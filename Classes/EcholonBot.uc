@@ -328,9 +328,13 @@ state DoObjective extends Roaming
 // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy
 state FightEnemy
 {
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        AbortMove();
+        SetTimer(0.2, true, 'Timer');
+        Focus = Enemy;
+        Timer();
     }
 
     // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.EndState
