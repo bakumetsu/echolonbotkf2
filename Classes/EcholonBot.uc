@@ -169,9 +169,9 @@ state Roaming
         MoveTowardX(MoveTarget);
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming.FinishedMove
     function FinishedMove()
     {
+    	PickCombatStyle();
     }
 
     // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming.EnemyChanged
