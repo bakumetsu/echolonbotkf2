@@ -434,9 +434,15 @@ function PruneInvalidBots()
     }
 }
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.DetermineGroupCount
 function int DetermineGroupCount(int BotCount)
 {
+    local int Count;
+    Count = BotCount / BOTS_PER_GROUP_TARGET;
+    if (Count < MIN_GROUPS)
+        Count = MIN_GROUPS;
+    if (Count > MAX_GROUPS)
+        Count = MAX_GROUPS;
+    return Count;
 }
 
 // @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.UpdateMacroWaypoints
