@@ -630,9 +630,29 @@ function Controller GetVIPController()
     return None;
 }
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.FindBossPawn
 function Pawn FindBossPawn()
 {
+    local Pawn P;
+    local Pawn BestBoss;
+
+    if (CachedBossPawn != None && !CachedBossPawn.bDeleteMe && CachedBossPawn.Health > 0)
+    {
+        return CachedBossPawn;
+    }
+
+    foreach WorldInfo.AllPawns(class'Pawn', P)
+    {
+        if (KFPawn_Monster(P) != None && P.Health > 5000)
+        {
+            if (BestBoss == None || P.Health > BestBoss.Health)
+            {
+                BestBoss = P;
+            }
+        }
+    }
+
+    CachedBossPawn = BestBoss;
+    return BestBoss;
 }
 
 // @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.OnBotKilled
