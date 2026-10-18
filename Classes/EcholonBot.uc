@@ -988,9 +988,12 @@ state GrenadeTarget
         AbortMove();
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.GrenadeTarget.EndState
     event EndState(name NextStateName)
     {
+        if (Pawn != None)
+        {
+            Pawn.StopFiring();
+        }
     }
 
     // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.GrenadeTarget.FinishedMove
