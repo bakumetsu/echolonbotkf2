@@ -4153,9 +4153,20 @@ function CheckEmoteEcho()
     }
 }
 
-// @STUB(M5b) @SYS-BASE-EMOTE legacy:KF2BotBase.PlayBotEmote
 final function PlayBotEmote()
 {
+    local KFPawn KFP;
+
+    KFP = KFPawn(Pawn);
+    if (KFP == None || bPlayingEmote)
+        return;
+
+    if (!KFP.CanDoSpecialMove(SM_Emote))
+        return;
+
+    bPlayingEmote = true;
+    KFP.DoSpecialMove(SM_Emote, true, None, 0);
+    SetTimer(4.0, false, 'ClearEmoteFlag');
 }
 
 // @STUB(M5b) @SYS-BASE-EMOTE legacy:KF2BotBase.ClearEmoteFlag
