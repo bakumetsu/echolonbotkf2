@@ -197,9 +197,14 @@ Camp:
 // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Camp
 state Camp
 {
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Camp.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        AbortMove();
+        if (KPawn != None)
+        {
+            KPawn.SetSprinting(false);
+        }
     }
 
     // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Camp.EndState
