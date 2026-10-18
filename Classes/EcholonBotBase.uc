@@ -4028,9 +4028,14 @@ function ReceiveWedgeOrder(KFPawn_Human Human, vector WedgeCenter, float ExpireT
     IssueCommand('CMD_PushAnchor', WedgeCenter);
 }
 
-// @STUB(M5b) @SYS-BASE-WEDGE legacy:KF2BotBase.UpdateWedgeMode
 function UpdateWedgeMode()
 {
+    if (!bWedgeActive)
+        return;
+    if (WorldInfo.TimeSeconds > WedgeExpireTime || WedgeHuman == None || !WedgeHuman.IsAliveAndWell())
+    {
+        ClearWedge();
+    }
 }
 
 // @STUB(M5b) @SYS-BASE-WEDGE legacy:KF2BotBase.ClearWedge
