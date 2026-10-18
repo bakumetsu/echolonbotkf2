@@ -854,9 +854,24 @@ function CleanupRangedHealCooldowns()
     }
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.HandleVIPSuccession
 function HandleVIPSuccession()
 {
+    local EcholonBot Best;
+
+    Best = FindBestCandidate(ActiveBots);
+    if (Best == None)
+    {
+        return;
+    }
+
+    VIPController = Best;
+    AlphaCommander = Best;
+    Best.bIsAlphaCommander = true;
+
+    if (Best.bIsGroupLeader)
+    {
+        DemoteGroupLeader(Best);
+    }
 }
 
 // @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.HandleFireteamCasualty
