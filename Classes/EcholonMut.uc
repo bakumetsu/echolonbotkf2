@@ -925,9 +925,45 @@ function HandleFireteamCasualty(EcholonBot DeadBot)
     SampleSquadSlots(GroupIdx);
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.DemoteGroupLeader
 function DemoteGroupLeader(EcholonBot OldLeader)
 {
+    local int GroupIdx, i;
+    local EcholonBot Candidate, NewLeader;
+
+    NewLeader = None;
+
+    if (OldLeader == None || !OldLeader.bIsGroupLeader)
+        return;
+
+    GroupIdx = OldLeader.GroupID - 1;
+    if (GroupIdx < 0 || GroupIdx >= Fireteams.Length)
+        return;
+
+    OldLeader.bIsGroupLeader = false;
+
+    for (i = 0; i < Fireteams[GroupIdx].Members.Length; i++)
+    {
+        Candidate = Fireteams[GroupIdx].Members[i];
+        if (Candidate == None || Candidate == OldLeader)
+            continue;
+        if (Candidate.Pawn == None || Candidate.Pawn.Health <= 0)
+            continue;
+
+        if (NewLeader == None || ComputeCommandScore(Candidate) > ComputeCommandScore(NewLeader))
+        {
+            NewLeader = Candidate;
+        }
+    }
+
+    if (NewLeader != None)
+    {
+        NewLeader.bIsGroupLeader = true;
+        NewLeader.ResetStuckState();
+        Fireteams[GroupIdx].Leader = NewLeader;
+        InheritSquadOrder(GroupIdx, NewLeader);
+    }
+
+    ConsolidateFireteams();
 }
 
 // @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.RequestLeaderDemotion
