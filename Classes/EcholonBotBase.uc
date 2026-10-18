@@ -2877,9 +2877,24 @@ final function bool IsInEffectiveRange(Actor T)
 	return VSizeSq(T.Location - Pawn.Location) <= RangeCacheSq;
 }
 
-// @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.CloseToEffectiveRange
 final function CloseToEffectiveRange()
 {
+    if (BotRank == GRUNT)
+    {
+        MoveToX(Pawn.Location + (Normal2D(Enemy.Location - Pawn.Location) * 250.0), Enemy);
+    }
+    else if (ActorReachable(Enemy))
+    {
+        MoveTowardX(Enemy, Enemy);
+    }
+    else if (BuildPathToward(Enemy))
+    {
+        MoveTowardX(MoveTarget, Enemy);
+    }
+    else
+    {
+        MoveToX(Pawn.Location + (Normal2D(Enemy.Location - Pawn.Location) * 300.0), Enemy);
+    }
 }
 
 // @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.CheckWeaponReequip
