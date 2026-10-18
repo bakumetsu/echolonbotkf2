@@ -4055,9 +4055,38 @@ function ClearWedge()
     }
 }
 
-// @STUB(M5b) @SYS-BASE-WEDGE legacy:KF2BotBase.ComputeWedgeOffset
 function vector ComputeWedgeOffset(int Slot, KFPawn_Human PlayerRef)
 {
+    local rotator R;
+    local vector AxX, AxY, AxZ, dir;
+    local float ang, dist;
+    local int sl;
+
+    sl = Clamp(Slot, 0, 3);
+    switch (sl)
+    {
+        case 0:
+            ang = -60.0;
+            break;
+        case 1:
+            ang = -30.0;
+            break;
+        case 2:
+            ang = 30.0;
+            break;
+        default:
+            ang = 60.0;
+            break;
+    }
+    ang = ang * DEG_TO_RAD;
+    dist = 150.0 + (50.0 * float(sl));
+
+    R = rot(0, 0, 0);
+    R.Yaw = PlayerRef.Rotation.Yaw;
+    GetAxes(R, AxX, AxY, AxZ);
+
+    dir = ((-AxX) * Cos(ang)) + (AxY * Sin(ang));
+    return dir * dist;
 }
 
 // @STUB(M5b) @SYS-BASE-WEDGE legacy:KF2BotBase.ApplyWedgeTarget
