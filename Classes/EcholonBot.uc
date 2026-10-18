@@ -179,9 +179,13 @@ state Roaming
         PickCombatStyle();
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming.DonateMoney
     function DonateMoney(Pawn Other)
     {
+        if (ActorReachable(Other))
+        {
+            DonateHuman = Other;
+            GotoState('DonatingMoney');
+        }
     }
 
 Begin:
