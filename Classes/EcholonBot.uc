@@ -653,9 +653,26 @@ state BreakLose
 {
     ignores CheckGrabbed;
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.BreakLose.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        AbortMove();
+        BreakFreeAttempts = 0;
+        GrabStartTime = WorldInfo.TimeSeconds;
+        NextEscapeAttempt = 0.0;
+        bGrappleFailsafeTriggered = false;
+        SetTimer(0.15, true, 'Timer');
+        Focus = KPawn.InteractionPawn;
+
+        if (BotRank == GRUNT && SquadLeader != None)
+        {
+            SquadLeader.OnGruntGrabbed(self);
+        }
+
+        if (mut != None && mut.bDebugGrapple)
+        {
+            mut.DebugMessage(GetHumanReadableName() $ " grabbed - attempting to break free.");
+        }
     }
 
     // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.BreakLose.EndState
