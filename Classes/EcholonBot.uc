@@ -750,9 +750,43 @@ state Hunting
         }
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting.PickStyle
     function PickStyle()
     {
+        local EcholonBot GroupLeader;
+
+        GroupLeader = None;
+        if (mut != None)
+        {
+            GroupLeader = mut.GetGroupLeader(GroupID);
+        }
+
+        if (!bIsGroupLeader && GroupLeader != None && GroupLeader.Pawn != None && VSizeSq(GroupLeader.Pawn.Location - Pawn.Location) > 810000.0)
+        {
+            Enemy = None;
+        }
+        else
+        {
+            if (FollowingHuman != None && VSizeSq(FollowingHuman.Location - Pawn.Location) > 810000.0)
+            {
+                Enemy = None;
+            }
+        }
+
+        if (Enemy == None || !Enemy.IsAliveAndWell())
+        {
+            PickCombatStyle();
+            return;
+        }
+
+        if (!BuildPathToward(Enemy))
+        {
+            Enemy = None;
+            PickCombatStyle();
+        }
+        else
+        {
+            MoveTowardX(MoveTarget, Enemy);
+        }
     }
 
     // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting.FinishedMove
