@@ -446,9 +446,51 @@ function BroadcastSpottedEnemy(int GroupID, Pawn Spotted)
     }
 }
 
-// @STUB(M4) @SYS-MUT-WAVE legacy:KF2BotsMut.CheckWave
 function CheckWave()
 {
+    if (bNewWave && KF.GetStateName() == 'TraderOpen')
+    {
+        bNewWave = false;
+        RespawnBots();
+    }
+
+    if (KF.WaveNum != OldWaveNum)
+    {
+        OldWaveNum = byte(KF.WaveNum);
+        bNewWave = true;
+        if ((ZedCountScaling > 0.0) && KF.SpawnManager.WaveTotalAI > 4)
+        {
+            KF.SpawnManager.WaveTotalAI *= (1.0 + (float(KF.NumBots) * ZedCountScaling));
+            KF.MyKFGRI.AIRemaining = KF.SpawnManager.WaveTotalAI;
+            KF.MyKFGRI.WaveTotalAICount = KF.SpawnManager.WaveTotalAI;
+        }
+    }
+
+    if (PrevObjective != KF.MyKFGRI.CurrentObjective)
+    {
+        PrevObjective = KF.MyKFGRI.CurrentObjective;
+        HoldVolume = KFMapObjective_DoshHold(PrevObjective);
+        if (HoldVolume != None)
+        {
+            SetHoldObjective(HoldVolume);
+        }
+        else
+        {
+            if (bObjectiveActive)
+            {
+                EndObjective();
+            }
+        }
+    }
+    else
+    {
+        if (bObjectiveActive && HoldVolume != None && HoldVolume.GetProgress() >= 0.999)
+        {
+            EndObjective();
+        }
+    }
+
+    EvaluateSquadPhase();
 }
 
 // @STUB(M4) @SYS-MUT-WAVE legacy:KF2BotsMut.SetHoldObjective
