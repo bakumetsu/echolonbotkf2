@@ -1877,9 +1877,54 @@ function int MoveSquadMembers(int FromIdx, int ToIdx)
     return Fireteams[ToIdx].Members.Length;
 }
 
-// @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.GetBotObjective
 final function NavigationPoint GetBotObjective(EcholonBot B)
 {
+    local int GroupIdx, i;
+    local SquadOrder O;
+    local float BestDistSq, DistSq;
+    local NavigationPoint Best;
+
+    if (!bObjectiveActive)
+    {
+        return None;
+    }
+    if (B == None || B.Pawn == None)
+    {
+        return ValidPoints[Rand(ValidPoints.Length)];
+    }
+
+    EnsureSquadOrderTable();
+    GroupIdx = B.GroupID - 1;
+    if (GroupIdx >= 0 && GroupIdx < SquadOrders.Length)
+    {
+        O = SquadOrders[GroupIdx];
+        if (O.Leader != None && O.GoalNav != None)
+        {
+            return O.GoalNav;
+        }
+    }
+
+    Best = None;
+    BestDistSq = 9999999999.0;
+    for (i = 0; i < SquadOrders.Length; i++)
+    {
+        O = SquadOrders[i];
+        if (O.Leader == None || O.Leader.Pawn == None || O.GoalNav == None)
+        {
+            continue;
+        }
+        DistSq = VSizeSq(O.Leader.Pawn.Location - B.Pawn.Location);
+        if (DistSq < BestDistSq)
+        {
+            BestDistSq = DistSq;
+            Best = O.GoalNav;
+        }
+    }
+    if (Best != None)
+    {
+        return Best;
+    }
+    return ValidPoints[Rand(ValidPoints.Length)];
 }
 
 // @STUB(M4) @SYS-MUT-NODEBLOCK legacy:KF2BotsMut.IsNodeBlocked
