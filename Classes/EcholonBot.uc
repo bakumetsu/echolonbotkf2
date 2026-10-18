@@ -925,9 +925,10 @@ state HealOther
         PickCombatStyle();
     }
 
-    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealOther.HealFailsafe
     function HealFailsafe()
     {
+        HealFail();
+        PickCombatStyle();
     }
 
 Begin:
