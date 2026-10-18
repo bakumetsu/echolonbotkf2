@@ -1109,9 +1109,13 @@ state GoShopping
         }
     }
 
-    // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.NotifyBump
     event bool NotifyBump(Actor Other, Vector HitNormal)
     {
+        if (IsTimerActive('DoTrading'))
+        {
+            return false;
+        }
+        return global.NotifyBump(Other, HitNormal);
     }
 
 Begin:
