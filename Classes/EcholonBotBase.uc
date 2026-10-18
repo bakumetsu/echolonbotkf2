@@ -3389,9 +3389,12 @@ function UpdatePanicBroadcast()
     }
 }
 
-// @STUB(M5a) @SYS-BASE-PANIC legacy:KF2BotBase.ReceivePanic
 function ReceivePanic(bool bPanic)
 {
+	if (PanicActive == bPanic)
+		return;
+	PanicActive = bPanic;
+	ApplyPanicVariance();
 }
 
 // @STUB(M5a) @SYS-BASE-PANIC legacy:KF2BotBase.ApplyPanicVariance
