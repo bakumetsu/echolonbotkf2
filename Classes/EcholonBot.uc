@@ -919,9 +919,10 @@ state HealOther
         }
     }
 
-    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealOther.TimeOut
     function TimeOut()
     {
+        HealFail();
+        PickCombatStyle();
     }
 
     // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealOther.HealFailsafe
