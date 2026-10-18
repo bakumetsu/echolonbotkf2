@@ -3056,9 +3056,15 @@ function bool UpdateOverwatchMovement(out vector OutMovePos)
     return false;
 }
 
-// @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.OnBreakLoseComplete
 function OnBreakLoseComplete()
 {
+    if (SquadLeader != None && SquadLeader.Pawn != None)
+    {
+        ReceiveOverwatchState(SquadLeader.bOverwatchPhase, OverwatchSlot, SquadLeader.bOverwatchAllMove);
+    }
+    OverwatchStuckTime = 0.0;
+    OverwatchSampleTime = WorldInfo.TimeSeconds;
+    RescueUntil = 0.0;
 }
 
 // @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.UpdateSectorWatch
