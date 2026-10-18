@@ -1670,9 +1670,17 @@ function EvaluateSquadPhase()
     }
 }
 
-// @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.HasSquadGoal
 function bool HasSquadGoal(EcholonBot B)
 {
+    local int G;
+
+    if (B == None || B.GroupID - 1 < 0 || B.GroupID - 1 >= SquadOrders.Length)
+    {
+        return false;
+    }
+
+    G = B.GroupID - 1;
+    return (SquadOrders[G].GoalNav != None && SquadOrders[G].GoalPoint != vect(0, 0, 0));
 }
 
 // @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.ReissueSquadOrder
