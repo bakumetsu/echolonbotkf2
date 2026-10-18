@@ -2959,9 +2959,14 @@ function CheckOverwatchStall()
     IssueCommand(CurrentOrder, newAnchor);
 }
 
-// @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.ReceiveOverwatchState
 function ReceiveOverwatchState(bool bPhase, byte InSlot, bool bAllMove)
 {
+    if (Pawn == None)
+        return;
+    GruntOverwatchPhase = bPhase;
+    OverwatchSlot = InSlot;
+    bOverwatchAllMove = bAllMove;
+    OverwatchOffset = ComputeSlotOffset(InSlot);
 }
 
 // @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.IsOverwatchStuck
