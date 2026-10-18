@@ -1131,7 +1131,7 @@ function bool MoveTowardGoal(Actor GoalActor, vector GoalPoint, bool bActorGoal)
 
     if (bActorGoal && GoalActor != None)
     {
-        PathNode = NavigationPoint(FindPathToward(GoalActor));
+        PathNode = NavigationPoint(FollowFindWalkablePath(GoalActor, vect(0,0,0)));  // wall-jump fix
         LastRouteDist = RouteDist;
         if (PathNode != None)
         {

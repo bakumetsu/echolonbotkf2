@@ -1277,7 +1277,7 @@ final function bool BuildPathToward(Actor Other)
         }
     }
 
-    MoveTarget = FindPathToward(Other);
+    MoveTarget = FollowFindWalkablePath(Other, vect(0,0,0));  // skips leap/climb edges (wall-jump fix)
 
     I = DoorPaths.Length - 1;
     while (I >= 0)
@@ -1334,7 +1334,7 @@ final function bool BuildPathTo(Vector Dest)
         }
     }
 
-    MoveTarget = FindPathTo(Dest);
+    MoveTarget = FollowFindWalkablePath(None, Dest);  // skips leap/climb edges (wall-jump fix)
 
     for (I = DoorPaths.Length - 1; I >= 0; I--)
     {
