@@ -2328,14 +2328,14 @@ function StartLTLoop()
 	LTDispatchLoop();
 }
 
-// @STUB(M3) @SYS-BASE-RANK legacy:KF2BotBase.StartCaptainLoop
 function StartCaptainLoop()
 {
 }
 
-// @STUB(M3) @SYS-BASE-RANK legacy:KF2BotBase.SetBotRank
 final function SetBotRank(EBotRank NewRank)
 {
+    BotRank = NewRank;
+    ArmRankTimers();
 }
 
 // @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.NotifyBlockedShooter
@@ -2398,14 +2398,49 @@ final function bool HandleWeaponManagement(KFWeapon W)
 {
 }
 
-// @STUB(M3) @SYS-BASE-ZEDS legacy:KF2BotBase.CountNearbyZedsCached
 final function int CountNearbyZedsCached(float Radius)
 {
+	local int I, C;
+	local float R2;
+
+	R2 = Radius * Radius;
+	C = 0;
+	for(I = 0; I < int(SquadZedCount); I++)
+	{
+		if((SquadZedCache[I] != None) && (SquadZedCache[I].Health > 0)
+			&& (VSizeSq(SquadZedCache[I].Location - Pawn.Location) < R2))
+		{
+			++C;
+		}
+	}
+	return C;
 }
 
-// @STUB(M3) @SYS-BASE-ZEDS legacy:KF2BotBase.RefreshSquadZedCache
 final function RefreshSquadZedCache()
 {
+	local KFPawn_Monster P;
+
+	SquadZedCount = 0;
+	if (Pawn == None)
+	{
+		return;
+	}
+
+	foreach WorldInfo.AllPawns(class'KFPawn_Monster', P, Pawn.Location, 300.0)
+	{
+		if (P == None)
+		{
+			continue;
+		}
+		if (P.Health > 0)
+		{
+			if (SquadZedCount < 16)
+			{
+				SquadZedCache[SquadZedCount] = P;
+				++SquadZedCount;
+			}
+		}
+	}
 }
 
 // @STUB(M5a) @SYS-BASE-CQB legacy:KF2BotBase.ApplyCrouch
@@ -2413,9 +2448,12 @@ final function ApplyCrouch(bool bWant)
 {
 }
 
-// @STUB(M3) @SYS-BASE-PERCEPT legacy:KF2BotBase.IsHostileZed
 final function bool IsHostileZed(Pawn P)
 {
+    local KFPawn_Monster M;
+
+    M = KFPawn_Monster(P);
+    return (M != None && M.IsAliveAndWell());
 }
 
 // @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.ToggleOverwatchPhase
@@ -2508,16 +2546,52 @@ function GruntPickCombatStyle()
 {
 }
 
-// @STUB(M3) @SYS-BASE-PERCEPT legacy:KF2BotBase.HearNoise
 event HearNoise(float Loudness, Actor NoiseMaker, optional Name NoiseType)
 {
-    // BRIDGE(M1): minimal engine pass-through so bots spawn; replaced by the full port in M3.
-    super.HearNoise(Loudness, NoiseMaker, NoiseType);
+    local Pawn NoisePawn;
+
+    if (BotRank != GRUNT || Pawn == None || NoiseMaker == None)
+    {
+        if (NoiseMaker != None && NoiseMaker.Instigator != None)
+        {
+            SetEnemy(NoiseMaker.Instigator);
+        }
+        Super.HearNoise(Loudness, NoiseMaker, NoiseType);
+        return;
+    }
+
+    if (Loudness <= 0.5 || VSizeSq(NoiseMaker.Location - Pawn.Location) >= HEAR_RANGE_SQ)
+    {
+        return;
+    }
+    if (Enemy != None && Enemy.IsAliveAndWell())
+    {
+        return;
+    }
+
+    NoisePawn = Pawn(NoiseMaker);
+    if (NoisePawn == None)
+    {
+        NoisePawn = NoiseMaker.Instigator;
+    }
+
+    if (IsHostileZed(NoisePawn))
+    {
+        GruntOnSight(NoisePawn);
+    }
+    else
+    {
+        NoiseGlanceUntil = WorldInfo.TimeSeconds + 1.5;
+        SetFocalPoint(NoiseMaker.Location);
+    }
 }
 
-// @STUB(M3) @SYS-BASE-ZEDS legacy:KF2BotBase.IsHeavyZedPawn
 final function bool IsHeavyZedPawn(Pawn P)
 {
+    local KFPawn_Monster M;
+
+    M = KFPawn_Monster(P);
+    return (M != None && M.bLargeZed);
 }
 
 // @STUB(M5a) @SYS-BASE-PANIC legacy:KF2BotBase.UpdatePanicBroadcast
@@ -2630,24 +2704,44 @@ function ClearEmoteFlag()
 {
 }
 
-// @STUB(M3) @SYS-BASE-ZEDS legacy:KF2BotBase.GetWaveMomentum
 final function float GetWaveMomentum()
 {
+    local KFGameReplicationInfo GRI;
+
+    GRI = mut.KF.MyKFGRI;
+    if (GRI == None)
+        return 1.0;
+    return Max(1.0, float(GRI.WaveNum) * 0.15 + 1.0);
 }
 
-// @STUB(M3) @SYS-BASE-ZEDS legacy:KF2BotBase.ExceedsRetreatZedCount
 final function bool ExceedsRetreatZedCount()
 {
+    if (Pawn == None)
+        return false;
+    return (CachedZedCount >= int(RETREAT_ZED_TRIGGER_COUNT / GetWaveMomentum()));
 }
 
-// @STUB(M3) @SYS-BASE-FIRE legacy:KF2BotBase.ApplyBreathing
 function ApplyBreathing(float t)
 {
+    BreathingPhase += BREATH_OMEGA * t;
 }
 
-// @STUB(M3) @SYS-BASE-ZEDS legacy:KF2BotBase.UpdateHoldAreaDrift
 function UpdateHoldAreaDrift()
 {
+    local float now, drift;
+
+    if (CurrentOrder != 'CMD_HoldArea')
+        return;
+
+    now = WorldInfo.TimeSeconds;
+    if (now - LastDriftTime < 60.0)
+        return;
+    LastDriftTime = now;
+
+    drift = DRIFT_RATE * 60.0;
+    HoldDriftDist += drift;
+    if (HoldDriftDist > DRIFT_MAX_TOTAL)
+        HoldDriftDist = DRIFT_MAX_TOTAL;
 }
 
 defaultproperties
