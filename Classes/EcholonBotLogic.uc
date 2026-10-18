@@ -101,9 +101,85 @@ final function bool CheckShouldHealMate()
     return Best != None;
 }
 
-// @STUB(M5c) @SYS-LOGIC-HEAL legacy:KF2BotLogic.CheckMedicGunHeal
 final function bool CheckMedicGunHeal()
 {
+    local KFPawn_Human P, Best;
+    local float Pct, EffectivePct, BestEffectivePct;
+
+    if (mut == None)
+    {
+        return false;
+    }
+    if (KPawn == None || !KPawn.IsAliveAndWell())
+    {
+        return false;
+    }
+
+    if (WorldInfo.TimeSeconds < HealRetryAfter)
+    {
+        return false;
+    }
+
+    RangeMedicGun = KFWeap_MedicBase(Pawn.Weapon);
+    if (RangeMedicGun == None)
+    {
+        return false;
+    }
+    if (!RangeMedicGun.HasAmmo(1))
+    {
+        return false;
+    }
+
+    Best = None;
+    BestEffectivePct = 0.0;
+
+    foreach WorldInfo.AllPawns(class'KFPawn_Human', P, Pawn.Location, 1800.0)
+    {
+        if (P == Pawn)
+        {
+            continue;
+        }
+        if (!P.IsAliveAndWell())
+        {
+            continue;
+        }
+        if (P.GetTeamNum() != GetTeamNum())
+        {
+            continue;
+        }
+        if (mut.IsRangedHealTargetOnCooldown(P))
+        {
+            continue;
+        }
+        Pct = (float(P.Health) / float(P.HealthMax)) * 100.0;
+        if (Pct > HEAL_MAX_NEED_PCT)
+        {
+            continue;
+        }
+        if (!TargetLowHealth(P))
+        {
+            continue;
+        }
+        if (mut.bEnableFastTraceHealing && !FastTrace(Pawn.Location, P.Location))
+        {
+            continue;
+        }
+
+        EffectivePct = Pct;
+        if (mut.VIPController != None && P == mut.VIPController.Pawn && Pct < VIP_TRIAGE_GATE_PCT)
+        {
+            EffectivePct = FMax(Pct - VIP_TRIAGE_BONUS_PCT, 0.0);
+        }
+
+        if (Best == None || EffectivePct < BestEffectivePct)
+        {
+            Best = P;
+            BestEffectivePct = EffectivePct;
+        }
+    }
+
+    PendingHeal = Best;
+    return Best != None;
 }
 
 // @STUB(M5c) @SYS-LOGIC-HEAL legacy:KF2BotLogic.CheckShouldSelfHeal
