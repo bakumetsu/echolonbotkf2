@@ -3372,9 +3372,21 @@ final function bool IsHeavyZedPawn(Pawn P)
     return (M != None && M.bLargeZed);
 }
 
-// @STUB(M5a) @SYS-BASE-PANIC legacy:KF2BotBase.UpdatePanicBroadcast
 function UpdatePanicBroadcast()
 {
+    local int i;
+    local bool bWantPanic;
+
+    bWantPanic = (Enemy != None && Enemy.IsAliveAndWell() && IsHeavyZedPawn(Enemy)
+               && VSizeSq(Enemy.Location - Pawn.Location) < 90000.0);
+
+    for (i = 0; i < 4; i++)
+    {
+        if (SquadMembers[i] != None)
+        {
+            SquadMembers[i].ReceivePanic(bWantPanic);
+        }
+    }
 }
 
 // @STUB(M5a) @SYS-BASE-PANIC legacy:KF2BotBase.ReceivePanic
