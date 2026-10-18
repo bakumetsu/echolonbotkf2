@@ -682,9 +682,11 @@ function OnBotKilled(EcholonBot DeadBot)
     UnregisterBot(DeadBot);
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.ComputeCommandScore
 function int ComputeCommandScore(EcholonBot Bot)
 {
+    if (Bot == None || Bot.PlayerReplicationInfo == None || Bot.Pawn == None)
+        return -1;
+    return (Bot.PlayerReplicationInfo.Kills * 10) + Bot.Pawn.Health;
 }
 
 // @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.FindBestCandidate
