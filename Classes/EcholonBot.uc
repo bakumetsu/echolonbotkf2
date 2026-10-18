@@ -1334,9 +1334,21 @@ state VictoryDance
 {
     ignores HearNoise, SeeMonster, SeePlayer;
 
-    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.VictoryDance.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        AbortMove();
+        if (Pawn != None)
+        {
+            Pawn.StopFiring();
+        }
+
+        // P1 Terminal Lock: derive the flag from the live match-over condition
+        // rather than from WHY VictoryDance was entered
+        if (mut != None && mut.KF != None && mut.KF.MyKFGRI != None && mut.KF.MyKFGRI.bMatchIsOver)
+        {
+            bInTerminalState = true;
+        }
     }
 
     // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.VictoryDance.EndState
