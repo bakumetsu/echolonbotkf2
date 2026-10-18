@@ -1008,9 +1008,16 @@ Begin:
 // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping
 state GoShopping
 {
-    // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        AbortMove();
+        if (KPawn != None)
+        {
+            KPawn.SetSprinting(true);
+        }
+        SetTimer(0.4 + FRand() * 0.25, true, 'DoTrading');
+        TraderRetryCount = 0;
     }
 
     // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.EndState
