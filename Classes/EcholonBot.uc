@@ -1278,9 +1278,10 @@ state Dead
 {
     ignores StopAdjusting, Tick, CheckGrabbed, PickCombatStyle, SetEnemy, KilledBy, HearNoise, SeeMonster, SeePlayer;
 
-    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.Dead.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        SetTimer(1.0, true, 'ReassertScoreboardFlags');
     }
 
     // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.Dead.EndState
