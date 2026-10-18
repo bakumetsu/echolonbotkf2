@@ -197,54 +197,474 @@ function bool FollowCheckExit()
     return false;
 }
 
-// @STUB(M2) @SYS-NAV-WATCHDOG legacy:KF2BotsFollowNavBase.FollowWatchdog
 function FollowWatchdog()
 {
+    local float IterNow;
+    local float IterMovedSq;
+    local float IterMinMoveSq;
+    local bool IterReach;
+
+    if (!bEnableAdvancedLocomotion || !IsInState('FollowingLeader'))
+    {
+        ClearTimer('FollowWatchdog');
+        return;
+    }
+
+    IterNow = WorldInfo.TimeSeconds;
+
+    if (FollowCheckExit())
+    {
+        return;
+    }
+
+    if (bFollowYielding)
+    {
+        if (IterNow >= FollowYieldEndTime)
+        {
+            bFollowYielding = false;
+            GotoState('FollowingLeader', 'Dispatch');
+        }
+        return;
+    }
+
+    if (!bFollowMoveActive || Pawn == None)
+    {
+        return;
+    }
+
+    if (bFollowDispatchPending)
+    {
+        FollowRequestDispatch();
+        return;
+    }
+
+    if (!FollowRefreshLeader() || bFollowLeaderJumped)
+    {
+        bFollowLeaderJumped = false;
+        FollowRequestDispatch();
+        return;
+    }
+
+    if (!bFollowDirectActive && (IterNow - FollowMoveStartTime) > FollowLegTimeout)
+    {
+        FollowOnStuck('Timeout');
+        return;
+    }
+
+    if (Pawn.Physics != PHYS_Falling && (IterNow - FollowStuckRefTime) >= FollowStuckWindow)
+    {
+        IterMovedSq = VSizeSq(Pawn.Location - FollowStuckRefLoc);
+        IterMinMoveSq = FollowStuckMinMove * FollowStuckMinMove;
+        FollowStuckRefLoc = Pawn.Location;
+        FollowStuckRefTime = IterNow;
+
+        if (IterMovedSq < IterMinMoveSq)
+        {
+            FollowOnStuck(FollowGuessStuckCause());
+            return;
+        }
+        if (VSizeSq(Pawn.Location - FollowRetryAnchorLoc) > (FollowRetryResetDist * FollowRetryResetDist))
+        {
+            FollowRetries = 0;
+            FollowBlocksThisEpisode = 0;
+            FollowRetryAnchorLoc = Pawn.Location;
+        }
+    }
+
+    IterReach = FollowCheckReachable(false);
+    if (IterNow >= FollowForcePathUntil && IterReach != bFollowDirectActive)
+    {
+        FollowRequestDispatch();
+        return;
+    }
+
+    if (!IterReach && !bFollowRouteStale
+        && VSizeSq(FollowLeaderPawn.Location - FollowLastLeaderPathLoc) > (FollowRepathDistance * FollowRepathDistance))
+    {
+        bFollowRouteStale = true;
+    }
 }
 
-// @STUB(M2) @SYS-NAV-WATCHDOG legacy:KF2BotsFollowNavBase.FollowRequestDispatch
 function FollowRequestDispatch()
 {
+    local float IterNow;
+
+    if (!bFollowMoveActive)
+    {
+        return;
+    }
+    IterNow = WorldInfo.TimeSeconds;
+    if (IterNow < FollowNextInterruptTime)
+    {
+        bFollowDispatchPending = true;
+        return;
+    }
+    FollowNextInterruptTime = IterNow + FollowInterruptMinGap;
+    bFollowDispatchPending = false;
+    `log("[FollowNav]" @ string(Name) @ "watchdog interrupt -> Dispatch");
+    GotoState('FollowingLeader', 'Dispatch');
 }
 
-// @STUB(M2) @SYS-NAV-LEADER legacy:KF2BotsFollowNavBase.FollowRefreshLeader
 function bool FollowRefreshLeader()
 {
+    local Pawn IterPawn;
+    local float IterNow;
+    local float IterDt;
+    local float IterJump;
+    local float IterSpeed;
+
+    IterNow = WorldInfo.TimeSeconds;
+    IterPawn = None;
+
+    if (FollowLeaderCtrl != None && !FollowLeaderCtrl.bDeleteMe)
+    {
+        IterPawn = FollowLeaderCtrl.Pawn;
+    }
+
+    if (IterPawn == None || IterPawn.bDeleteMe || IterPawn.Health <= 0)
+    {
+        FollowLeaderPawn = None;
+        if (FollowLeaderInvalidSince <= 0.0)
+        {
+            FollowLeaderInvalidSince = IterNow;
+        }
+        if (FollowLeaderCtrl == None || (IterNow - FollowLeaderInvalidSince) >= FollowLeaderGraceTime)
+        {
+            FollowSetStatus(FS_LeaderLost);
+        }
+        return false;
+    }
+
+    FollowLeaderInvalidSince = 0.0;
+
+    if (IterPawn != FollowLeaderPawn)
+    {
+        FollowLeaderPawn = IterPawn;
+        FollowInvalidateRoute();
+        FollowLeaderLastSampleLoc = IterPawn.Location;
+        FollowLeaderLastSampleTime = IterNow;
+        bFollowLeaderJumped = true;
+        return true;
+    }
+
+    IterDt = IterNow - FollowLeaderLastSampleTime;
+    if (IterDt >= 0.2)
+    {
+        IterJump = VSize(IterPawn.Location - FollowLeaderLastSampleLoc);
+        IterSpeed = IterJump / FMax(IterDt, 0.0001);
+        if (IterJump > FollowLeaderTeleportDist && IterSpeed > FollowLeaderTeleportSpeed)
+        {
+            FollowInvalidateRoute();
+            FollowRetries = 0;
+            FollowForcePathUntil = 0.0;
+            FollowNextPathTime = FMax(FollowNextPathTime, IterNow + FollowSlotPhase() + (FRand() * 0.25));
+            bFollowLeaderJumped = true;
+            FollowSetStatus(FS_LeaderTeleported);
+        }
+        FollowLeaderLastSampleLoc = IterPawn.Location;
+        FollowLeaderLastSampleTime = IterNow;
+    }
+    return true;
 }
 
-// @STUB(M2) @SYS-NAV-LEADER legacy:KF2BotsFollowNavBase.FollowGetArrivalRadius
 function float FollowGetArrivalRadius()
 {
+    local float IterOffset;
+
+    IterOffset = FollowBaseOffset + (float(FollowSlotIndex) * FollowSlotRingStep);
+    if (Pawn == None || FollowLeaderPawn == None)
+    {
+        return IterOffset;
+    }
+    return Pawn.GetCollisionRadius() + FollowLeaderPawn.GetCollisionRadius() + IterOffset;
 }
 
-// @STUB(M2) @SYS-NAV-LEADER legacy:KF2BotsFollowNavBase.FollowEvalArrived
 function bool FollowEvalArrived()
 {
+    local vector IterDelta;
+    local float IterDist;
+    local float IterDz;
+    local float IterRadius;
+    local bool IterWasArrived;
+    local vector IterAnchorRef;
+
+    if (Pawn == None || FollowLeaderPawn == None)
+    {
+        bFollowArrived = false;
+        return false;
+    }
+
+    IterWasArrived = bFollowArrived;
+
+    if (bFollowOrderAnchorActive)
+    {
+        IterAnchorRef = FollowOrderAnchorLoc;
+    }
+    else
+    {
+        IterAnchorRef = FollowLeaderPawn.Location;
+    }
+
+    IterDelta = IterAnchorRef - Pawn.Location;
+    IterDz = Abs(IterDelta.Z);
+    IterDelta.Z = 0.0;
+    IterDist = VSize(IterDelta);
+    IterRadius = FollowGetArrivalRadius();
+
+    if (IterWasArrived)
+    {
+        bFollowArrived = (IterDist <= (IterRadius + FollowResumeMargin)) && (IterDz <= FollowZTolerance);
+    }
+    else
+    {
+        bFollowArrived = (IterDist <= IterRadius) && (IterDz <= FollowZTolerance);
+    }
+
+    if (bFollowArrived && !IterWasArrived)
+    {
+        FollowRetries = 0;
+        FollowBlocksThisEpisode = 0;
+        FollowRetryAnchorLoc = Pawn.Location;
+    }
+
+    return bFollowArrived;
 }
 
-// @STUB(M2) @SYS-NAV-LEADER legacy:KF2BotsFollowNavBase.FollowCheckReachable
 function bool FollowCheckReachable(bool bForceNow)
 {
+    local float IterNow;
+    local bool IterReach;
+
+    if (Pawn == None || FollowLeaderPawn == None)
+    {
+        return false;
+    }
+
+    IterNow = WorldInfo.TimeSeconds;
+
+    if (!bForceNow && bFollowReachKnown && IterNow < FollowNextReachCheckTime)
+    {
+        return bFollowReachStable;
+    }
+
+    if (bFollowReachKnown && (FollowLeaderPawn.Physics == PHYS_Falling || Pawn.Physics == PHYS_Falling))
+    {
+        FollowNextReachCheckTime = IterNow + FollowReachIntervalDirect;
+        return bFollowReachStable;
+    }
+
+    IterReach = ActorReachable(FollowLeaderPawn);
+
+    if (IterReach)
+    {
+        FollowReachFailStreak = 0;
+        bFollowReachStable = true;
+        if (bFollowDirectActive)
+        {
+            FollowNextReachCheckTime = IterNow + FollowReachIntervalDirect;
+        }
+        else
+        {
+            FollowNextReachCheckTime = IterNow + FollowReachIntervalPath;
+        }
+    }
+    else
+    {
+        FollowReachFailStreak++;
+        if (!bFollowReachKnown || FollowReachFailStreak >= FollowReachFailsToPath)
+        {
+            bFollowReachStable = false;
+            FollowNextReachCheckTime = IterNow + FollowReachIntervalPath;
+        }
+        else
+        {
+            FollowNextReachCheckTime = IterNow + FollowReachIntervalDirect;
+        }
+    }
+
+    bFollowReachKnown = true;
+    return bFollowReachStable;
 }
 
-// @STUB(M2) @SYS-NAV-PATH legacy:KF2BotsFollowNavBase.FollowBuildPath
 function bool FollowBuildPath()
 {
+    local float IterNow;
+    local Actor IterFirst;
+    local int IterIdx;
+
+    IterNow = WorldInfo.TimeSeconds;
+    if (FollowLeaderPawn == None || IterNow < FollowNextPathTime)
+    {
+        return false;
+    }
+
+    FollowNextPathTime = IterNow + FollowPathMinInterval + (FRand() * FollowPhaseJitter);
+
+    IterFirst = FindPathToward(FollowLeaderPawn);
+    if (IterFirst == None)
+    {
+        FollowPathFailBackoff = FClamp(FollowPathFailBackoff * 2.0, FollowPathFailBackoffMin, FollowPathFailBackoffMax);
+        FollowNextPathTime = IterNow + FMax(FollowPathMinInterval, FollowPathFailBackoff);
+        FollowRetries++;
+        `log("[FollowNav]" @ string(Name) @ "FindPathToward returned None, retries=" $ string(FollowRetries));
+        return false;
+    }
+
+    FollowRoute.Length = 0;
+    for (IterIdx = 0; IterIdx < RouteCache.Length && IterIdx < FollowMaxRouteNodes; IterIdx++)
+    {
+        FollowRoute.AddItem(RouteCache[IterIdx]);
+    }
+    if (FollowRoute.Length == 0)
+    {
+        FollowRoute.AddItem(IterFirst);
+    }
+
+    FollowRouteIdx = 0;
+    FollowPathFailBackoff = 0.0;
+    bFollowRouteStale = false;
+    FollowLastLeaderPathLoc = FollowLeaderPawn.Location;
+    FollowLastPawnTargetPathLoc = FollowLeaderPawn.Location;
+    `log("[FollowNav]" @ string(Name) @ "A* OK " $ string(FollowRoute.Length) @ "nodes to " $ string(FollowLeaderPawn));
+    return true;
 }
 
-// @STUB(M2) @SYS-NAV-PATH legacy:KF2BotsFollowNavBase.FollowGetNextNode
 function Actor FollowGetNextNode()
 {
+    local Actor IterNode;
+
+    if (Pawn == None)
+    {
+        return None;
+    }
+
+    Pawn.DestinationOffset = 0.0;
+
+    while (FollowRouteIdx < FollowRoute.Length)
+    {
+        IterNode = FollowRoute[FollowRouteIdx];
+
+        if (IterNode == None)
+        {
+            FollowRouteIdx++;
+            continue;
+        }
+
+        if (!Pawn.ReachedDestination(IterNode))
+        {
+            return IterNode;
+        }
+
+        FollowRouteIdx++;
+    }
+
+    return None;
 }
 
-// @STUB(M2) @SYS-NAV-DECIDE legacy:KF2BotsFollowNavBase.FollowDecide
 function EFollowAction FollowDecide()
 {
+    local float IterNow;
+    local bool IterUsePath;
+    local vector IterAnchor;
+
+    IterNow = WorldInfo.TimeSeconds;
+    FollowWaitTime = FollowWatchdogPeriod;
+
+    if (Pawn == None || Pawn.Health <= 0)
+    {
+        FollowWaitTime = 0.5;
+        return FA_Wait;
+    }
+
+    if (!FollowRefreshLeader())
+    {
+        FollowWaitTime = 0.5;
+        return FA_Wait;
+    }
+
+    if (FollowGetOrderAnchor(IterAnchor))
+    {
+        bFollowOrderAnchorActive = true;
+        FollowOrderAnchorLoc = IterAnchor;
+    }
+    else
+    {
+        bFollowOrderAnchorActive = false;
+    }
+
+    if (FollowRetries >= FollowRetriesGiveUpAt)
+    {
+        return FA_GiveUp;
+    }
+
+    if (bFollowEscaping)
+    {
+        if (IterNow < FollowEscapeUntil)
+        {
+            return FA_Escape;
+        }
+        bFollowEscaping = false;
+        FollowEscapeNormal = vect(0, 0, 0);
+        FollowEscapeUntil = 0.0;
+    }
+
+    if (FollowEvalArrived())
+    {
+        FollowSetStatus(FS_Arrived);
+        FollowWaitTime = FollowWatchdogPeriod + (FRand() * FollowPhaseJitter);
+        return FA_Hold;
+    }
+
+    if (bFollowYieldPending)
+    {
+        return FA_Yield;
+    }
+
+    if (IterNow < FollowRepathPauseUntil)
+    {
+        FollowWaitTime = FollowRepathPauseUntil - IterNow;
+        return FA_Wait;
+    }
+
+    FollowSetStatus(FS_Following);
+
+    IterUsePath = (IterNow < FollowForcePathUntil) || !FollowCheckReachable(false);
+    if (!IterUsePath)
+    {
+        return FA_Direct;
+    }
+
+    if (bFollowRouteStale || FollowRouteIdx >= FollowRoute.Length)
+    {
+        if (!FollowBuildPath() && FollowRouteIdx >= FollowRoute.Length)
+        {
+            FollowWaitTime = FMax(FollowNextPathTime - IterNow, FollowMinLoopSleep);
+            return FA_Wait;
+        }
+    }
+
+    return FA_Path;
 }
 
-// @STUB(M2) @SYS-NAV-PATH legacy:KF2BotsFollowNavBase.FollowOnMoveBegin
 function FollowOnMoveBegin(bool bDirect)
 {
+    local float IterNow;
+
+    IterNow = WorldInfo.TimeSeconds;
+    bFollowMoveActive = true;
+    bFollowDirectActive = bDirect;
+    FollowMoveStartTime = IterNow;
+
+    if (FollowStuckRefTime <= 0.0 || (IterNow - FollowStuckRefTime) > (FollowStuckWindow * 3.0))
+    {
+        FollowStuckRefLoc = Pawn.Location;
+        FollowStuckRefTime = IterNow;
+    }
+
+    if (!bDirect && FollowNode != None)
+    {
+        FollowLegTimeout = FMax(0.5, 2.0 * (VSize(FollowNode.Location - Pawn.Location) / FMax(Pawn.GroundSpeed, 0.0001)));
+    }
 }
 
 // @STUB(M2) @SYS-NAV-PATH legacy:KF2BotsFollowNavBase.FollowOnMoveEnd
