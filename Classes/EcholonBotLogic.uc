@@ -551,9 +551,10 @@ function GruntDecisionTimer()
     }
 }
 
-// @STUB(M5c) @SYS-LOGIC-WATCHDOG legacy:KF2BotLogic.IdleWatchdogTimer
 function IdleWatchdogTimer()
 {
+    SetTimer(AUDIT_WD_PERIOD, false, 'IdleWatchdogTimer');
+    IdleWatchdog();
 }
 
 // @STUB(M5c) @SYS-LOGIC-WATCHDOG legacy:KF2BotLogic.IdleWatchdog
