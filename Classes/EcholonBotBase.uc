@@ -2123,9 +2123,25 @@ function AuditStateEntry()
 	}
 }
 
-// @STUB(M5b) @SYS-BASE-AUDIT legacy:KF2BotBase.AuditStateExit
 function AuditStateExit(name NextStateName)
 {
+	local float IterDwell;
+
+	if (WorldInfo != None)
+	{
+		IterDwell = WorldInfo.TimeSeconds - AuditStateEntryTime;
+		AuditDwellTotal += IterDwell;
+		if (IterDwell >= 3.0)
+		{
+			EchelonLog("STATE_EXIT bot=" $ Name $ " state=" $ AuditStateEntryName $ " next=" $ NextStateName $ " reason=unspecified" $ " duration=" $ string(IterDwell));
+		}
+		if (WorldInfo.TimeSeconds - AuditLastLog_DWELLTOT >= 60.0)
+		{
+			EchelonLog("DWELL_TOTAL bot=" $ Name $ " sinceLast=" $ string(AuditDwellTotal));
+			AuditDwellTotal = 0.0;
+			AuditLastLog_DWELLTOT = WorldInfo.TimeSeconds;
+		}
+	}
 }
 
 // @STUB(M5b) @SYS-BASE-AUDIT legacy:KF2BotBase.AuditGoalLog
