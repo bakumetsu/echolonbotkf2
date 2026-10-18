@@ -989,9 +989,40 @@ function ConsolidateFireteams()
     SyncSquadLeaders();
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.PullBotFromNearestGroup
 function PullBotFromNearestGroup(int TargetGroupIdx)
 {
+    local int SourceGroupIdx, BestSourceIdx;
+    local float BestDistSq, DistSq;
+    local EcholonBot Puller;
+    local vector TargetLoc;
+
+    if (Fireteams[TargetGroupIdx].Leader == None || Fireteams[TargetGroupIdx].Leader.Pawn == None)
+        return;
+
+    TargetLoc = Fireteams[TargetGroupIdx].Leader.Pawn.Location;
+    BestSourceIdx = INDEX_NONE;
+    BestDistSq = 0.0;
+
+    for (SourceGroupIdx = 0; SourceGroupIdx < Fireteams.Length; SourceGroupIdx++)
+    {
+        if (SourceGroupIdx == TargetGroupIdx) continue;
+        if (Fireteams[SourceGroupIdx].Members.Length <= 2) continue;
+        if (Fireteams[SourceGroupIdx].Leader == None || Fireteams[SourceGroupIdx].Leader.Pawn == None) continue;
+
+        DistSq = VSizeSq(Fireteams[SourceGroupIdx].Leader.Pawn.Location - TargetLoc);
+        if (BestSourceIdx == INDEX_NONE || DistSq < BestDistSq)
+        {
+            BestSourceIdx = SourceGroupIdx;
+            BestDistSq = DistSq;
+        }
+    }
+
+    if (BestSourceIdx == INDEX_NONE) return;
+
+    Puller = FindExpendableMember(Fireteams[BestSourceIdx].Members);
+    if (Puller == None) return;
+
+    ReassignBotToGroup(Puller, TargetGroupIdx);
 }
 
 // @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.DissolveGroup
