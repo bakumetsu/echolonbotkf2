@@ -2980,9 +2980,43 @@ final function bool ShouldThrowGrenade(out Actor Aim, bool bFromSignal, Actor Cu
 	return false;
 }
 
-// @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.TryThrowGrenade
 final function bool TryThrowGrenade(KFWeapon W, Actor CurEnemy)
 {
+	local Actor Aim;
+	local bool bFromSignal;
+
+	bFromSignal = false;
+
+	if (!ShouldThrowGrenade(Aim, bFromSignal, CurEnemy))
+	{
+		GrenadeAimTicks = 0;
+		return false;
+	}
+
+	if (NeedToTurn(Aim.Location))
+	{
+		if (++GrenadeAimTicks > 3)
+		{
+			GrenadeAimTicks = 0;
+			NextGrenadeTimer = WorldInfo.TimeSeconds + 2.0;
+			return false;
+		}
+		Focus = Aim;
+		return true;
+	}
+
+	GrenadeAimTicks = 0;
+	NextGrenadeTimer = WorldInfo.TimeSeconds + 4.0 + (FRand() * 3.0);
+
+	if (bFromSignal && (SquadLeader != None) && (SquadLeader.GrenadeThrowsLeft > 0))
+	{
+		--SquadLeader.GrenadeThrowsLeft;
+	}
+
+	Target = Aim;
+	Focus = Aim;
+	W.StartFire(BOTFM_GRENADE);
+	return true;
 }
 
 // @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.SLGrenadeCheck
