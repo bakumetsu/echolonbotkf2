@@ -1762,9 +1762,71 @@ function int CountZedsInRadius(vector Origin, float Radius)
     return Count;
 }
 
-// @STUB(M4) @SYS-MUT-REGROUP legacy:KF2BotsMut.EvaluateRegroupEntries
 function EvaluateRegroupEntries()
 {
+    local int i;
+    local SquadOrder O;
+    local EcholonBot Leader, NewLeader;
+    local bool bLeaderDead, bNoGoal, bIdleNow;
+    local float Now;
+
+    if (Fireteams.Length == 0)
+        return;
+    EnsureSquadOrderTable();
+    if (SquadIdleStamp.Length != SquadOrders.Length)
+        SquadIdleStamp.Length = SquadOrders.Length;
+    Now = WorldInfo.TimeSeconds;
+
+    for (i = 0; i < Fireteams.Length; i++)
+    {
+        Leader = Fireteams[i].Leader;
+        bLeaderDead = (Leader == None || Leader.Pawn == None || Leader.Pawn.Health <= 0);
+        if (bLeaderDead)
+        {
+            if (Fireteams[i].Members.Length > 0)
+            {
+                NewLeader = FindBestCandidate(Fireteams[i].Members);
+                if (NewLeader != None)
+                {
+                    Fireteams[i].Leader = NewLeader;
+                    NewLeader.bIsGroupLeader = true;
+                    NewLeader.BotRank = SQUAD_LEADER;
+                    NewLeader.ResetStuckState();
+                    InheritSquadOrder(i, NewLeader);
+                    SampleSquadSlots(i);
+                    O = SquadOrders[i];
+                    O.Phase = PHASE_REGROUP;
+                    O.StartTime = Now;
+                    SquadOrders[i] = O;
+                    EchelonLog("REGROUP_ENTER squad=" $ string(i + 1) $ " leaderDead newLeader=" $ string(NewLeader.Name));
+                    SyncSquadLeaders();
+                }
+            }
+            continue;
+        }
+
+        bNoGoal = !HasSquadGoal(Leader);
+        bIdleNow = Leader.IsInState('PickNextMove') || Leader.IsInState('Camp') || Leader.IsInState('Roaming');
+        if (bNoGoal && bIdleNow && SquadIdleStamp[i] == 0.0)
+        {
+            SquadIdleStamp[i] = Now;
+        }
+        else if (!(bNoGoal && bIdleNow))
+        {
+            SquadIdleStamp[i] = 0.0;
+        }
+        if (bNoGoal && bIdleNow && SquadIdleStamp[i] > 0.0
+            && Now - SquadIdleStamp[i] >= 3.0
+            && CountZedsInRadius(Leader.Pawn.Location, REGROUP_SCAN_RADIUS) == 0)
+        {
+            O = SquadOrders[i];
+            O.Phase = PHASE_REGROUP;
+            O.StartTime = Now;
+            SquadOrders[i] = O;
+            SquadIdleStamp[i] = 0.0;
+            EchelonLog("REGROUP_ENTER squad=" $ string(i + 1) $ " leaderIdle leader=" $ string(Leader.Name));
+        }
+    }
 }
 
 // @STUB(M4) @SYS-MUT-REGROUP legacy:KF2BotsMut.GetSquadStartTime
