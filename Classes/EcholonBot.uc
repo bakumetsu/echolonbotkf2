@@ -224,9 +224,10 @@ Begin:
 // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.DoObjective
 state DoObjective extends Roaming
 {
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.DoObjective.FinishObjective
     function FinishObjective()
     {
+        global.FinishObjective();
+        PickCombatStyle();
     }
 
     // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.DoObjective.PickStyle
