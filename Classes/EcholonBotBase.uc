@@ -3505,9 +3505,11 @@ function ReceiveReloadDrift(vector Anchor, bool bMove, float Lease)
     }
 }
 
-// @STUB(M5a) @SYS-BASE-RELOAD legacy:KF2BotBase.OnReloadDriftAnchor
 function OnReloadDriftAnchor(vector Anchor)
 {
+    ReloadDriftLoc = Anchor + ReloadDriftOffset;
+    ApplyCrouch(true);
+    MoveToX(ReloadDriftLoc);
 }
 
 // @STUB(M5a) @SYS-BASE-RELOAD legacy:KF2BotBase.OnReloadComplete
