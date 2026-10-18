@@ -189,8 +189,16 @@ state Roaming
     }
 
 Begin:
+    if(Pawn.Physics == 2)
+    {
+        WaitForLanding(2.0);
+    }
+    PickStyle();
     Stop;
+
 Camp:
+    Sleep(0.5 + FRand());
+    PickCombatStyle();
     Stop;
 }
 
