@@ -3256,9 +3256,11 @@ function UpdateCoverCrouch()
     ApplyCrouch(bWantCrouch);
 }
 
-// @STUB(M5a) @SYS-BASE-GRUNT legacy:KF2BotBase.IsGruntCombatLocked
 final function bool IsGruntCombatLocked()
 {
+    return (GetStateName() == 'BreakLose' || GetStateName() == 'HealingSelf' || GetStateName() == 'HealOther'
+        || GetStateName() == 'HealRanged' || GetStateName() == 'TacticalRetreat' || GetStateName() == 'IsRagdolled'
+        || GetStateName() == 'Dead' || GetStateName() == 'VictoryDance');
 }
 
 // @STUB(M5a) @SYS-BASE-GRUNT legacy:KF2BotBase.GruntOnSight
