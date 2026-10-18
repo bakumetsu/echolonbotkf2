@@ -1086,9 +1086,9 @@ state GoShopping
         }
     }
 
-    // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.FinishedMove
     function FinishedMove()
     {
+        PickCombatStyle();
     }
 
     // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.DoTrading
