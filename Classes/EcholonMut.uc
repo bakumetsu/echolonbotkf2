@@ -966,9 +966,9 @@ function DemoteGroupLeader(EcholonBot OldLeader)
     ConsolidateFireteams();
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.RequestLeaderDemotion
 function RequestLeaderDemotion(EcholonBot StuckLeader)
 {
+    DemoteGroupLeader(StuckLeader);
 }
 
 // @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.ConsolidateFireteams
