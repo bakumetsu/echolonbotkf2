@@ -361,9 +361,51 @@ function InitializePlatoon()
         SetTimer(MACRO_WAYPOINT_INTERVAL, true, 'UpdateMacroWaypoints');
 }
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.SyncSquadLeaders
 function SyncSquadLeaders()
 {
+    local int GroupIdx, i;
+    local int FollowerSlot, FollowerTotal;
+    local EcholonBot Ldr, Member;
+
+    for (GroupIdx = 0; GroupIdx < Fireteams.Length; GroupIdx++)
+    {
+        Ldr = Fireteams[GroupIdx].Leader;
+        if (Ldr != None && (Ldr.bDeleteMe || Ldr.Pawn == None || Ldr.Pawn.Health <= 0))
+        {
+            Ldr = None;
+        }
+
+        FollowerTotal = 0;
+        for (i = 0; i < Fireteams[GroupIdx].Members.Length; i++)
+        {
+            Member = Fireteams[GroupIdx].Members[i];
+            if (Member != None && Member != Ldr)
+            {
+                FollowerTotal++;
+            }
+        }
+
+        FollowerSlot = 0;
+        for (i = 0; i < Fireteams[GroupIdx].Members.Length; i++)
+        {
+            Member = Fireteams[GroupIdx].Members[i];
+            if (Member == None)
+            {
+                continue;
+            }
+
+            if (Member == Ldr)
+            {
+                Member.SquadLeader = None;
+            }
+            else
+            {
+                Member.SquadLeader = Ldr;
+                Member.FollowSetSlot(FollowerSlot, FollowerTotal);
+                FollowerSlot++;
+            }
+        }
+    }
 }
 
 // @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.ShuffleActiveBots
