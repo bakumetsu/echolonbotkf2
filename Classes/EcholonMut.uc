@@ -838,9 +838,20 @@ function bool IsRangedHealTargetOnCooldown(KFPawn_Human Target)
     return false;
 }
 
-// @STUB(M4) @SYS-MUT-HEALCOOL legacy:KF2BotsMut.CleanupRangedHealCooldowns
 function CleanupRangedHealCooldowns()
 {
+    local int I;
+
+    I = RangedHealTargets.Length - 1;
+    while (I >= 0)
+    {
+        if (WorldInfo.TimeSeconds >= RangedHealCooldownEnds[I])
+        {
+            RangedHealTargets.Remove(I, 1);
+            RangedHealCooldownEnds.Remove(I, 1);
+        }
+        I--;
+    }
 }
 
 // @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.HandleVIPSuccession
