@@ -2641,9 +2641,27 @@ function CacheHumans()
     CacheHumanPositions();
 }
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.CacheHumanPositions
 function CacheHumanPositions()
 {
+    local KFPawn_Human H;
+    local CachedHumanInfo Info;
+    local PlayerController PC;
+
+    CachedHumans.Length = 0;
+    foreach WorldInfo.AllPawns(class'KFPawn_Human', H)
+    {
+        if (H.IsAliveAndWell())
+        {
+            PC = PlayerController(H.Controller);
+            if (PC != None)
+            {
+                Info.HumanPawn = H;
+                Info.Loc = H.Location;
+                Info.Vel = H.Velocity;
+                CachedHumans.AddItem(Info);
+            }
+        }
+    }
 }
 
 // @STUB(M4) @SYS-MUT-WAVE legacy:KF2BotsMut.GetObjectiveLocation
