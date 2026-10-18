@@ -3114,9 +3114,63 @@ function UpdateSectorWatch()
     SetFocalPoint(Pawn.Location + (vector(R) * 512.0));
 }
 
-// @STUB(M5a) @SYS-BASE-CQB legacy:KF2BotBase.HandleCQBProximity
 function HandleCQBProximity()
 {
+    local float distSq, now;
+    local KFWeapon W;
+    local KFPawn_Human KFPH;
+    local vector awayDir;
+    local bool bWantLight;
+
+    if (Pawn == None || Enemy == None || Enemy.Health <= 0 || CurrentFormation != 'SingleFile')
+    {
+        return;
+    }
+
+    now = WorldInfo.TimeSeconds;
+    KFPH = KFPawn_Human(Pawn);
+    distSq = VSizeSq(Enemy.Location - Pawn.Location);
+
+    if (distSq < CQB_BASH_SQ)
+    {
+        if (now >= NextBashTime)
+        {
+            NextBashTime = now + CQB_BASH_INTERVAL;
+
+            W = KFWeapon(Pawn.Weapon);
+            if (W != None)
+            {
+                if (W.bMeleeWeapon)
+                {
+                    W.StartFire(0);
+                }
+                else
+                {
+                    W.StartFire(3);
+                }
+            }
+
+            if (Pawn.Physics == PHYS_Walking)
+            {
+                awayDir = Pawn.Location - Enemy.Location;
+                awayDir.Z = 0.0;
+                Pawn.Velocity = Normal(awayDir) * CQB_STEPBACK_SPEED;
+            }
+
+            if (KFPH != None)
+            {
+                KFPH.SetFlashlight(!KFPH.bFlashlightOn, false);
+            }
+        }
+    }
+    else if (KFPH != None)
+    {
+        bWantLight = (distSq >= CQB_MID_SQ);
+        if (KFPH.bFlashlightOn != bWantLight)
+        {
+            KFPH.SetFlashlight(bWantLight, false);
+        }
+    }
 }
 
 // @STUB(M5a) @SYS-BASE-GRUNT legacy:KF2BotBase.OnGruntGrabbed
