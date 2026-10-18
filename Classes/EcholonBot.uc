@@ -616,9 +616,18 @@ state TacticalRetreat
         }
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.TacticalRetreat.CheckRetreatStatus
     function CheckRetreatStatus()
     {
+        if (Pawn == None || Pawn.Health <= 0)
+        {
+            return;
+        }
+
+        if (CountNearbyZeds(RETREAT_ZED_RADIUS) < RETREAT_ZED_CLEAR_COUNT && !HeavyZedWithin(RETREAT_HEAVY_RADIUS))
+        {
+            bIsRetreating = false;
+            PickCombatStyle();
+        }
     }
 
     // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.TacticalRetreat.FinishedMove
