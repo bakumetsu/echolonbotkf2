@@ -1337,9 +1337,17 @@ function SpawnSquadAt(vector AnchorPos, int SquadIndex)
     }
 }
 
-// @STUB(M1) @SYS-MUT-SPAWN legacy:KF2BotsMut.PickSquadSpawnPoint
 function vector PickSquadSpawnPoint(vector AnchorPos, float MinR, float MaxR)
 {
+    local float R, Ang;
+    local vector P;
+
+    R = MinR + FRand() * (MaxR - MinR);
+    Ang = FRand() * 360.0;
+    P = AnchorPos;
+    P.X += Cos(Ang * 0.0174533) * R;
+    P.Y += Sin(Ang * 0.0174533) * R;
+    return P;
 }
 
 function EcholonBot SpawnBotWithRank(EBotRank Rank, vector SpawnPos)
