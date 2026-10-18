@@ -187,9 +187,43 @@ final function bool CheckShouldSelfHeal()
 {
 }
 
-// @STUB(M5c) @SYS-LOGIC-UTIL legacy:KF2BotLogic.ShouldNadeEnemies
 final function bool ShouldNadeEnemies()
 {
+    local KFPawn_Monster M, B, Best;
+    local byte T;
+    local float Score, BestScore;
+
+    T = GetTeamNum();
+    BestScore = 0.0;
+
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', M, Pawn.Location, 1400.0)
+    {
+        if ((!M.IsAliveAndWell() || !FastTrace(M.Location, Pawn.Location)) || M.GetTeamNum() == T)
+        {
+            continue;
+        }
+        Score = FClamp(float(M.Health) / 5.0, 50.0, 150.0);
+        foreach WorldInfo.AllPawns(class'KFPawn_Monster', B, M.Location, 600.0)
+        {
+            if (((B == M) || !B.IsAliveAndWell() || !FastTrace(B.Location, M.Location)) || B.GetTeamNum() == T)
+            {
+                continue;
+            }
+            Score += FClamp(float(B.Health) / 7.0, 50.0, 150.0);
+        }
+        if ((Score > 300.0 && Best == None) || Score > BestScore)
+        {
+            Best = M;
+            BestScore = Score;
+        }
+    }
+
+    if (Best == None)
+    {
+        return false;
+    }
+    Target = Best;
+    return true;
 }
 
 // @STUB(M5c) @SYS-LOGIC-GRUNTMOVE legacy:KF2BotLogic.CheckGrabbed
