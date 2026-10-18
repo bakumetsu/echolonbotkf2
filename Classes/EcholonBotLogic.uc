@@ -357,9 +357,31 @@ function UpdateGruntOffset()
     MoveToX(GruntTarget);
 }
 
-// @STUB(M5c) @SYS-LOGIC-GRUNTMOVE legacy:KF2BotLogic.ApplyZStep
 function vector ApplyZStep(vector T)
 {
+    local float DZ;
+    DZ = T.Z - Pawn.Location.Z;
+    if (Abs(DZ) > 300.0)
+    {
+        T.Z = Pawn.Location.Z;
+        return T;
+    }
+    if (Abs(DZ) > 200.0)
+    {
+        if (DZ > 0.0)
+        {
+            T.Z += 50.0;
+        }
+        else
+        {
+            T.Z -= 50.0;
+        }
+    }
+    if (Abs(T.Z - Pawn.Location.Z) <= 50.0)
+    {
+        T.Z = Pawn.Location.Z;
+    }
+    return T;
 }
 
 // @STUB(M5c) @SYS-LOGIC-GRUNTMOVE legacy:KF2BotLogic.RequestReroute
