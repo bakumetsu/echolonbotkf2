@@ -434,11 +434,15 @@ function SeePlayer(Pawn Seen)
 // @STUB(M3) @SYS-BASE-PERCEPT legacy:KF2BotBase.SeeMonster
 function SeeMonster(Pawn Seen)
 {
+    // PASS-THROUGH: overrides Controller; keep the engine behaviour until the real port lands.
+    super.SeeMonster(Seen);
 }
 
 // @STUB(M3) @SYS-BASE-PERCEPT legacy:KF2BotBase.NotifyBump
 event bool NotifyBump(Actor Other, Vector HitNormal)
 {
+    // PASS-THROUGH: overrides Controller; keep the engine behaviour until the real port lands.
+    return super.NotifyBump(Other, HitNormal);
 }
 
 // @STUB(M3) @SYS-BASE-PERCEPT legacy:KF2BotBase.TargetLowHealth
@@ -469,6 +473,8 @@ function float GetEnemyThreat(Pawn Other)
 // @STUB(M3) @SYS-BASE-FIRE legacy:KF2BotBase.FireWeaponAt
 function bool FireWeaponAt(Actor inActor)
 {
+    // PASS-THROUGH: overrides Controller; keep the engine behaviour until the real port lands.
+    return super.FireWeaponAt(inActor);
 }
 
 // @STUB(M3) @SYS-BASE-OBJ legacy:KF2BotBase.TryBreakFree
@@ -494,16 +500,22 @@ function DonateMoney(Pawn Other)
 // @STUB(M3) @SYS-BASE-SHOP legacy:KF2BotBase.SwitchToBestWeapon
 exec function SwitchToBestWeapon(optional bool bForceNewWeapon, optional bool check_9mm_logic = false)
 {
+    // PASS-THROUGH: overrides Controller; keep the engine behaviour until the real port lands.
+    super.SwitchToBestWeapon(bForceNewWeapon, check_9mm_logic);
 }
 
 // @STUB(M3) @SYS-BASE-FIRE legacy:KF2BotBase.GetAdjustedAimFor
 function Rotator GetAdjustedAimFor(Weapon W, Vector StartFireLoc)
 {
+    // PASS-THROUGH: overrides Controller; keep the engine behaviour until the real port lands.
+    return super.GetAdjustedAimFor(W, StartFireLoc);
 }
 
 // @STUB(M3) @SYS-BASE-FIRE legacy:KF2BotBase.GetPlayerViewPoint
 simulated function GetPlayerViewPoint(out Vector out_Location, out Rotator out_Rotation)
 {
+    // PASS-THROUGH: overrides AIController; keep the engine behaviour until the real port lands.
+    super.GetPlayerViewPoint(out_Location, out_Rotation);
 }
 
 // @STUB(M3) @SYS-BASE-MOVE legacy:KF2BotBase.MoveToX
@@ -559,6 +571,8 @@ function FollowOnGaveUp()
 // @STUB(M3) @SYS-BASE-MOVE legacy:KF2BotBase.Tick
 function Tick(float Delta)
 {
+    // PASS-THROUGH: overrides Actor; keep the engine behaviour until the real port lands.
+    super.Tick(Delta);
 }
 
 // @STUB(M3) @SYS-BASE-PATH legacy:KF2BotBase.MarkDoorPath
@@ -594,6 +608,8 @@ final function bool NeedToTurn(Vector targ)
 // @STUB(M3) @SYS-BASE-PERCEPT legacy:KF2BotBase.NotifyHitWall
 event bool NotifyHitWall(Vector HitNormal, Actor Wall)
 {
+    // PASS-THROUGH: overrides Controller; keep the engine behaviour until the real port lands.
+    return super.NotifyHitWall(HitNormal, Wall);
 }
 
 // @STUB(M3) @SYS-BASE-MOVE legacy:KF2BotBase.FinishedMove
@@ -624,6 +640,8 @@ final function ProcessPurchase(KFGFxObject_TraderItems L)
 // @STUB(M3) @SYS-BASE-SHOP legacy:KF2BotBase.NotifyAddInventory
 function NotifyAddInventory(Inventory NewItem)
 {
+    // PASS-THROUGH: overrides Controller; keep the engine behaviour until the real port lands.
+    super.NotifyAddInventory(NewItem);
 }
 
 // @STUB(M3) @SYS-BASE-MOVE legacy:KF2BotBase.PickCombatStyle

@@ -125,6 +125,8 @@ final function bool FindCollectable()
 // @STUB(M5c) @SYS-LOGIC-UTIL legacy:KF2BotLogic.NotifyJumpApex
 event NotifyJumpApex()
 {
+    // PASS-THROUGH: overrides Controller; keep the engine behaviour until the real port lands.
+    super.NotifyJumpApex();
 }
 
 // @STUB(M5c) @SYS-LOGIC-UTIL legacy:KF2BotLogic.GetAIInfo
@@ -135,6 +137,8 @@ function string GetAIInfo()
 // @STUB(M5c) @SYS-LOGIC-DEATH legacy:KF2BotLogic.ReplicatedEvent
 simulated event ReplicatedEvent(name VarName)
 {
+    // PASS-THROUGH: overrides Controller; keep the engine behaviour until the real port lands.
+    super.ReplicatedEvent(VarName);
 }
 
 // @STUB(M5c) @SYS-LOGIC-DEATH legacy:KF2BotLogic.FinishObjective
@@ -150,6 +154,8 @@ final function Vector GetPointNear(Pawn Other, float MaxDist)
 // @STUB(M5c) @SYS-LOGIC-DEATH legacy:KF2BotLogic.NotifyKilled
 function NotifyKilled(Controller Killer, Controller Killed, Pawn KilledPawn, Class<DamageType> damageTyp)
 {
+    // PASS-THROUGH: overrides Controller; keep the engine behaviour until the real port lands.
+    super.NotifyKilled(Killer, Killed, KilledPawn, damageTyp);
 }
 
 // @STUB(M5c) @SYS-LOGIC-MOVEVAL legacy:KF2BotLogic.EvaluateSquadTether

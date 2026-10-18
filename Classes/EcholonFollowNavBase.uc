@@ -282,16 +282,22 @@ function FollowOnGaveUp()
 // @STUB(M2) @SYS-NAV-HANDLE legacy:KF2BotsFollowNavBase.NotifyHitWall
 event bool NotifyHitWall(vector HitNormal, Actor Wall)
 {
+    // PASS-THROUGH: overrides Controller; keep the engine behaviour until the real port lands.
+    return super.NotifyHitWall(HitNormal, Wall);
 }
 
 // @STUB(M2) @SYS-NAV-HANDLE legacy:KF2BotsFollowNavBase.NotifyBump
 event bool NotifyBump(Actor Other, vector HitNormal)
 {
+    // PASS-THROUGH: overrides Controller; keep the engine behaviour until the real port lands.
+    return super.NotifyBump(Other, HitNormal);
 }
 
 // @STUB(M2) @SYS-NAV-HANDLE legacy:KF2BotsFollowNavBase.MoveUnreachable
 event MoveUnreachable(vector AttemptedDest, Actor AttemptedTarget)
 {
+    // PASS-THROUGH: overrides Controller; keep the engine behaviour until the real port lands.
+    super.MoveUnreachable(AttemptedDest, AttemptedTarget);
 }
 
 // @STUB(M2) @SYS-NAV-STATE legacy:KF2BotsFollowNavBase.FollowingLeader
