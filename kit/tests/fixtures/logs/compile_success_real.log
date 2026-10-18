@@ -1,0 +1,8 @@
+Log: Log file open, 10/10/26 10:32:44
+Init: Command line: make -useunpublished -log
+[0028.33] Log: Executing Class UnrealEd.MakeCommandlet
+[0028.34] Log: No scripts need recompiling.
+[0028.34] Log: 
+[0028.34] Log: Success - 0 error(s), 0 warning(s)
+[0028.34] Log: 
+[0029.87] Log: Log file closed, 10/10/26 10:33:13

@@ -1,6 +1,6 @@
 # Milestone 0a report
 
-**Result: all M0a gates pass. 40 of 40 tests pass** (`python -m pytest -q kit/tests`, run against the real legacy corpus).
+**Result: all M0a gates pass. 44 of 44 tests pass** (`python -m pytest -q kit/tests`, run against the real legacy corpus).
 
 | Gate | Result |
 |---|---|
@@ -13,16 +13,15 @@
 **Spec corrections found:** (1) ternary `?:` compiles in KF2 (16 corpus uses), so U008 ternary is a WARN, not an ERROR. (2) The legacy files are partly decompiler output (`J0x..:` + goto loops), so a new rule N13 and validator U014 (WARN) cover that style. (3) The doc's 943 count came from an extractor that counted struct members and missed `var()`. (4) The `bFollowExitPending` writers are resolved: Nav clears it, the hub sets it.
 
 ## [UNVERIFIED]
-- The compile command `KFEditor.exe make -useunpublished -log -unattended`, the log path `KFGame\Logs\Launch.log`, and the error regex in `workspace.json`. These come from the Steam guide; no real log has been seen yet.
-- The SDK root `D:\SteamLibrary\steamapps\common\killingfloor2` (taken from the doc's own SDK citations).
-- The llama.cpp CUDA build needed for the RTX 5060 Ti (Blackwell) and the `--flash-attn on` flag spelling.
+- The per-error compile line format (`File.uc(N) : Error, msg`). The command `make -useunpublished -log`, the log path, the `Success - N error(s), N warning(s)` summary and the runtime ScriptWarning format are now verified from your real logs (trimmed copies in `tests/fixtures/logs/`). `-unattended` is an addition that hasn't been tried.
+- Whether llama-swap accepts the forward-slash, quoted paths in `docs/llama-swap.config.yaml`.
 - U010 (unknown SDK member) is deferred to M0b because it needs `sdk_index.py`.
 - In-state `super.` semantics, `IsInState` matching parent states, and timers dispatching to state overrides. These are marked UNVERIFIED in the Bible topics.
 
 ## Next: M0b
 The boundary auditor + single_writer.json, compile_loop (with `--fake-log`), sdk_index, log_checker, splice, skeleton_gen, contracts.json + constants.json generators, agent_runner with `--mock-backend`, and docgen.
 
-## Questions
-1. Can you paste one real compile log that has an error in it? It is needed to lock the error regex.
-2. What is the exact file name of your 27B model, and which quant? It goes in `llama-swap.config.yaml`.
-3. Is your SDK at `D:\SteamLibrary\steamapps\common\killingfloor2`?
+## Answered (2026-10-18)
+- SDK: `D:\SteamLibrary\steamapps\common\killingfloor2\Development\Src` (confirmed).
+- Models: Swift 1.5 Qwen3.8-27B IQ3_S-mtp (coder/debugger) and Qwen3.8-27B-AP IQ3_S (docs), both from your .bat, now in `docs/llama-swap.config.yaml`.
+- Logs: your Launch.log was a successful no-op compile, so the error-line format gets confirmed on the kit's first failing compile.

@@ -9,18 +9,30 @@
  "legacy_dir": "{kf2_userdir}\\KFGame\\Src\\KF2Bots\\Classes",
  "doc_path": "{legacy_dir}\\Mod Architecture\\KF2_Current_Architecture.md",
  "compile": {
-  "_status": "[UNVERIFIED] defaults from the Steam guide 1112644122; used by compile_loop in M0b",
-  "args": ["make", "-useunpublished", "-log", "-unattended"],
+  "_status": "command, log path and summary line VERIFIED from Launch.log (2026-10-10); the per-error line format is still [UNVERIFIED] (no log with an error seen yet)",
+  "args": [
+   "make",
+   "-useunpublished",
+   "-log",
+   "-unattended"
+  ],
   "editor_ini": "{kf2_userdir}\\KFGame\\Config\\KFEditor.ini",
   "output_u": "{kf2_userdir}\\KFGame\\Unpublished\\BrewedPC\\Script\\EcholonBot.u",
   "log_path": "{kf2_userdir}\\KFGame\\Logs\\Launch.log",
-  "error_regex": "^(?P<file>.+?\\.uc)\\((?P<line>\\d+)\\)\\s*:\\s*(?P<sev>Error|Warning),\\s*(?P<msg>.*)$",
+  "error_regex": "(?P<file>[A-Za-z]:[\\\\/][^()]*?\\.uc)\\((?P<line>\\d+)\\)\\s*:\\s*(?P<sev>Error|Warning),\\s*(?P<msg>.*)$",
+  "summary_regex": "(?P<result>Success|Failure) - (?P<errors>\\d+) error\\(s\\), (?P<warnings>\\d+) warning\\(s\\)",
+  "nothing_to_do": "No scripts need recompiling.",
   "timeout_s": 300
  },
  "backend": {
-  "_status": "[UNVERIFIED] llama-swap on its default port; see kit/docs/LLAMA_SWAP_SETUP.md",
+  "_status": "llama-swap in front of your llama.cpp; see kit/docs/LLAMA_SWAP_SETUP.md",
   "kind": "llama_swap",
-  "endpoint": "http://127.0.0.1:8080/v1"
+  "endpoint": "http://127.0.0.1:8080/v1",
+  "roles": {
+   "coder": "swift",
+   "debugger": "swift",
+   "doc": "ap"
+  }
  },
  "budgets": {
   "bible_core": 1800,
@@ -41,5 +53,18 @@
   "KF2BotBroadcastHandle": "EcholonBroadcastHandler",
   "KFInventoryManager_Bot": "EcholonInventoryManager"
  },
- "aux_legacy_files": ["AIWeaponInfo.uc", "KF2BotChat.uc", "KF2BotBroadcastHandle.uc", "KFInventoryManager_Bot.uc"]
+ "aux_legacy_files": [
+  "AIWeaponInfo.uc",
+  "KF2BotChat.uc",
+  "KF2BotBroadcastHandle.uc",
+  "KFInventoryManager_Bot.uc"
+ ],
+ "runtime_log": {
+  "_status": "VERIFIED format from Launch_2.log: '[t] ScriptWarning: Accessed None 'Var'' then tab-indented object line and 'Function Pkg.Class:Func:Offset'",
+  "path": "{kf2_userdir}\\KFGame\\Logs\\Launch.log",
+  "own_packages": [
+   "EcholonBot",
+   "KF2Bots"
+  ]
+ }
 }

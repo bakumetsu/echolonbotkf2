@@ -1,29 +1,48 @@
-# llama-swap config for the Echolon agent kit (RTX 5060 Ti 16 GB).
-# Copy to C:\llama\config.yaml and fix the two paths marked EDIT.
-# llama-swap keeps ONE model loaded at a time and swaps when a request names another model.
-# Prompts are capped at 7k tokens by the kit, so 16k context is plenty; the VRAM goes to quality.
+# llama-swap config for the Echolon agent kit, built from your Qwen3.8-CoderScript.bat.
+# Copy to "D:\LLM Storage\llama.cpp\config.yaml". llama-swap keeps ONE model loaded and swaps
+# when a request names the other one (both 27B IQ3_S files need most of the 16 GB).
+#
+# Differences from the .bat, on purpose:
+#  - context 32768: kit prompts are capped at 7k tokens, plus up to 8k of reasoning and ~2k of
+#    code, so 65k would only waste VRAM and prefill time.
+#  - no --host/--alias: llama-swap picks the port (${PORT}) and names the model itself, and it
+#    listens on 127.0.0.1 only (the .bat's 0.0.0.0 option has no password).
+#  - forward slashes in paths: llama-swap splits the command like a shell, and backslashes inside
+#    quotes can be eaten. Windows accepts D:/... paths. [UNVERIFIED on your machine]
+# Every other flag is copied verbatim from the .bat, since you said those settings run well.
 
 healthCheckTimeout: 300   # seconds to wait for a model to load before giving up
 
 models:
-  # Coder / debugger: the 27B model. ~13 GB weights at Q3_K_M + ~1.5 GB KV cache at 16k (q8).
-  "coder":
+  # Coder + debugger: Swift 1.5 (your .bat task [6] "Heavy debug" settings, at 32k context).
+  "swift":
     cmd: >
-      C:\llama\llama-server.exe --port ${PORT}
-      -m C:\models\CODER-27B-Q3_K_M.gguf
-      -ngl 99 -c 16384 --flash-attn on
-      --cache-type-k q8_0 --cache-type-v q8_0
-      --jinja --temp 0.2
-    # EDIT the -m path to your 27B .gguf file name
-    ttl: 900              # unload after 15 idle minutes
+      "D:/LLM Storage/llama.cpp/llama-server.exe"
+      -m "D:/LLM Storage/Swift-1.5-Qwen3.8-27B-GSQ-RCO-IQ3_S/Swift-1.5-Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf"
+      -ngl 99 -ngld 99 --fit off
+      --spec-type draft-mtp --spec-draft-n-max 2 --spec-draft-p-min 0.0
+      -c 32768 -fa on -ctk q8_0 -ctv q8_0 -ctkd q8_0 -ctvd q8_0 -kvu -np 1
+      -b 512 -ub 256 -t 8 -ctxcp 16 --cache-ram 6144
+      -tb 8 -C 5555 -Cb 5555 --prio 2 --prio-batch 2 --poll-batch 1 --jinja
+      --reasoning on --reasoning-format deepseek --reasoning-effort medium
+      --reasoning-budget 8192 --reasoning-budget-message "Reasoning budget reached. Give your best answer now."
+      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.0
+      --load-mode none --port ${PORT}
+    ttl: 1800             # unload after 30 idle minutes
 
-  # Planner / doc helper: a small fast model, optional.
-  "small":
+  # Docs / brainstorm: AP (your .bat task [3] "Heavy docs" settings, at 32k context).
+  "ap":
     cmd: >
-      C:\llama\llama-server.exe --port ${PORT}
-      -m C:\models\Qwen3-8B-Q6_K.gguf
-      -ngl 99 -c 16384 --flash-attn on
-      --cache-type-k q8_0 --cache-type-v q8_0
-      --jinja --temp 0.3
-    # EDIT the -m path, or delete this whole "small" block if you only use one model
-    ttl: 900
+      "D:/LLM Storage/llama.cpp/llama-server.exe"
+      -m "D:/LLM Storage/Qwen3.8-27B-AP-IQ3_S/Qwen3.8-27B-AP-IQ3_S.gguf"
+      --chat-template-file "D:/LLM Storage/Qwen3.8-27B-AP-IQ3_S/chat_template.jinja"
+      -ngl 99 -ngld 99 --fit off
+      --spec-type draft-mtp,ngram-mod --spec-draft-n-max 3 --spec-draft-p-min 0.0
+      -c 32768 -fa on -ctk q8_0 -ctv q8_0 -kvu -np 1
+      -b 512 -ub 256 -t 8 -ctxcp 16 --cache-ram 6144
+      --no-mmproj --no-warmup
+      --reasoning on --reasoning-format deepseek --reasoning-effort medium
+      --reasoning-budget 8192 --reasoning-budget-message "Reasoning budget reached. Give your best answer now."
+      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.0
+      --load-mode none --port ${PORT}
+    ttl: 1800

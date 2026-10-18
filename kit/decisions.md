@@ -14,7 +14,7 @@ Final decisions from the Milestone 0 spec (D1-D6) plus answers given in the proj
 - **D7 Review is manual and model-agnostic.** No API calls to Opus. Escalations are self-contained markdown packets, so any AI can review them for edge cases, loopholes and bugs.
 - **D8 Package name `EcholonBot`.** Classes are renamed per `workspace.json` `class_map` (EcholonMut, EcholonFollowNavBase, EcholonBotBase, EcholonBotLogic, EcholonBot, EcholonWeaponInfo, EcholonChat, EcholonBroadcastHandler, EcholonInventoryManager). The repo is cloned to `KFGame\Src\EcholonBot`.
 - **D9 All 9 legacy classes are in scope,** including the 4 auxiliary ones. They are indexed and validated; the 943 gate still covers only the 5 core files.
-- **D10 Backend is llama-swap** in front of llama.cpp, so exactly one model is loaded at a time. Setup: `docs/LLAMA_SWAP_SETUP.md`.
+- **D10 Backend is llama-swap** in front of your existing llama.cpp (`D:\LLM Storage\llama.cpp`), so exactly one model is loaded at a time. Roles: coder and debugger = `swift` (Swift 1.5 Qwen3.8-27B IQ3_S-mtp), doc = `ap` (Qwen3.8-27B-AP IQ3_S). Both use 32k context, since kit prompts stay ≤7k plus up to 8k of reasoning. The flags come from the user's .bat. Setup: `docs/LLAMA_SWAP_SETUP.md`.
 - **D11 No LLM orchestrator.** Routing is deterministic Python. Local models write or fix one symbol at a time; planning and review stay with Opus/humans.
 - **D12 Milestone 0 is split.** M0a = hashes, indexer, slicer, validator, Bible (done). M0b = boundary auditor, compile loop, sdk_index, log checker, runner, splice, skeleton/constants generators, contracts.json, docgen.
 - **D13 Ternary is house-style banned (WARN), not a compile error.** Corpus evidence shows it compiles.
