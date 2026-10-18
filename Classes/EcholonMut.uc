@@ -1746,9 +1746,20 @@ function Controller FindNearestActiveLeader(EcholonBot B, float MaxDist)
     return BestCtrl;
 }
 
-// @STUB(M4) @SYS-MUT-REGROUP legacy:KF2BotsMut.CountZedsInRadius
 function int CountZedsInRadius(vector Origin, float Radius)
 {
+    local int Count;
+    local KFPawn_Monster Zed;
+
+    Count = 0;
+    foreach DynamicActors(class'KFPawn_Monster', Zed)
+    {
+        if (Zed.IsAliveAndWell() && VSizeSq(Zed.Location - Origin) <= Radius * Radius)
+        {
+            Count++;
+        }
+    }
+    return Count;
 }
 
 // @STUB(M4) @SYS-MUT-REGROUP legacy:KF2BotsMut.EvaluateRegroupEntries
