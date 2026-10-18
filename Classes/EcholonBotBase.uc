@@ -2113,9 +2113,14 @@ function bool FollowGetOrderAnchor(out vector OutLoc)
     return true;
 }
 
-// @STUB(M5b) @SYS-BASE-AUDIT legacy:KF2BotBase.AuditStateEntry
 function AuditStateEntry()
 {
+	if (WorldInfo != None)
+	{
+		AuditStateEntryTime = WorldInfo.TimeSeconds;
+		AuditStateEntryName = GetStateName();
+		WdLastMoveIntentTime = WorldInfo.TimeSeconds;
+	}
 }
 
 // @STUB(M5b) @SYS-BASE-AUDIT legacy:KF2BotBase.AuditStateExit
