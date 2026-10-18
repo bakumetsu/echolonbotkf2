@@ -1997,9 +1997,9 @@ function bool CanHealOthers()
     return MedicGun != None;
 }
 
-// @STUB(M5b) @SYS-BASE-HEALQ legacy:KF2BotBase.IsHealLockedOut
 function bool IsHealLockedOut()
 {
+    return false;
 }
 
 // @STUB(M5b) @SYS-BASE-HEALQ legacy:KF2BotBase.ShouldAbortRetreat
