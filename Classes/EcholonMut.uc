@@ -1859,7 +1859,9 @@ function int MoveSquadMembers(int FromIdx, int ToIdx)
     O.Phase = PHASE_IDLE;
     SquadOrders[FromIdx] = O;
 
-    for (MemberIdx = 0; MemberIdx < Fireteams[FromIdx].Members.Length; MemberIdx++)
+    // Bug hunt (legacy bug): ReassignBotToGroup removes M from this same Members array, so a forward
+    // loop skipped every second bot and left it in the dissolved squad with no leader. Walk backwards.
+    for (MemberIdx = Fireteams[FromIdx].Members.Length - 1; MemberIdx >= 0; MemberIdx--)
     {
         M = Fireteams[FromIdx].Members[MemberIdx];
         if (M == None)
