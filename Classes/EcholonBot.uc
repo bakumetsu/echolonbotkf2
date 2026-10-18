@@ -638,9 +638,10 @@ state TacticalRetreat
         }
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.TacticalRetreat.EnemyChanged
     function EnemyChanged()
     {
+        // Deliberately ignored -- P4 overrides P7: a newly spotted Zed must
+        // not interrupt an active retreat.
     }
 
 Begin:
