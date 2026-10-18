@@ -89,7 +89,7 @@ var() config bool bEnableFastTraceHealing;
 var array<KFPawn_Human> RangedHealTargets;
 var array<float> RangedHealCooldownEnds;
 var transient array<string> AvailableBotNames;
-var transient array<Class<KFPerk>> PerkPool;
+var transient array<Class<KFPerk> > PerkPool;
 var transient array<int> PerkPoolCounts;
 var float LastAuditLogTime;
 
