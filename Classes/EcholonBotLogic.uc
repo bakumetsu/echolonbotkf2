@@ -399,9 +399,13 @@ function PromotionGapTimer()
     }
 }
 
-// @STUB(M5c) @SYS-LOGIC-HEAL legacy:KF2BotLogic.CanAffordHeal
 function bool CanAffordHeal(int Type)
 {
+    if (Type == 0)
+    {
+        return (MedicGun != None) && (MedicGun.AmmoCount[0] >= 100.0);
+    }
+    return (RangeMedicGun != None) && (RangeMedicGun.AmmoCount[1] >= 50.0);
 }
 
 // @STUB(M5c) @SYS-LOGIC-HEAL legacy:KF2BotLogic.HealFail
