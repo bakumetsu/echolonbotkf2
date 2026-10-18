@@ -230,9 +230,98 @@ state DoObjective extends Roaming
         PickCombatStyle();
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.DoObjective.PickStyle
     function PickStyle()
     {
+        local bool IterGoalReachable;
+
+        IterGoalReachable = false;
+
+        if (CheckObjectiveHazard())
+        {
+            return;
+        }
+
+        if (ObjectiveGoal == None)
+        {
+            ObjectiveGoal = mut.GetBotObjective(self);
+            ObjectiveBailUntil = 0.0;
+            AuditGoalLog("GOAL_SET", "DoObjectivePick");
+        }
+
+        if (ObjectiveGoal == None)
+        {
+            PickCombatStyle();
+            return;
+        }
+
+        if (mut != None && mut.IsNodeBlocked(self, ObjectiveGoal))
+        {
+            PickCombatStyle();
+            return;
+        }
+
+        if (VSizeSq(ObjectiveGoal.Location - Pawn.Location) > 90000.0)
+        {
+            if (ActorReachable(ObjectiveGoal))
+            {
+                IterGoalReachable = true;
+                MoveTowardX(ObjectiveGoal);
+                return;
+            }
+            if (BuildPathToward(ObjectiveGoal))
+            {
+                IterGoalReachable = true;
+                MoveTowardX(MoveTarget);
+                return;
+            }
+        }
+        else
+        {
+            Focus = None;
+            SetFocalPoint(Pawn.Location + (VRand() * 1000.0));
+            return;
+        }
+
+        if (!IterGoalReachable && VSizeSq(ObjectiveGoal.Location - Pawn.Location) > 90000.0)
+        {
+            if (WorldInfo.TimeSeconds < ObjectiveBailUntil)
+            {
+                PickCombatStyle();
+                return;
+            }
+            ObjectiveBailUntil = WorldInfo.TimeSeconds + OBJ_BAIL_COOLDOWN;
+            if (mut != None && ObjectiveGoal != None
+                && WorldInfo.TimeSeconds - LastNodeBlockTime >= 2.0
+                && NodeBlockCount < 2)
+            {
+                mut.AddNodeBlock(self, ObjectiveGoal);
+                LastNodeBlockTime = WorldInfo.TimeSeconds;
+                NodeBlockCount++;
+                EchelonLog("NODE_BLOCK bot=" $ Name $ " node=(" $ string(FFloor(ObjectiveGoal.Location.X / 100.0)) $ "," $ string(FFloor(ObjectiveGoal.Location.Y / 100.0)) $ "," $ string(FFloor(ObjectiveGoal.Location.Z / 100.0)) $ ") reason=pathfail ttl=8s");
+            }
+            EchelonLog("DoObjective: objective unreachable, bailing to combat (slot=" $ string(FollowSlotIndex) $ ")");
+            PickCombatStyle();
+            return;
+        }
+
+        if (RandGoal == None && !BuildRandomPath())
+        {
+            MoveToX(Pawn.Location + (VRand() * 300.0));
+            return;
+        }
+        if (ActorReachable(RandGoal))
+        {
+            MoveTowardX(RandGoal);
+            RandGoal = None;
+            return;
+        }
+        if (!BuildPathToward(RandGoal))
+        {
+            RandGoal = None;
+            MoveToX(Pawn.Location + (VRand() * 300.0));
+            return;
+        }
+        MoveTowardX(MoveTarget);
     }
 }
 
