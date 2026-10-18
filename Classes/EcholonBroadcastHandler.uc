@@ -42,9 +42,9 @@ event AllowBroadcastLocalized(Actor Sender, Class<LocalMessage> Message, optiona
     MainHandle.AllowBroadcastLocalized(Sender, Message, Switch, RelatedPRI_1, RelatedPRI_2, OptionalObject);
 }
 
-// @STUB(M1) - legacy:KF2BotBroadcastHandle.AllowBroadcastLocalizedTeam
 event AllowBroadcastLocalizedTeam(int TeamIndex, Actor Sender, Class<LocalMessage> Message, optional int Switch, optional PlayerReplicationInfo RelatedPRI_1, optional PlayerReplicationInfo RelatedPRI_2, optional Object OptionalObject)
 {
+    MainHandle.AllowBroadcastLocalizedTeam(TeamIndex, Sender, Message, Switch, RelatedPRI_1, RelatedPRI_2, OptionalObject);
 }
 
 defaultproperties
