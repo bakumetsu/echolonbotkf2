@@ -1182,9 +1182,9 @@ state DonatingMoney
         }
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.DonatingMoney.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
     }
 
     // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.DonatingMoney.Tick
