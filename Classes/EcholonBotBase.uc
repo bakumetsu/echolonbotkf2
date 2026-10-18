@@ -2409,9 +2409,19 @@ final function bool SyncLineFocus()
 	return false;
 }
 
-// @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.HasOwnFireLine
 final function bool HasOwnFireLine(Actor T)
 {
+    if ((T == None) || (Pawn == None))
+    {
+        return false;
+    }
+    if ((T != FireLineTarget) || (WorldInfo.TimeSeconds >= NextFireLineCheck))
+    {
+        FireLineTarget = T;
+        NextFireLineCheck = WorldInfo.TimeSeconds + 0.5;
+        bFireLineClear = FastTrace(T.Location, Pawn.Location + (vect(0.0, 0.0, 1.0) * Pawn.BaseEyeHeight));
+    }
+    return bFireLineClear;
 }
 
 // @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.ValidateOffsetTarget
