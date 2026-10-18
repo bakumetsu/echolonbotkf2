@@ -1056,9 +1056,18 @@ function bool EvaluateSquadTether()
     return EvaluateFollowerMove();
 }
 
-// @STUB(M5c) @SYS-LOGIC-MOVEVAL legacy:KF2BotLogic.IsAnchorValid
 function bool IsAnchorValid(Actor Anchor)
 {
+    local Pawn AnchorPawn;
+
+    if (Anchor == None || Anchor.bDeleteMe)
+        return false;
+
+    AnchorPawn = Pawn(Anchor);
+    if (AnchorPawn != None && AnchorPawn.Health <= 0)
+        return false;
+
+    return true;
 }
 
 // @STUB(M5c) @SYS-LOGIC-MOVEVAL legacy:KF2BotLogic.EvaluateLeaderMove
