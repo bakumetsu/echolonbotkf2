@@ -1036,9 +1036,37 @@ state GoShopping
         PickCombatStyle();
     }
 
-    // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.PickStyle
     function PickStyle()
     {
+        if (KFGRI.OpenedTrader == None)
+        {
+            PickCombatStyle();
+            return;
+        }
+        if (ActorReachable(KFGRI.OpenedTrader))
+        {
+            TraderRetryCount = 0;
+            MoveToX(KFGRI.OpenedTrader.Location);
+            return;
+        }
+        if (BuildPathToward(KFGRI.OpenedTrader))
+        {
+            TraderRetryCount = 0;
+            MoveTowardX(MoveTarget);
+        }
+        else
+        {
+            AbortMove();
+            ++TraderRetryCount;
+            if (TraderRetryCount >= TRADER_MAX_RETRIES)
+            {
+                TraderRetryCount = 0;
+                NextShoppingTime = WorldInfo.TimeSeconds + TRADER_GIVEUP_COOLDOWN;
+                PickCombatStyle();
+                return;
+            }
+            SetTimer((1.0 + (FRand() * 2.0)) + (float(TraderRetryCount) * 1.0), false, 'DoTrading');
+        }
     }
 
     // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.Timer
