@@ -1028,9 +1028,32 @@ function NotifyKilled(Controller Killer, Controller Killed, Pawn KilledPawn, Cla
     }
 }
 
-// @STUB(M5c) @SYS-LOGIC-MOVEVAL legacy:KF2BotLogic.EvaluateSquadTether
 function bool EvaluateSquadTether()
 {
+    local vector TDiff;
+
+    if (Pawn == None || mut == None)
+        return false;
+
+    if (KFGRI != None && KFGRI.bTraderIsOpen && KFGRI.OpenedTrader != None
+        && KFGRI.GetTraderTimeRemaining() > TRADER_REFORM_REMAINING)
+    {
+        TDiff = Pawn.Location - KFGRI.OpenedTrader.Location;
+        if (TDiff.X * TDiff.X + TDiff.Y * TDiff.Y + TDiff.Z * TDiff.Z > TRADER_ROAM_RADIUS_SQ)
+        {
+            MoveTowardGoal(KFGRI.OpenedTrader, vect(0, 0, 0), true);
+            return true;
+        }
+        return false;
+    }
+
+    if (!IsAnchorValid(AssignedAnchor))
+        return false;
+
+    if (bIsGroupLeader)
+        return EvaluateLeaderMove();
+
+    return EvaluateFollowerMove();
 }
 
 // @STUB(M5c) @SYS-LOGIC-MOVEVAL legacy:KF2BotLogic.IsAnchorValid
