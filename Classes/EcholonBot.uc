@@ -593,9 +593,16 @@ Begin:
 // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.TacticalRetreat
 state TacticalRetreat
 {
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.TacticalRetreat.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        AbortMove();
+        bIsRetreating = true;
+        if (KPawn != None)
+        {
+            KPawn.SetSprinting(true);
+        }
+        SetTimer(ZED_COUNT_INTERVAL, true, 'CheckRetreatStatus');
     }
 
     // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.TacticalRetreat.EndState
