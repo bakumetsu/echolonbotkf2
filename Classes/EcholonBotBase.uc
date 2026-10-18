@@ -2453,9 +2453,41 @@ function RequestRerouteWithBlock(Vector BlockedPos)
 	}
 }
 
-// @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.IsDirClearCached
 final function bool IsDirClearCached(Vector Dest)
 {
+	local Vector X, Y, Z, Dir;
+	local Rotator R;
+	local float DX, DY;
+	local byte Bit;
+
+	R.Yaw = FormationYaw;
+	GetAxes(R, X, Y, Z);
+	Dir = Normal2D(Dest - Pawn.Location);
+	DX = Dir Dot X;
+	DY = Dir Dot Y;
+	if ((DX * DX) >= (DY * DY))
+	{
+		if (DX > 0.0)
+		{
+			Bit = 1;
+		}
+		else
+		{
+			Bit = 8;
+		}
+	}
+	else
+	{
+		if (DY > 0.0)
+		{
+			Bit = 4;
+		}
+		else
+		{
+			Bit = 2;
+		}
+	}
+	return (ScanMask & Bit) != 0;
 }
 
 final function bool IsRetreatSafe(Vector RetreatDest)
