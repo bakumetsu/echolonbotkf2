@@ -2539,9 +2539,16 @@ final function bool TryIssueSafeAnchor(Vector NewAnchor)
     return false;
 }
 
-// @STUB(M5a) @SYS-BASE-CQB legacy:KF2BotBase.ApplySquadCrouchHold
 final function ApplySquadCrouchHold()
 {
+	local bool bWant;
+
+	bWant = (SquadLeader != None) && SquadLeader.bSquadCrouchHold;
+	if (bWant != bHoldCrouching)
+	{
+		bHoldCrouching = bWant;
+		Pawn.ShouldCrouch(bWant);
+	}
 }
 
 final function ClearRankTimers()
