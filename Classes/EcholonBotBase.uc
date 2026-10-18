@@ -3019,9 +3019,26 @@ final function bool TryThrowGrenade(KFWeapon W, Actor CurEnemy)
 	return true;
 }
 
-// @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.SLGrenadeCheck
 function SLGrenadeCheck()
 {
+	local int I, Near;
+
+	if( (BotRank != SQUAD_LEADER) || (Pawn == None) || GrenadeSignal || (NextGrenadeSignalTime > WorldInfo.TimeSeconds) )
+	{
+		return;
+	}
+	for( I = 0; I < SquadZedCount; I++ )
+	{
+		if( (SquadZedCache[I] != None) && (SquadZedCache[I].Health > 0)
+			&& (VSizeSq(SquadZedCache[I].Location - Pawn.Location) < 90000.0) )
+		{
+			Near++;
+		}
+	}
+	if( Near >= 3 )
+	{
+		SetTimer(0.07, false, 'SLGrenadeLOSPhase');
+	}
 }
 
 // @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.SLGrenadeLOSPhase
