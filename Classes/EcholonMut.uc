@@ -607,9 +607,27 @@ function NavigationPoint FindNearestChokepoint(Controller VIP)
 }
 
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.GetVIPController
 function Controller GetVIPController()
 {
+    local Controller C;
+
+    if (VIPController != None && !VIPController.bDeleteMe
+        && VIPController.Pawn != None && VIPController.Pawn.Health > 0)
+    {
+        return VIPController;
+    }
+
+    foreach WorldInfo.AllControllers(class'Controller', C)
+    {
+        if (PlayerController(C) != None && C.Pawn != None && C.Pawn.Health > 0)
+        {
+            VIPController = C;
+            return VIPController;
+        }
+    }
+
+    VIPController = None;
+    return None;
 }
 
 // @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.FindBossPawn
