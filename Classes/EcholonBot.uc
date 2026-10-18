@@ -1031,9 +1031,9 @@ state GoShopping
         }
     }
 
-    // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.EnemyChanged
     function EnemyChanged()
     {
+        PickCombatStyle();
     }
 
     // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.PickStyle
