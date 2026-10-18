@@ -473,9 +473,20 @@ function HealSuccess()
     HealPacingEnd = WorldInfo.TimeSeconds + (20.0 + FRand() * 10.0);
 }
 
-// @STUB(M5c) @SYS-LOGIC-HEAL legacy:KF2BotLogic.VerifyWeapon
 function VerifyWeapon()
 {
+    if (Pawn == None)
+    {
+        return;
+    }
+    if (GetStateName() == 'HealingSelf' || GetStateName() == 'HealOther' || GetStateName() == 'HealRanged')
+    {
+        return;
+    }
+    if (KFWeap_HealerBase(Pawn.Weapon) != None)
+    {
+        Pawn.InvManager.SwitchToBestWeapon(true);
+    }
 }
 
 // @STUB(M5c) @SYS-LOGIC-HEAL legacy:KF2BotLogic.HealTimeOut
