@@ -1323,9 +1323,9 @@ state IsRagdolled
         }
     }
 
-    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.IsRagdolled.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
     }
 }
 
