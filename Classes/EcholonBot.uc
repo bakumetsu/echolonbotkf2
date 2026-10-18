@@ -429,9 +429,10 @@ state FightEnemy
         }
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.FinishedMove
     function FinishedMove()
     {
+        Pawn.ShouldCrouch(false);
+        PickCombatStyle();
     }
 
     // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.PickStyle
