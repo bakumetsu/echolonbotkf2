@@ -3881,9 +3881,12 @@ function StartLtHumanBounding()
     SetTimer(FRand() * HUMAN_BOUND_INTERVAL, false, 'BeginLtHumanBounding');
 }
 
-// @STUB(M5b) @SYS-BASE-LTBOUND legacy:KF2BotBase.BeginLtHumanBounding
 function BeginLtHumanBounding()
 {
+    if (BotRank == LIEUTENANT)
+    {
+        SetTimer(HUMAN_BOUND_INTERVAL, true, 'LtHumanBoundLoop');
+    }
 }
 
 // @STUB(M5b) @SYS-BASE-LTBOUND legacy:KF2BotBase.LtHumanBoundLoop
