@@ -3221,9 +3221,20 @@ function OnGruntGrabbed(EcholonBot GruntBot)
         N2.BeginRescue(grabLoc, grabber);
 }
 
-// @STUB(M5a) @SYS-BASE-GRUNT legacy:KF2BotBase.BeginRescue
 function BeginRescue(vector GrabLoc, Pawn Grabber)
 {
+    if (Pawn == None || IsGruntCombatLocked())
+        return;
+
+    RescueLoc = GrabLoc;
+    RescueUntil = WorldInfo.TimeSeconds + RESCUE_DURATION;
+    IssueCommand('CMD_FocusTarget', GrabLoc);
+
+    if (IsHostileZed(Grabber))
+    {
+        SetEnemy(Grabber);
+        GruntEnterCombat(Grabber);
+    }
 }
 
 // @STUB(M5a) @SYS-BASE-CQB legacy:KF2BotBase.UpdateCoverCrouch
