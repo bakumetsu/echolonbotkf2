@@ -494,9 +494,19 @@ function HealTimeOut()
     PickCombatStyle();
 }
 
-// @STUB(M5c) @SYS-LOGIC-GRUNTMOVE legacy:KF2BotLogic.ConsumePathToken
 function bool ConsumePathToken()
 {
+    if (WorldInfo.TimeSeconds > PathTokenResetTime)
+    {
+        PathTokensUsed = 0;
+        PathTokenResetTime = WorldInfo.TimeSeconds + 1.0;
+    }
+    if (PathTokensUsed >= 10)
+    {
+        return false;
+    }
+    PathTokensUsed++;
+    return true;
 }
 
 // @STUB(M5c) @SYS-LOGIC-WATCHDOG legacy:KF2BotLogic.GruntDecisionTimer
