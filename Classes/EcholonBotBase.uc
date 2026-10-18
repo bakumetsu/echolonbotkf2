@@ -2527,9 +2527,16 @@ final function HoldAndCrouch()
 	SetSquadCrouchHold();
 }
 
-// @STUB(M5a) @SYS-BASE-CQB legacy:KF2BotBase.TryIssueSafeAnchor
 final function bool TryIssueSafeAnchor(Vector NewAnchor)
 {
+    if ((Pawn != None) && IsDirClearCached(NewAnchor))
+    {
+        bSquadCrouchHold = false;
+        IssueCommand('CMD_HoldArea', NewAnchor);
+        return true;
+    }
+    SetSquadCrouchHold();
+    return false;
 }
 
 // @STUB(M5a) @SYS-BASE-CQB legacy:KF2BotBase.ApplySquadCrouchHold
