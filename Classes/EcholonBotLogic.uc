@@ -459,9 +459,11 @@ function bool CanAffordHeal(int Type)
     return (RangeMedicGun != None) && (RangeMedicGun.AmmoCount[1] >= 50.0);
 }
 
-// @STUB(M5c) @SYS-LOGIC-HEAL legacy:KF2BotLogic.HealFail
 function HealFail()
 {
+    FailStreak++;
+    HealRetryAfter = WorldInfo.TimeSeconds + FMin(4.0 * FailStreak, 20.0);
+    PendingHeal = None;
 }
 
 // @STUB(M5c) @SYS-LOGIC-HEAL legacy:KF2BotLogic.HealSuccess
