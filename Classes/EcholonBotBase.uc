@@ -3425,9 +3425,60 @@ final function bool IsReloading()
     return (W != None && W.IsInState('Reloading'));
 }
 
-// @STUB(M5a) @SYS-BASE-RELOAD legacy:KF2BotBase.HandleReloadDrift
 function HandleReloadDrift()
 {
+    local int i, reloadingCount;
+    local float now;
+    local vector dir;
+    local EcholonBot Grunt;
+
+    if (Pawn == None)
+        return;
+    if (CurrentOrder == 'CMD_PushAnchor' || CurrentOrder == 'CMD_TacticalRetreat')
+        return;
+
+    now = WorldInfo.TimeSeconds;
+
+    for (i = 0; i < 4; i++)
+    {
+        Grunt = SquadMembers[i];
+        if (Grunt != None && Grunt.Pawn != None && Grunt.IsReloading())
+        {
+            reloadingCount++;
+        }
+    }
+    if (reloadingCount < 2)
+        return;
+
+    if (now - ReloadPullStamp > 0.75)
+    {
+        if (Enemy != None)
+            dir = Enemy.Location - Pawn.Location;
+        else
+            dir = vector(Pawn.Rotation);
+        dir.Z = 0.0;
+        if (VSizeSq(dir) < 1.0)
+            dir = vect(1, 0, 0);
+        dir = Normal(dir);
+
+        ReloadPullAnchor = Pawn.Location - (dir * RELOAD_DRIFT_DIST);
+        bReloadPullClear = FastTrace(ReloadPullAnchor, Pawn.Location);
+
+        if (bReloadPullClear)
+        {
+            HoldAreaAnchor = ReloadPullAnchor;
+            IssueCommand('CMD_HoldArea', ReloadPullAnchor);
+        }
+    }
+    ReloadPullStamp = now;
+
+    for (i = 0; i < 4; i++)
+    {
+        if (SquadMembers[i] != None && SquadMembers[i].Pawn != None)
+        {
+            SquadMembers[i].ReceiveReloadDrift(ReloadPullAnchor, bReloadPullClear, RELOAD_DRIFT_LEASE);
+        }
+    }
 }
 
 // @STUB(M5a) @SYS-BASE-RELOAD legacy:KF2BotBase.ReceiveReloadDrift
