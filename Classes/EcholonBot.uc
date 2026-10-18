@@ -1016,7 +1016,7 @@ state GoShopping
         {
             KPawn.SetSprinting(true);
         }
-        SetTimer(0.4 + FRand() * 0.25, true, 'DoTrading');
+        SetTimer(0.4 + FRand() * 0.25, true);  // default 'Timer': this state's Timer() walks to the trader
         TraderRetryCount = 0;
     }
 
@@ -1057,6 +1057,7 @@ state GoShopping
         else
         {
             AbortMove();
+            SetTimer(0.0, false);  // stop the repeating Timer before the backoff retry
             ++TraderRetryCount;
             if (TraderRetryCount >= TRADER_MAX_RETRIES)
             {
@@ -1132,7 +1133,7 @@ state GetItem
         KPawn.SetSprinting(Enemy == None);
         if ((Enemy != None) && LineOfSightTo(Enemy))
         {
-            SetTimer(0.1 + FRand() * 0.15, true, 'FireWeaponAt');
+            SetTimer(0.1 + FRand() * 0.15, true);  // default 'Timer', as legacy
         }
     }
 
