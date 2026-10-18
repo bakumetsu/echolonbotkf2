@@ -1079,9 +1079,49 @@ function bool EvaluateLeaderMove()
     return MoveTowardGoal(AssignedAnchor, vect(0,0,0), true);
 }
 
-// @STUB(M5c) @SYS-LOGIC-MOVEVAL legacy:KF2BotLogic.EvaluateFollowerMove
 function bool EvaluateFollowerMove()
 {
+    local EcholonBot Leader;
+    local vector FormationGoal;
+
+    Leader = mut.GetGroupLeader(GroupID);
+
+    if (Leader == None || Leader.Pawn == None || Leader.Pawn.Health <= 0)
+    {
+        bHasHoldPosition = false;
+        return MoveTowardGoal(AssignedAnchor, vect(0,0,0), true);
+    }
+
+    if (Leader.bIsRetreating)
+    {
+        if (!bHasHoldPosition)
+        {
+            HoldPosition = Pawn.Location;
+            bHasHoldPosition = true;
+        }
+        if (VSizeSq(Pawn.Location - HoldPosition) > FOLLOWER_DRIFT_SQ)
+        {
+            return MoveTowardGoal(None, HoldPosition, false);
+        }
+        Pawn.Acceleration = vect(0.0, 0.0, 0.0);
+        return false;
+    }
+    bHasHoldPosition = false;
+
+    if (Leader.bIsStuck)
+    {
+        return MoveTowardGoal(AssignedAnchor, vect(0,0,0), true);
+    }
+
+    if (bEnableAdvancedLocomotion)
+    {
+        FollowStart(Leader);
+        `log("[FollowNav] EcholonBot: FollowStart issued; leaderGroup=" $ string(Leader.GroupID) $ " slot=" $ string(FollowSlotIndex) $ "/" $ string(FollowSlotCount));
+        return true;
+    }
+
+    FormationGoal = ComputeFormationOffset(Leader, Leader.bSingleFileFormation);
+    return MoveTowardGoal(None, FormationGoal, false);
 }
 
 // @STUB(M5c) @SYS-LOGIC-MOVEVAL legacy:KF2BotLogic.MoveTowardGoal
