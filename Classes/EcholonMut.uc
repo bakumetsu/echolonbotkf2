@@ -572,9 +572,16 @@ function PropagateAnchorToFollowers(int GroupIdx)
     }
 }
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.FindNearestNavPoint
 function NavigationPoint FindNearestNavPoint(vector ProjectedLoc, float SearchRadius)
 {
+    local NavigationPoint FoundNav;
+
+    foreach WorldInfo.RadiusNavigationPoints(class'NavigationPoint', FoundNav, ProjectedLoc, SearchRadius)
+    {
+        return FoundNav;
+    }
+
+    return None;
 }
 
 // @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.FindNearestChokepoint
