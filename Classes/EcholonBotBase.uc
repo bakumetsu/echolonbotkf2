@@ -3067,9 +3067,51 @@ function OnBreakLoseComplete()
     RescueUntil = 0.0;
 }
 
-// @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.UpdateSectorWatch
 function UpdateSectorWatch()
 {
+    local float now, dt;
+    local int baseYaw, scanOffset;
+    local Rotator R;
+
+    if (Pawn == None)
+        return;
+
+    now = WorldInfo.TimeSeconds;
+
+    ApplyCrouch(true);
+
+    if ((Enemy != None && Enemy.IsAliveAndWell()) || now < NoiseGlanceUntil)
+    {
+        SectorLastTime = now;
+        return;
+    }
+
+    if (SquadLeader != None && SquadLeader.Pawn != None && SquadLeader.Pawn.IsAliveAndWell())
+    {
+        LastValidSquadLeaderYaw = SquadLeader.Pawn.Rotation.Yaw;
+    }
+    else if (LastValidSquadLeaderYaw == 0)
+    {
+        LastValidSquadLeaderYaw = Pawn.Rotation.Yaw;
+    }
+
+    dt = now - SectorLastTime;
+    SectorLastTime = now;
+    if (dt > 0.5)
+        dt = 0.2;
+
+    SectorScanPhase += dt * SW_SCAN_OMEGA * PanicScanSpeedMultiplier;
+    if (SectorScanPhase > SW_TWO_PI)
+        SectorScanPhase -= SW_TWO_PI;
+
+    baseYaw = LastValidSquadLeaderYaw + (OverwatchSlot * 16384);
+    scanOffset = int(SW_SCAN_AMP_DEG * PanicScanSpeedMultiplier * Sin(SectorScanPhase + (float(OverwatchSlot) * 0.7853982)) * SW_DEG_TO_URU);
+
+    R.Pitch = 0;
+    R.Roll = 0;
+    R.Yaw = (baseYaw + scanOffset) & 65535;
+
+    SetFocalPoint(Pawn.Location + (vector(R) * 512.0));
 }
 
 // @STUB(M5a) @SYS-BASE-CQB legacy:KF2BotBase.HandleCQBProximity
