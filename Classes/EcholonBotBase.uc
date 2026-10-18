@@ -3041,9 +3041,44 @@ function SLGrenadeCheck()
 	}
 }
 
-// @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.SLGrenadeLOSPhase
 function SLGrenadeLOSPhase()
 {
+	local int I, Traces, NoLOS, Near;
+	local Pawn Z, Pick;
+
+	if (BotRank != SQUAD_LEADER || Pawn == None)
+	{
+		return;
+	}
+	for (I = 0; I < SquadZedCount; I++)
+	{
+		Z = SquadZedCache[I];
+		if (Z == None || Z.Health <= 0 || VSizeSq(Z.Location - Pawn.Location) >= 90000.0)
+		{
+			continue;
+		}
+		Near++;
+		if (Traces < 3)
+		{
+			Traces++;
+			if (!FastTrace(Z.Location, Pawn.Location))
+			{
+				NoLOS++;
+				if (Pick == None)
+				{
+					Pick = Z;
+				}
+			}
+		}
+	}
+	if (Near >= 3 && NoLOS >= 2)
+	{
+		GrenadeSignal = true;
+		GrenadeThrowsLeft = 2;
+		GrenadeTargetPawn = Pick;
+		NextGrenadeSignalTime = WorldInfo.TimeSeconds + 6.0;
+		SetTimer(2.0, false, 'ClearGrenadeSignal');
+	}
 }
 
 // @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.ClearGrenadeSignal
