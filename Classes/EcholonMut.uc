@@ -1233,9 +1233,53 @@ function CheckWave()
     EvaluateSquadPhase();
 }
 
-// @STUB(M4) @SYS-MUT-WAVE legacy:KF2BotsMut.SetHoldObjective
 final function SetHoldObjective(Volume V)
 {
+    local NavigationPoint N;
+    local NavigationPoint GP;
+    local int i;
+
+    ValidPoints.Length = 0;
+    foreach WorldInfo.AllNavigationPoints(Class'Engine.NavigationPoint', N)
+    {
+        if (V.Encompasses(N))
+        {
+            ValidPoints.AddItem(N);
+        }
+    }
+    bObjectiveActive = ValidPoints.Length != 0;
+
+    if (bObjectiveActive)
+    {
+        EnsureSquadOrderTable();
+        for (i = 0; i < SquadOrders.Length; i++)
+        {
+            SquadOrders[i].Zone = HoldVolume;
+            SquadOrders[i].SquadID = i + 1;
+            SquadOrders[i].NodeBlacklist.Length = 0;
+            SquadOrders[i].ObjectiveBailUntil = 0.0;
+            if (SquadOrders[i].Leader != None && SquadOrders[i].Leader.Pawn != None)
+            {
+                GP = NearestValidPoint(SquadOrders[i].Leader.Pawn.Location);
+                if (GP != None)
+                {
+                    SquadOrders[i].GoalNav = GP;
+                    SquadOrders[i].GoalPoint = GP.Location;
+                    SquadOrders[i].Phase = PHASE_ENROUTE;
+                    SquadOrders[i].StartTime = WorldInfo.TimeSeconds;
+                    SquadOrders[i].SquadSeedAngle = FRand() * 6.2831855;
+                    EchelonLog("ORDER_CREATED squad=" $ string(i + 1) $ " goal=" $ CoordStr(SquadOrders[i].GoalPoint));
+                    SampleSquadSlots(i);
+                }
+            }
+            else
+            {
+                SquadOrders[i].GoalNav = None;
+                SquadOrders[i].GoalPoint = vect(0, 0, 0);
+                SquadOrders[i].Phase = PHASE_IDLE;
+            }
+        }
+    }
 }
 
 // @STUB(M4) @SYS-MUT-WAVE legacy:KF2BotsMut.EndObjective
