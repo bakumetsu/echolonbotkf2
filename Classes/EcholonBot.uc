@@ -794,9 +794,9 @@ state Hunting
         PickCombatStyle();
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting.EnemyChanged
     function EnemyChanged()
     {
+        PickCombatStyle();
     }
 
     // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting.Timer
