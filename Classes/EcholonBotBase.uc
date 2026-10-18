@@ -1844,29 +1844,123 @@ final function bool AreZedsNear(vector Loc, bool bRequireCanSee, float CheckRadi
     return false;
 }
 
-// @STUB(M3) @SYS-BASE-ZEDS legacy:KF2BotBase.HeavyZedWithin
 final function bool HeavyZedWithin(float Radius)
 {
+    local KFPawn_Monster Z;
+
+    if (Pawn == None)
+    {
+        return false;
+    }
+
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', Z, Pawn.Location, Radius)
+    {
+        if (Z == None || !Z.IsAliveAndWell())
+        {
+            continue;
+        }
+
+        if (Z.bLargeZed || Z.Class == class'KFPawn_ZedSiren')
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
-// @STUB(M3) @SYS-BASE-ZEDS legacy:KF2BotBase.ShouldTacticalRetreat
 final function bool ShouldTacticalRetreat()
 {
+	if (Pawn == None)
+		return false;
+
+	if (WorldInfo.TimeSeconds - LastZedCountTime >= ZED_COUNT_INTERVAL)
+	{
+		LastZedCountTime = WorldInfo.TimeSeconds;
+		CachedZedCount = CountNearbyZeds(RETREAT_ZED_RADIUS);
+		bCachedHeavyZed = HeavyZedWithin(RETREAT_HEAVY_RADIUS);
+	}
+
+	return (CachedZedCount >= RETREAT_ZED_TRIGGER_COUNT) || bCachedHeavyZed || ExceedsRetreatZedCount();
 }
 
-// @STUB(M3) @SYS-BASE-FIRE legacy:KF2BotBase.IsMeleeOnly
 final function bool IsMeleeOnly()
 {
+    if (Pawn == None)
+        return false;
+
+    if (Pawn.Weapon != None)
+        return Pawn.Weapon.bMeleeWeapon;
+    else
+        return !Pawn.HasRangedAttack();
 }
 
-// @STUB(M3) @SYS-BASE-OBJ legacy:KF2BotBase.CheckObjectiveHazard
 final function bool CheckObjectiveHazard()
 {
+    local KFPawn_Monster P;
+
+    if (Pawn == None)
+        return false;
+
+    // Siren check: engage a nearby Siren before pushing further into the
+    // objective corridor.
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', P, Pawn.Location, SIREN_CHECK_RADIUS)
+    {
+        if (P == None || !P.IsAliveAndWell())
+            continue;
+        if (P.Class == class'KFPawn_ZedSiren' && FastTrace(Pawn.Location, P.Location))
+        {
+            SetEnemy(P, true);
+            GotoState('FightEnemy');
+            return true;
+        }
+    }
+
+    if (!AreZedsNear(Pawn.Location, false, OBJECTIVE_HAZARD_RADIUS, OBJECTIVE_HAZARD_ZED_COUNT))
+    {
+        return false;
+    }
+
+    // Dense crowd in the approach corridor: fight through it first.
+    if (Enemy == None || !Enemy.IsAliveAndWell())
+    {
+        PickNextEnemy();
+    }
+    if (Enemy != None && Enemy.IsAliveAndWell())
+    {
+        GotoState('FightEnemy');
+        return true;
+    }
+
+    // Zeds are near but nothing is targetable yet -- hold this call.
+    Focus = None;
+    SetFocalPoint(Pawn.Location + (VRand() * 300.0));
+    return true;
 }
 
-// @STUB(M3) @SYS-BASE-OBJ legacy:KF2BotBase.ForceBreakGrapple
 final function ForceBreakGrapple()
 {
+    local KFPawn GrabbingZed;
+
+    if (KPawn == None)
+    {
+        return;
+    }
+
+    GrabbingZed = KPawn.InteractionPawn;
+
+    if (mut != None && mut.bDebugGrapple)
+    {
+        mut.DebugMessage(GetHumanReadableName() $ " grapple failsafe triggered after " $ string(int(WorldInfo.TimeSeconds - GrabStartTime)) $ "s - forcing a break free.");
+    }
+
+    if (GrabbingZed != None)
+    {
+        GrabbingZed.TakeDamage(150, self, GrabbingZed.Location, vect(0, 0, 0), Class'Engine.DamageType');
+        GrabbingZed.EndSpecialMove();
+    }
+
+    KPawn.EndSpecialMove();
+    KPawn.InteractionPawn = None;
 }
 
 // @STUB(M5b) @SYS-BASE-HEALQ legacy:KF2BotBase.IsBotAlive
@@ -1889,19 +1983,48 @@ function bool ShouldAbortRetreat()
 {
 }
 
-// @STUB(M3) @SYS-BASE-OBJ legacy:KF2BotBase.GetObjectiveLocation
 function vector GetObjectiveLocation()
 {
+    local vector ObjLoc;
+
+    ObjLoc = vect(0, 0, 0);
+
+    if (mut != None)
+    {
+        ObjLoc = mut.GetObjectiveLocation();
+        if (VSizeSq(ObjLoc) > 1.0)
+        {
+            return ObjLoc;
+        }
+    }
+
+    if (Pawn != None)
+    {
+        return Pawn.Location;
+    }
+
+    return vect(0, 0, 0);
 }
 
-// @STUB(M3) @SYS-BASE-OBJ legacy:KF2BotBase.IsBossWaveActive
 function bool IsBossWaveActive()
 {
+    local KFGameReplicationInfo GRI;
+
+    GRI = KFGameReplicationInfo(WorldInfo.GRI);
+    return (GRI != None && GRI.IsBossWave());
 }
 
-// @STUB(M3) @SYS-BASE-BOOT legacy:KF2BotBase.EchelonLog
 function EchelonLog(string Msg)
 {
+	if (WorldInfo == None)
+	{
+		return;
+	}
+	if (!AuditRateLimit(Msg))
+	{
+		return;
+	}
+	`log("[EcholonAudit] " $ Name $ " " $ Msg);
 }
 
 // @STUB(M5b) @SYS-BASE-AUDIT legacy:KF2BotBase.AuditRateLimit
@@ -1931,14 +2054,48 @@ function AuditGoalLog(string Op, string Src)
 {
 }
 
-// @STUB(M3) @SYS-BASE-RANK legacy:KF2BotBase.IssueCommand
 function IssueCommand(name Cmd, Vector Anchor)
 {
+    CurrentOrder = Cmd;
+    OrderAnchor = Anchor;
+    EchelonLog("IssueCommand: " $ Cmd);
 }
 
-// @STUB(M3) @SYS-BASE-RANK legacy:KF2BotBase.SLDecisionLoop
 function SLDecisionLoop()
 {
+    local Vector RetreatDest;
+    local Rotator R;
+    local Vector Fwd, Rgt, Up;
+
+    bSLLoopSuspended = (Pawn == None || Pawn.Health <= 0
+                        || IsInState('BreakLose') || IsInState('IsRagdolled') || IsInState('Dead'));
+    if (bSLLoopSuspended)
+        return;
+
+    ScanRoomForFormation();
+    RefreshSquadZedCache();
+    SLGrenadeCheck();
+    CheckWeaponReequip();
+    UpdateOverwatchTimer();
+    CheckOverwatchStall();
+    UpdatePanicBroadcast();
+    HandleReloadDrift();
+    UpdateWedgeMode();
+    UpdateHoldAreaDrift();
+
+    if (ShouldTacticalRetreat() || ExceedsRetreatZedCount())
+    {
+        R.Yaw = Pawn.Rotation.Yaw;
+        GetAxes(R, Fwd, Rgt, Up);
+        RetreatDest = Pawn.Location - (Fwd * 300.0);
+        if (!IsRetreatSafe(RetreatDest))
+        {
+            HoldAndCrouch();
+            return;
+        }
+        IssueCommand('CMD_TacticalRetreat', RetreatDest);
+        return;
+    }
 }
 
 // @STUB(M3) @SYS-BASE-RANK legacy:KF2BotBase.LTDispatchLoop
