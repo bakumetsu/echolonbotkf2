@@ -271,9 +271,94 @@ function PollWaveStart()
     }
 }
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.InitializePlatoon
 function InitializePlatoon()
 {
+    local int i, GroupCount, GroupIdx;
+    local EcholonBot Bot;
+
+    PruneInvalidBots();
+    ShuffleActiveBots();
+
+    if (ActiveBots.Length == 0)
+        return;
+
+    for (GroupIdx = 0; GroupIdx < Fireteams.Length; GroupIdx++)
+    {
+        for (i = Fireteams[GroupIdx].Members.Length - 1; i >= 0; i--)
+        {
+            if (Fireteams[GroupIdx].Members[i] == None
+                || Fireteams[GroupIdx].Members[i].bDeleteMe
+                || Fireteams[GroupIdx].Members[i].Pawn == None
+                || Fireteams[GroupIdx].Members[i].Pawn.Health <= 0)
+            {
+                Fireteams[GroupIdx].Members.Remove(i, 1);
+            }
+        }
+    }
+
+    GroupCount = DetermineGroupCount(ActiveBots.Length);
+    NumGroups = GroupCount;
+
+    Fireteams.Length = 0;
+    Fireteams.Length = GroupCount;
+
+    for (i = 0; i < ActiveBots.Length; i++)
+    {
+        Bot = ActiveBots[i];
+        if (Bot == None)
+            continue;
+
+        GroupIdx = i % GroupCount;
+        Bot.GroupID = GroupIdx + 1;
+        Bot.bIsGroupLeader = false;
+        Fireteams[GroupIdx].Members.AddItem(Bot);
+    }
+
+    for (GroupIdx = 0; GroupIdx < GroupCount; GroupIdx++)
+    {
+        if (Fireteams[GroupIdx].Members.Length > 0)
+        {
+            Fireteams[GroupIdx].Leader = Fireteams[GroupIdx].Members[0];
+            Fireteams[GroupIdx].Leader.bIsGroupLeader = true;
+            Fireteams[GroupIdx].Leader.BotRank = SQUAD_LEADER;
+        }
+    }
+
+    for (i = 0; i < ActiveBots.Length; i++)
+    {
+        Bot = ActiveBots[i];
+        if (Bot == None)
+            continue;
+        if (Bot.bIsGroupLeader)
+            continue;
+        Bot.BotRank = GRUNT;
+    }
+
+    for (i = 0; i < ActiveBots.Length; i++)
+    {
+        Bot = ActiveBots[i];
+        if (Bot == None)
+            continue;
+        if (Bot.bIsAlphaCommander)
+            Bot.BotRank = LIEUTENANT;
+        else if (Bot == VIPController)
+            Bot.BotRank = CAPTAIN;
+    }
+
+    SyncSquadLeaders();
+
+    for (i = 0; i < ActiveBots.Length; i++)
+    {
+        Bot = ActiveBots[i];
+        if (Bot == None)
+            continue;
+        InitBotCharacter(Bot);
+        Bot.RefreshRoleNameTag();
+    }
+
+    UpdateMacroWaypoints();
+    if (!IsTimerActive('UpdateMacroWaypoints'))
+        SetTimer(MACRO_WAYPOINT_INTERVAL, true, 'UpdateMacroWaypoints');
 }
 
 // @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.SyncSquadLeaders
