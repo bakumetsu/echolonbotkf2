@@ -790,9 +790,11 @@ function ProcessPromotionQueue()
     }
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.PromoteBot
 function PromoteBot(EcholonBot Bot, EBotRank NewRank)
 {
+    if (Bot == None)
+        return;
+    Bot.BotRank = NewRank;
 }
 
 // @STUB(M4) @SYS-MUT-HEALCOOL legacy:KF2BotsMut.RegisterRangedHealTarget
