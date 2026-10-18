@@ -226,9 +226,17 @@ final function bool ShouldNadeEnemies()
     return true;
 }
 
-// @STUB(M5c) @SYS-LOGIC-GRUNTMOVE legacy:KF2BotLogic.CheckGrabbed
 function CheckGrabbed()
 {
+    if ( (KPawn != None && KPawn.Health > 0 && KPawn.IsDoingSpecialMove(31)) && KPawn.InteractionPawn != None )
+    {
+        GotoState('BreakLose');
+        return;
+    }
+    if (BotRank == GRUNT)
+    {
+        UpdateGruntOffset();
+    }
 }
 
 // @STUB(M5c) @SYS-LOGIC-GRUNTMOVE legacy:KF2BotLogic.UpdateGruntOffset
