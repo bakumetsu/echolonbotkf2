@@ -924,9 +924,20 @@ event NotifyJumpApex()
     Pawn.DoJump(false);
 }
 
-// @STUB(M5c) @SYS-LOGIC-UTIL legacy:KF2BotLogic.GetAIInfo
 function string GetAIInfo()
 {
+    local string S, PawnState, PawnHealth;
+
+    PawnState = "None";
+    PawnHealth = "0";
+    if (Pawn != None)
+    {
+        PawnState = string(Pawn.GetStateName());
+        PawnHealth = string(Pawn.Health);
+    }
+
+    S = "State:" $ string(GetStateName()) $ " MoveType:" $ string(MoveFlags) $ " AdjustMove:" $ string(bAdjusting) $ " MoveTarget:" $ string(MoveTarget) $ " Pawn:" $ string(Pawn) $ " Pawn.State:" $ PawnState $ " Pawn.Health:" $ PawnHealth;
+    return S;
 }
 
 // @STUB(M5c) @SYS-LOGIC-DEATH legacy:KF2BotLogic.ReplicatedEvent
