@@ -209,6 +209,8 @@ state PickNextMove
     }
 
 Begin:
+    Sleep(0.0);
+    PickMove();
     Stop;
 }
 
@@ -792,6 +794,11 @@ state FightEnemy
     }
 
 Begin:
+    if (Pawn.Physics == PHYS_Falling)
+    {
+        WaitForLanding(2.0);  // W4: bounded, as in the other states
+    }
+    PickStyle();
     Stop;
 }
 
