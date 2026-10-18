@@ -178,7 +178,6 @@ function PostBeginPlay()
     }
 
     SetTimer(WAVE_POLL_INTERVAL, true, 'PollWaveStart');
-    SetTimer(3.0, true, 'RebuildHierarchy');
     SetTimer(3.0, true, 'CacheHumans');
 }
 
