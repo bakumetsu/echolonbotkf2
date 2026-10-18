@@ -1557,9 +1557,16 @@ function EcholonBot GetFollowerBySlot(int GroupIdx, int SlotIdx)
     return None;
 }
 
-// @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.GetSquadPhase
 function int GetSquadPhase(EcholonBot B)
 {
+    local int GroupIdx;
+
+    if (B == None)
+        return 0;
+    GroupIdx = B.GroupID - 1;
+    if (GroupIdx < 0 || GroupIdx >= SquadOrders.Length)
+        return 0;
+    return SquadOrders[GroupIdx].Phase;
 }
 
 // @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.IsSquadInObjectivePhase
