@@ -196,24 +196,63 @@ function AddMutator(Mutator M)
     }
 }
 
-// @STUB(M1) @SYS-MUT-BOOT legacy:KF2BotsMut.MatchStarting
 function MatchStarting()
 {
+    local byte I;
+
+    if (WorldInfo.NetMode == NM_Standalone)
+    {
+        for (I = 0; I < NumBots; ++I)
+        {
+            AddBot();
+        }
+    }
+    else
+    {
+        SetTimer(1.0, true);
+    }
+    SetTimer(0.1, true, 'CheckWave');
 }
 
-// @STUB(M1) @SYS-MUT-BOOT legacy:KF2BotsMut.Timer
 function Timer()
 {
+    if (KF.MyKFGRI.bMatchIsOver)
+    {
+        return;
+    }
+
+    if ((KF.NumPlayers + KF.NumBots) < NumBots || KF.NumBots < MinimumBots)
+    {
+        AddBot();
+    }
+    else if ((KF.NumPlayers + KF.NumBots) > NumBots && KF.NumBots > 0 && KF.NumBots > MinimumBots)
+    {
+        RemoveBot();
+    }
 }
 
-// @STUB(M1) @SYS-MUT-SPAWN legacy:KF2BotsMut.RegisterBot
 function RegisterBot(EcholonBot NewBot)
 {
+    if (NewBot == None)
+        return;
+    if (ActiveBots.Find(NewBot) == INDEX_NONE)
+        ActiveBots.AddItem(NewBot);
+    NewBot.mut = self;
+    NewBot.WdLastHubContactTime = WorldInfo.TimeSeconds;
 }
 
-// @STUB(M1) @SYS-MUT-SPAWN legacy:KF2BotsMut.UnregisterBot
 function UnregisterBot(EcholonBot LeavingBot)
 {
+    local int Idx;
+
+    if (LeavingBot == None)
+        return;
+
+    Idx = ActiveBots.Find(LeavingBot);
+    if (Idx != INDEX_NONE)
+        ActiveBots.Remove(Idx, 1);
+
+    HandleFireteamCasualty(LeavingBot);
 }
 
 // @STUB(M4) @SYS-MUT-WAVE legacy:KF2BotsMut.PollWaveStart
@@ -381,9 +420,30 @@ function int GetFollowerIndex(EcholonBot Bot)
 {
 }
 
-// @STUB(M1) @SYS-MUT-UTIL legacy:KF2BotsMut.BroadcastSpottedEnemy
 function BroadcastSpottedEnemy(int GroupID, Pawn Spotted)
 {
+    local int GroupIdx, i;
+    local EcholonBot Member;
+
+    if (Spotted == None || !Spotted.IsAliveAndWell())
+        return;
+
+    GroupIdx = GroupID - 1;
+    if (GroupIdx < 0 || GroupIdx >= Fireteams.Length)
+        return;
+
+    for (i = 0; i < Fireteams[GroupIdx].Members.Length; i++)
+    {
+        Member = Fireteams[GroupIdx].Members[i];
+        if (Member == None || Member.bIsGroupLeader)
+            continue;
+        if (Member.Pawn == None || Member.Pawn.Health <= 0)
+            continue;
+        if (Member.Enemy != None && Member.Enemy.IsAliveAndWell())
+            continue;
+
+        Member.SetEnemy(Spotted, true);
+    }
 }
 
 // @STUB(M4) @SYS-MUT-WAVE legacy:KF2BotsMut.CheckWave
