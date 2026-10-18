@@ -1089,60 +1089,402 @@ function FollowNotifyHub(EFollowStatus NewStatus)
     }
 }
 
-// @STUB(M3) @SYS-BASE-MOVE legacy:KF2BotBase.FollowOnGaveUp
 function FollowOnGaveUp()
 {
-    // PASS-THROUGH: overrides EcholonFollowNavBase; keep the engine behaviour until the real port lands.
-    super.FollowOnGaveUp();
+    `log("[FollowNav] EcholonBot: follow retry ladder exhausted; hub will re-decide via PickNextMove");
 }
 
-// @STUB(M3) @SYS-BASE-MOVE legacy:KF2BotBase.Tick
 function Tick(float Delta)
 {
-    // PASS-THROUGH: overrides Actor; keep the engine behaviour until the real port lands.
-    super.Tick(Delta);
+    local KFPawn_Monster MonCheck;
+
+    if (Pawn == None)
+    {
+        return;
+    }
+
+    // Follow-combat escape: route to combat when a Zed has LOS while tethered
+    if (IsInState('FollowingLeader') || IsInState('FollowingLeaderBasic'))
+    {
+        MonCheck = KFPawn_Monster(Enemy);
+        if (Enemy != None && Enemy.IsAliveAndWell()
+            && !(MonCheck != None && MonCheck.bIsHeadless)
+            && (WorldInfo.TimeSeconds - LastFollowEscapeTime >= FOLLOW_ESCAPE_COOLDOWN))
+        {
+            LastFollowEscapeTime = WorldInfo.TimeSeconds;
+            if (LineOfSightTo(Enemy))
+            {
+                GotoState('FightEnemy');
+            }
+            else
+            {
+                GotoState('Hunting');
+            }
+            return;
+        }
+    }
+
+    // Global zed count refresh (throttled)
+    if (WorldInfo.TimeSeconds - LastGlobalZedCountTime >= GLOBAL_ZED_COUNT_INTERVAL)
+    {
+        LastGlobalZedCountTime = WorldInfo.TimeSeconds;
+        GlobalZedCount = CountNearbyZeds(GLOBAL_ZED_RADIUS);
+    }
+
+    // Adjusting movement
+    if (bAdjusting)
+    {
+        if (VSizeSq2D(AdjustPosition.Position - Pawn.Location) < 2500.0)
+        {
+            StopAdjusting();
+        }
+        else
+        {
+            Pawn.Acceleration = Normal(AdjustPosition.Position - Pawn.Location) * 2000.0;
+        }
+    }
+
+    // Move processing
+    if (MoveFlags != 0)
+    {
+        if (EndMoveTime < WorldInfo.TimeSeconds)
+        {
+            if (MoveFlags == 2)
+            {
+                if (LastFailedMove != NavigationPoint(MoveTarget))
+                {
+                    LastFailedMove = NavigationPoint(MoveTarget);
+                    FailedMoveCount = 0;
+                }
+                else
+                {
+                    if (LastFailedMove != None && ++FailedMoveCount > 5)
+                    {
+                        TempBlockPath = LastFailedMove;
+                        TempBlockTime = WorldInfo.TimeSeconds + 30.0;
+                    }
+                }
+
+                if (CurrentPath != None)
+                {
+                    CheckBlockedPath(CurrentPath.Start, CurrentPath.GetEnd());
+                }
+                else
+                {
+                    if (LastFailedMove != None)
+                    {
+                        CheckBlockedPath(Pawn, LastFailedMove);
+                    }
+                }
+            }
+
+            Pawn.Acceleration = vect(0, 0, 0);
+            MoveFlags = 0;
+            FinishedMove();
+        }
+        else
+        {
+            if (VSizeSq(PrevMovePos - Pawn.Location) < 2500.0 * Delta)
+            {
+                if (WorldInfo.TimeSeconds - MovePauseTime > 0.5)
+                {
+                    Pawn.DoJump(false);
+                }
+            }
+            else
+            {
+                PrevMovePos = Pawn.Location;
+                MovePauseTime = WorldInfo.TimeSeconds;
+            }
+
+            if (!bAdjusting)
+            {
+                if (MoveFlags == 1)
+                {
+                    ProcessMoveTo();
+                }
+                else
+                {
+                    ProcessMoveToward();
+                }
+            }
+        }
+    }
 }
 
-// @STUB(M3) @SYS-BASE-PATH legacy:KF2BotBase.MarkDoorPath
 final function bool MarkDoorPath(KFDoorActor door)
 {
+    local int I;
+    local NavigationPoint N;
+
+    if (door.bIsDoorOpen || door.WeldIntegrity <= 0 || door.bAutomaticDoor)
+    {
+        return false;
+    }
+
+    N = NavigationPoint(MoveTarget);
+    if (N != None)
+    {
+        if (DoorPaths.Find('Path', N) >= 0)
+        {
+            return true;
+        }
+        if (((N.Location - Pawn.Location) Dot (door.Location - Pawn.Location)) < 0.0)
+        {
+            return false;
+        }
+        I = DoorPaths.Length;
+        DoorPaths.Length = I + 1;
+        DoorPaths[I].door = door;
+        DoorPaths[I].Path = N;
+    }
+    return true;
 }
 
-// @STUB(M3) @SYS-BASE-PATH legacy:KF2BotBase.BuildPathToward
 final function bool BuildPathToward(Actor Other)
 {
+    local int I;
+
+    I = DoorPaths.Length - 1;
+    while (I >= 0)
+    {
+        if ((DoorPaths[I].Path.bBlocked || DoorPaths[I].door.bIsDestroyed) || DoorPaths[I].door.bIsDoorOpen || DoorPaths[I].door.WeldIntegrity <= 0)
+        {
+            DoorPaths.Remove(I, 1);
+        }
+        else
+        {
+            DoorPaths[I].Path.bBlocked = true;
+        }
+        I--;
+    }
+
+    I = BotBlockRoutes.Length - 1;
+    while (I >= 0)
+    {
+        BotBlockRoutes[I].bBlocked = true;
+        I--;
+    }
+
+    if (TempBlockPath != None)
+    {
+        if (TempBlockTime < WorldInfo.TimeSeconds)
+        {
+            TempBlockPath = None;
+        }
+        else
+        {
+            TempBlockPath.bBlocked = true;
+        }
+    }
+
+    MoveTarget = FindPathToward(Other);
+
+    I = DoorPaths.Length - 1;
+    while (I >= 0)
+    {
+        DoorPaths[I].Path.bBlocked = false;
+        I--;
+    }
+
+    I = BotBlockRoutes.Length - 1;
+    while (I >= 0)
+    {
+        BotBlockRoutes[I].bBlocked = false;
+        I--;
+    }
+
+    if (TempBlockPath != None)
+    {
+        TempBlockPath.bBlocked = false;
+    }
+
+    return MoveTarget != None;
 }
 
-// @STUB(M3) @SYS-BASE-PATH legacy:KF2BotBase.BuildPathTo
 final function bool BuildPathTo(Vector Dest)
 {
+    local int I;
+
+    for (I = DoorPaths.Length - 1; I >= 0; I--)
+    {
+        if (DoorPaths[I].Path.bBlocked || DoorPaths[I].door.bIsDestroyed || DoorPaths[I].door.bIsDoorOpen || DoorPaths[I].door.WeldIntegrity <= 0)
+        {
+            DoorPaths.Remove(I, 1);
+        }
+        else
+        {
+            DoorPaths[I].Path.bBlocked = true;
+        }
+    }
+
+    for (I = BotBlockRoutes.Length - 1; I >= 0; I--)
+    {
+        BotBlockRoutes[I].bBlocked = true;
+    }
+
+    if (TempBlockPath != None)
+    {
+        if (TempBlockTime < WorldInfo.TimeSeconds)
+        {
+            TempBlockPath = None;
+        }
+        else
+        {
+            TempBlockPath.bBlocked = true;
+        }
+    }
+
+    MoveTarget = FindPathTo(Dest);
+
+    for (I = DoorPaths.Length - 1; I >= 0; I--)
+    {
+        DoorPaths[I].Path.bBlocked = false;
+    }
+
+    for (I = BotBlockRoutes.Length - 1; I >= 0; I--)
+    {
+        BotBlockRoutes[I].bBlocked = false;
+    }
+
+    if (TempBlockPath != None)
+    {
+        TempBlockPath.bBlocked = false;
+    }
+
+    return MoveTarget != None;
 }
 
-// @STUB(M3) @SYS-BASE-PATH legacy:KF2BotBase.BuildRandomPath
 final function bool BuildRandomPath()
 {
+    local int I;
+
+    I = DoorPaths.Length - 1;
+    while (I >= 0)
+    {
+        if (DoorPaths[I].Path.bBlocked || DoorPaths[I].door.bIsDestroyed || DoorPaths[I].door.bIsDoorOpen || DoorPaths[I].door.WeldIntegrity <= 0)
+        {
+            DoorPaths.Remove(I, 1);
+        }
+        else
+        {
+            DoorPaths[I].Path.bBlocked = true;
+        }
+        I--;
+    }
+
+    I = BotBlockRoutes.Length - 1;
+    while (I >= 0)
+    {
+        BotBlockRoutes[I].bBlocked = true;
+        I--;
+    }
+
+    if (TempBlockPath != None)
+    {
+        if (TempBlockTime < WorldInfo.TimeSeconds)
+        {
+            TempBlockPath = None;
+        }
+        else
+        {
+            TempBlockPath.bBlocked = true;
+        }
+    }
+
+    RandGoal = FindRandomDest();
+
+    I = DoorPaths.Length - 1;
+    while (I >= 0)
+    {
+        DoorPaths[I].Path.bBlocked = false;
+        I--;
+    }
+
+    I = BotBlockRoutes.Length - 1;
+    while (I >= 0)
+    {
+        BotBlockRoutes[I].bBlocked = false;
+        I--;
+    }
+
+    if (TempBlockPath != None)
+    {
+        TempBlockPath.bBlocked = false;
+    }
+
+    return RandGoal != None;
 }
 
-// @STUB(M3) @SYS-BASE-FIRE legacy:KF2BotBase.StopAdjusting
 function StopAdjusting()
 {
+    bAdjusting = false;
+    Pawn.Acceleration = vect(0, 0, 0);
 }
 
-// @STUB(M3) @SYS-BASE-FIRE legacy:KF2BotBase.NeedToTurn
 final function bool NeedToTurn(Vector targ)
 {
+    local Rotator R;
+
+    R.Yaw = Pawn.Rotation.Yaw;
+    return (Vector(R) Dot Normal2D(targ - Pawn.Location)) < 0.93;
 }
 
-// @STUB(M3) @SYS-BASE-PERCEPT legacy:KF2BotBase.NotifyHitWall
 event bool NotifyHitWall(Vector HitNormal, Actor Wall)
 {
-    // PASS-THROUGH: overrides Controller; keep the engine behaviour until the real port lands.
-    return super.NotifyHitWall(HitNormal, Wall);
+    if (FollowOwnsEvents())
+    {
+        return FollowHandleHitWall(HitNormal, Wall);
+    }
+
+    super.NotifyHitWall(HitNormal, Wall);
+
+    if (MoveFlags != 0)
+    {
+        if (KFDoorActor(Wall) != None)
+        {
+            if (!MarkDoorPath(KFDoorActor(Wall)))
+            {
+                KFDoorActor(Wall).UseDoor(Pawn);
+            }
+            else
+            {
+                EndMoveTime = WorldInfo.TimeSeconds - 1.0;
+            }
+        }
+
+        if ((MoveFlags == 2) && MoveTarget != None)
+        {
+            SetDestinationPosition(MoveTarget.Location);
+        }
+
+        if (!PickWallAdjust(HitNormal))
+        {
+            if ((NextAdjustTime < WorldInfo.TimeSeconds) && Pawn.Physics == 1)
+            {
+                if (Rand(3) == 0)
+                {
+                    Pawn.DoJump(false);
+                }
+                else
+                {
+                    bAdjusting = true;
+                    AdjustPosition.Position = (Pawn.Location + (HitNormal * 80.0)) + (VRand() * 50.0);
+                }
+            }
+        }
+        else
+        {
+            NextAdjustTime = WorldInfo.TimeSeconds + 0.5;
+        }
+    }
+
+    return false;
 }
 
-// @STUB(M3) @SYS-BASE-MOVE legacy:KF2BotBase.FinishedMove
 function FinishedMove()
 {
+    PickCombatStyle();
 }
 
 // @STUB(M3) @SYS-BASE-MOVE legacy:KF2BotBase.PickFavorite
