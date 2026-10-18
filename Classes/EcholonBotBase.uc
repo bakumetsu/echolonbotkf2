@@ -2833,9 +2833,25 @@ final function bool ShouldReload(KFWeapon W)
 	return W.HasAnyAmmo();
 }
 
-// @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.GetWeaponEffectiveRangeUU
 final function float GetWeaponEffectiveRangeUU(KFWeapon W)
 {
+	if (W == None)
+	{
+		return DefaultWeaponEffectiveRangeUU;
+	}
+	if (W.IsA('KFWeap_ShotgunBase'))
+	{
+		return ShotgunEffectiveRangeUU;
+	}
+	if (W.IsA('KFWeap_Flame_Flamethrower'))
+	{
+		return FlamethrowerEffectiveRangeUU;
+	}
+	if (W.IsA('KFWeap_FlameBase'))
+	{
+		return FlamethrowerEffectiveRangeUU;
+	}
+	return DefaultWeaponEffectiveRangeUU;
 }
 
 // @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.IsInEffectiveRange
