@@ -1290,9 +1290,18 @@ state Dead
         ClearTimer('ReassertScoreboardFlags');
     }
 
-    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.Dead.ReassertScoreboardFlags
     function ReassertScoreboardFlags()
     {
+        local KFPlayerReplicationInfo KFPRI;
+
+        if (PlayerReplicationInfo != None)
+        {
+            KFPRI = KFPlayerReplicationInfo(PlayerReplicationInfo);
+            if (KFPRI != None)
+            {
+                KFPRI.bHasSpawnedIn = true;
+            }
+        }
     }
 
 Begin:
