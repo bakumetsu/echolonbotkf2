@@ -1313,9 +1313,14 @@ state IsRagdolled
 {
     ignores StopAdjusting, Tick, CheckGrabbed, PickCombatStyle, SetEnemy, HearNoise, SeeMonster, SeePlayer;
 
-    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.IsRagdolled.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        AbortMove();
+        if (Pawn != None)
+        {
+            Pawn.StopFiring();
+        }
     }
 
     // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.IsRagdolled.EndState
