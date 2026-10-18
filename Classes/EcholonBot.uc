@@ -982,9 +982,10 @@ Begin:
 // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.GrenadeTarget UNVERIFIED-ENTRY
 state GrenadeTarget
 {
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.GrenadeTarget.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        AbortMove();
     }
 
     // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.GrenadeTarget.EndState
