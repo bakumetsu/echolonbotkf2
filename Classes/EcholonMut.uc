@@ -1829,9 +1829,16 @@ function EvaluateRegroupEntries()
     }
 }
 
-// @STUB(M4) @SYS-MUT-REGROUP legacy:KF2BotsMut.GetSquadStartTime
 function float GetSquadStartTime(EcholonBot B)
 {
+    local int GroupIdx;
+
+    if (B == None)
+        return 0.0;
+    GroupIdx = B.GroupID - 1;
+    if (GroupIdx < 0 || GroupIdx >= SquadOrders.Length)
+        return 0.0;
+    return SquadOrders[GroupIdx].StartTime;
 }
 
 // @STUB(M4) @SYS-MUT-REGROUP legacy:KF2BotsMut.MoveSquadMembers
