@@ -2361,9 +2361,52 @@ function Vector ComputeSlotOffset(optional int Slot = -1)
 	return (Fwd * CachedLocalOffset.X) + (Rgt * CachedLocalOffset.Y);
 }
 
-// @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.SyncLineFocus
 final function bool SyncLineFocus()
 {
+	local Pawn LT;
+
+	if ((BotRank != GRUNT) || (Pawn == None))
+	{
+		return false;
+	}
+
+	if ((SquadLeader != None) && (SquadLeader.CurrentFormation == 'LineFormation'))
+	{
+		LT = SquadLeader.Enemy;
+		if ((LT != None) && LT.IsAliveAndWell())
+		{
+			if (InheritedEnemy != LT)
+			{
+				InheritedEnemy = LT;
+				Enemy = LT;
+				Focus = LT;
+				if (GetStateName() != 'FightEnemy')
+				{
+					GotoState('FightEnemy');
+				}
+			}
+			return false;
+		}
+	}
+
+	if (InheritedEnemy != None)
+	{
+		if (Enemy == InheritedEnemy)
+		{
+			Enemy = None;
+			Focus = None;
+			Pawn.StopFiring();
+			InheritedEnemy = None;
+			if (GetStateName() == 'FightEnemy')
+			{
+				PickCombatStyle();
+				return true;
+			}
+		}
+		InheritedEnemy = None;
+	}
+
+	return false;
 }
 
 // @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.HasOwnFireLine
