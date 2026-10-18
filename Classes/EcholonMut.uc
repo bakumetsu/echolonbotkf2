@@ -2636,9 +2636,9 @@ final function bool ShouldDoVictoryDance()
     return true;
 }
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.CacheHumans
 function CacheHumans()
 {
+    CacheHumanPositions();
 }
 
 // @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.CacheHumanPositions
