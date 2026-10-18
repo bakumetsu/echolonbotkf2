@@ -2974,9 +2974,86 @@ final function bool IsOverwatchStuck()
     return (bOverwatchMoving && OverwatchStuckTime >= OW_STUCK_TIME);
 }
 
-// @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.UpdateOverwatchMovement
 function bool UpdateOverwatchMovement(out vector OutMovePos)
 {
+    local bool bMovingTeam;
+    local float now;
+    local vector moved, toGoal;
+    local Pawn tgt;
+
+    if (SquadLeader == None || SquadLeader.Pawn == None)
+    {
+        bOverwatchMoving = false;
+        return true;
+    }
+
+    now = WorldInfo.TimeSeconds;
+
+    if (bOverwatchAllMove)
+    {
+        bMovingTeam = true;
+    }
+    else if ((OverwatchSlot & 1) == 1)
+    {
+        bMovingTeam = GruntOverwatchPhase;
+    }
+    else
+    {
+        bMovingTeam = !GruntOverwatchPhase;
+    }
+    bOverwatchMoving = bMovingTeam;
+
+    if (bMovingTeam)
+    {
+        ApplyCrouch(false);
+        OutMovePos = SquadLeader.Pawn.Location + OverwatchOffset;
+
+        if (now - OverwatchSampleTime >= 0.5)
+        {
+            moved = Pawn.Location - OverwatchSamplePos;
+            moved.Z = 0.0;
+            toGoal = OutMovePos - Pawn.Location;
+            toGoal.Z = 0.0;
+            if (VSizeSq(toGoal) > OW_STUCK_MIN_DIST_SQ && VSizeSq(moved) < OW_STUCK_MOVE_SQ)
+            {
+                OverwatchStuckTime += (now - OverwatchSampleTime);
+            }
+            else
+            {
+                OverwatchStuckTime = 0.0;
+            }
+            OverwatchSamplePos = Pawn.Location;
+            OverwatchSampleTime = now;
+        }
+        return true;
+    }
+
+    OverwatchStuckTime = 0.0;
+    OverwatchSampleTime = now;
+    OverwatchSamplePos = Pawn.Location;
+    ApplyCrouch(true);
+
+    if (GetStateName() != 'FightEnemy')
+    {
+        tgt = Enemy;
+        if (tgt == None)
+        {
+            tgt = SquadLeader.Enemy;
+        }
+        if (tgt != None && tgt.IsAliveAndWell())
+        {
+            if (now >= NextOverwatchLOSTime)
+            {
+                NextOverwatchLOSTime = now + 0.5;
+                bOverwatchLOS = FastTrace(tgt.Location, Pawn.Location);
+            }
+            if (bOverwatchLOS)
+            {
+                FireWeaponAt(tgt);
+            }
+        }
+    }
+    return false;
 }
 
 // @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.OnBreakLoseComplete
