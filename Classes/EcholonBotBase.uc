@@ -1487,46 +1487,308 @@ function FinishedMove()
     PickCombatStyle();
 }
 
-// @STUB(M3) @SYS-BASE-MOVE legacy:KF2BotBase.PickFavorite
 final function PickFavorite()
 {
+    local float desire, BestDesire;
+    local EcholonWeaponInfo A;
+
+    foreach mut.TraderList(A)
+    {
+        desire = A.AIRating * (FRand() + 0.3);
+        if ((Perk != None) && (A.Perk != None) && Perk != A.Perk)
+        {
+            desire *= 0.15;
+        }
+        if (FavoriteWeapon == None || desire > BestDesire)
+        {
+            FavoriteWeapon = A.WeaponClass;
+            BestDesire = desire;
+        }
+    }
 }
 
-// @STUB(M3) @SYS-BASE-SHOP legacy:KF2BotBase.SellWeapon
 final function bool SellWeapon(KFWeapon W, out int Dosh)
 {
+    local float desire, BestDesire;
+    local KFWeapon T;
+    local EcholonWeaponInfo A;
+
+    if (W == None)
+    {
+        foreach KFInvManager.InventoryActors(class'KFWeapon', T)
+        {
+            A = mut.FindWeaponByClass(T.Class);
+            if (A == None || !A.bCanSell)
+            {
+                continue;
+            }
+            desire = A.AIRating * (0.5 + FRand());
+            if (W == None || desire < BestDesire)
+            {
+                W = T;
+                BestDesire = desire;
+            }
+        }
+        if (W == None)
+        {
+            return false;
+        }
+    }
+
+    A = mut.FindWeaponByClass(W.Class);
+    if (A == None || !A.bCanSell)
+    {
+        return false;
+    }
+
+    W.Destroy();
+    Dosh += int(A.BuyPrice * 0.75);
+    return true;
 }
 
-// @STUB(M3) @SYS-BASE-SHOP legacy:KF2BotBase.GetBestBuy
 final function EcholonWeaponInfo GetBestBuy(int Cash)
 {
+    local EcholonWeaponInfo A, Best;
+    local float desire, BestDesire;
+    local KFWeapon W;
+
+    Best = None;
+    BestDesire = 0.0;
+
+    foreach mut.TraderList(A)
+    {
+        desire = A.AIRating * (FRand() + 0.5);
+
+        if (FavoriteWeapon == A.WeaponClass)
+        {
+            desire *= 4.0;
+        }
+        else
+        {
+            if ((Perk != None) && (A.Perk != None) && (Perk != A.Perk))
+            {
+                continue;
+            }
+        }
+
+        W = KFWeapon(KFInvManager.FindInventoryType(A.WeaponClass));
+
+        if (W != None)
+        {
+            if ((!W.UsesAmmo() || W.GetMissingSpareAmmoAmount(0) <= 0) || Cash < A.AmmoPricePerMag)
+            {
+                continue;
+            }
+            desire *= 2.5;
+        }
+        else
+        {
+            if ((Cash < A.BuyPrice) || ((!KFInvManager.CanCarryWeapon(A.WeaponClass)) && (FavoriteWeapon != A.WeaponClass)))
+            {
+                continue;
+            }
+        }
+
+        if ((Best == None) || (desire > BestDesire))
+        {
+            Best = A;
+            BestDesire = desire;
+        }
+    }
+
+    return Best;
 }
 
-// @STUB(M3) @SYS-BASE-SHOP legacy:KF2BotBase.ProcessPurchase
 final function ProcessPurchase(KFGFxObject_TraderItems L)
 {
+    local int S, N, J, olds;
+    local byte I, loops;
+    local KFWeapon W, WW;
+    local EcholonWeaponInfo A;
+
+    if (!mut.bTraderListInit)
+    {
+        mut.InitTraderList(L);
+    }
+
+    if (FavoriteWeapon == None)
+    {
+        PickFavorite();
+    }
+
+    S = int(PlayerReplicationInfo.Score);
+    olds = 0;
+
+    if (Perk != None)
+    {
+        foreach KFInvManager.InventoryActors(Class'KFWeapon', WW)
+        {
+            if (WW.GetWeaponPerkClass(Perk) == Perk)
+            {
+                continue;
+            }
+            A = mut.FindWeaponByClass(WW.Class);
+            if ((A == None) || !A.bCanSell)
+            {
+                continue;
+            }
+            WW.Destroy();
+            S += int(float(A.BuyPrice) * 0.75);
+        }
+    }
+
+    loops = 0;
+    while (((S > 150) || mut.bBotsUnlimitedCash) && olds != S && loops < 7)
+    {
+        olds = S;
+        if (mut.bBotsUnlimitedCash)
+        {
+            A = GetBestBuy(999999);
+        }
+        else
+        {
+            A = GetBestBuy(S);
+        }
+
+        if (A == None)
+        {
+            break;
+        }
+
+        W = KFWeapon(KFInvManager.FindInventoryType(A.WeaponClass));
+        if (W != None)
+        {
+            if (!W.UsesAmmo())
+            {
+                break;
+            }
+            I = 0;
+            while (I < 2)
+            {
+                if ((I == 1) && !W.UsesSecondaryAmmo())
+                {
+                    I++;
+                    continue;
+                }
+                N = W.GetMissingSpareAmmoAmount(I);
+                if (N > 0)
+                {
+                    if (!mut.bBotsUnlimitedCash)
+                    {
+                        N = Min(N, int(float(S) / A.PricePerBullet[I]));
+                    }
+                    W.SpareAmmoCount[I] += N;
+                    S -= int(float(N) * A.PricePerBullet[I]);
+                    if (S <= 0)
+                    {
+                        break;
+                    }
+                }
+                I++;
+            }
+        }
+        else
+        {
+            J = 0;
+            while (!KFInvManager.CanCarryWeapon(A.WeaponClass) && J < 5)
+            {
+                if (!SellWeapon(None, S))
+                {
+                    break;
+                }
+                J++;
+            }
+            KFInvManager.CreateInventory(A.WeaponClass);
+            S -= A.BuyPrice;
+        }
+        loops++;
+    }
+
+    if (((S >= L.ArmorPrice) || mut.bBotsUnlimitedCash) && KPawn.Armor < KPawn.MaxArmor)
+    {
+        N = KPawn.MaxArmor - KPawn.Armor;
+        if (((N * L.ArmorPrice) > S) && !mut.bBotsUnlimitedCash)
+        {
+            N = S / L.ArmorPrice;
+        }
+        KPawn.Armor += byte(N);
+        S -= (N * L.ArmorPrice);
+    }
+
+    if ((S > 0) || mut.bBotsUnlimitedCash)
+    {
+        N = (1 + Rand(4)) - KFInvManager.GrenadeCount;
+        while ((N > 0) && ((S >= L.GrenadePrice) || mut.bBotsUnlimitedCash))
+        {
+            S -= L.GrenadePrice;
+            KFInvManager.GrenadeCount++;
+            N--;
+        }
+    }
+
+    PlayerReplicationInfo.Score = float(Max(S, 0));
+    PlayerReplicationInfo.bForceNetUpdate = true;
 }
 
-// @STUB(M3) @SYS-BASE-SHOP legacy:KF2BotBase.NotifyAddInventory
 function NotifyAddInventory(Inventory NewItem)
 {
-    // PASS-THROUGH: overrides Controller; keep the engine behaviour until the real port lands.
-    super.NotifyAddInventory(NewItem);
+    if (KFWeap_Welder(NewItem) != None)
+    {
+        Weapon(NewItem).AIRating = -1.0;
+    }
 }
 
-// @STUB(M3) @SYS-BASE-MOVE legacy:KF2BotBase.PickCombatStyle
 function PickCombatStyle()
 {
+    bJustSpawned = false;
+    WdLastMoveIntentTime = WorldInfo.TimeSeconds;
+
+    if (bInTerminalState)
+    {
+        GotoState('VictoryDance');
+        return;
+    }
+
+    if (bEnableAdvancedLocomotion && (IsInState('FollowingLeader') || IsInState('FollowingLeaderBasic')))
+    {
+        return;
+    }
+
+    GotoState('PickNextMove');
 }
 
-// @STUB(M3) @SYS-BASE-BOOT legacy:KF2BotBase.ValidateAndNudgeSpawn
 function ValidateAndNudgeSpawn()
 {
+    local vector NudgeLoc;
+    local int Attempts;
+
+    if (Pawn == None)
+        return;
+    if (IsOnWalkableFloor())
+        return;
+
+    `log("[FollowNav] ValidateAndNudgeSpawn: spawn not on a floor, nudging");
+
+    for (Attempts = 0; Attempts < 6; Attempts++)
+    {
+        NudgeLoc = Pawn.Location;
+        NudgeLoc.X = NudgeLoc.X + (FRand() * 128.0 - 64.0);
+        NudgeLoc.Y = NudgeLoc.Y + (FRand() * 128.0 - 64.0);
+        SetLocation(NudgeLoc);
+        if (IsOnWalkableFloor())
+            return;
+    }
+
+    `log("[FollowNav] ValidateAndNudgeSpawn: nudged, still settling");
 }
 
-// @STUB(M3) @SYS-BASE-BOOT legacy:KF2BotBase.IsOnWalkableFloor
 function bool IsOnWalkableFloor()
 {
+    if (Pawn == None || Pawn.Base == None || Pawn.Base == Pawn)
+        return false;
+    if (Pawn.Location.Z < Pawn.Base.Location.Z)
+        return false;
+    return (Pawn.Location.Z - Pawn.Base.Location.Z) < 80.0;
 }
 
 // @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.ComputeFormationOffset
@@ -1534,14 +1796,52 @@ function vector ComputeFormationOffset(EcholonBot Leader, bool bSingleFile)
 {
 }
 
-// @STUB(M3) @SYS-BASE-ZEDS legacy:KF2BotBase.CountNearbyZeds
 final function int CountNearbyZeds(float Radius)
 {
+    local KFPawn_Monster Z;
+    local int ZedCount;
+
+    if (Pawn == None)
+    {
+        return 0;
+    }
+
+    ZedCount = 0;
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', Z, Pawn.Location, Radius)
+    {
+        if ((Z != None) && Z.IsAliveAndWell())
+        {
+            ZedCount++;
+        }
+    }
+
+    return ZedCount;
 }
 
-// @STUB(M3) @SYS-BASE-ZEDS legacy:KF2BotBase.AreZedsNear
 final function bool AreZedsNear(vector Loc, bool bRequireCanSee, float CheckRadius, int MinimalCount)
 {
+    local KFPawn_Monster Z;
+    local int ZedCount;
+
+    ZedCount = 0;
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', Z, Loc, CheckRadius)
+    {
+        if (Z == None || !Z.IsAliveAndWell())
+        {
+            continue;
+        }
+        if (bRequireCanSee && !FastTrace(Z.Location, Loc))
+        {
+            continue;
+        }
+
+        ZedCount++;
+        if (ZedCount >= MinimalCount)
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 // @STUB(M3) @SYS-BASE-ZEDS legacy:KF2BotBase.HeavyZedWithin
