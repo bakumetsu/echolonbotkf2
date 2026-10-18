@@ -1927,9 +1927,33 @@ final function NavigationPoint GetBotObjective(EcholonBot B)
     return ValidPoints[Rand(ValidPoints.Length)];
 }
 
-// @STUB(M4) @SYS-MUT-NODEBLOCK legacy:KF2BotsMut.IsNodeBlocked
 function bool IsNodeBlocked(EcholonBot OwnerBot, NavigationPoint Node)
 {
+    local int GroupIdx, i;
+    local SquadOrder O;
+    local float Now;
+
+    if (OwnerBot == None || Node == None)
+        return false;
+
+    GroupIdx = OwnerBot.GroupID - 1;
+    if (GroupIdx < 0 || GroupIdx >= SquadOrders.Length)
+        return false;
+
+    Now = WorldInfo.TimeSeconds;
+    O = SquadOrders[GroupIdx];
+
+    for (i = 0; i < O.NodeBlacklist.Length; i++)
+    {
+        if (O.NodeBlacklist[i].Owner != OwnerBot)
+            continue;
+        if (O.NodeBlacklist[i].Node != Node.Name)
+            continue;
+        if (O.NodeBlacklist[i].ExpiresAt > Now)
+            return true;
+    }
+
+    return false;
 }
 
 // @STUB(M4) @SYS-MUT-NODEBLOCK legacy:KF2BotsMut.AddNodeBlock
