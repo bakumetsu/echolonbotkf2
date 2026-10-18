@@ -1137,9 +1137,27 @@ function int GetGroupSize(int GroupID)
     return Fireteams[GroupIdx].Members.Length;
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.GetFollowerIndex
 function int GetFollowerIndex(EcholonBot Bot)
 {
+    local int GroupIdx, i, FollowerCount;
+
+    if (Bot == None)
+        return 1;
+
+    GroupIdx = Bot.GroupID - 1;
+    if (GroupIdx < 0 || GroupIdx >= Fireteams.Length)
+        return 1;
+
+    FollowerCount = 0;
+    for (i = 0; i < Fireteams[GroupIdx].Members.Length; i++)
+    {
+        if (Fireteams[GroupIdx].Members[i] == Fireteams[GroupIdx].Leader)
+            continue;
+        FollowerCount++;
+        if (Fireteams[GroupIdx].Members[i] == Bot)
+            return FollowerCount;
+    }
+    return FollowerCount + 1;
 }
 
 function BroadcastSpottedEnemy(int GroupID, Pawn Spotted)
