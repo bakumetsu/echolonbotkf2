@@ -2696,9 +2696,30 @@ final function SetBotRank(EBotRank NewRank)
     ArmRankTimers();
 }
 
-// @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.NotifyBlockedShooter
 final function NotifyBlockedShooter(EcholonBot Shooter)
 {
+	if (BotRank != SQUAD_LEADER)
+	{
+		return;
+	}
+
+	if ((WorldInfo.TimeSeconds - BlockedShooterWindowStart) > 1.5)
+	{
+		BlockedShooterWindowStart = WorldInfo.TimeSeconds;
+		BlockedShooterCount = 0;
+	}
+
+	if (++BlockedShooterCount >= 2)
+	{
+		BlockedShooterCount = 0;
+		LineSuppressUntil = WorldInfo.TimeSeconds + 4.0;
+		if (CurrentFormation == 'LineFormation')
+		{
+			CurrentFormation = 'StaggeredColumn';
+			PendingFormationCount = 0;
+			++FormationEpoch;
+		}
+	}
 }
 
 // @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.ShouldReload
