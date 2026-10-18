@@ -384,9 +384,9 @@ function vector ApplyZStep(vector T)
     return T;
 }
 
-// @STUB(M5c) @SYS-LOGIC-GRUNTMOVE legacy:KF2BotLogic.RequestReroute
 function RequestReroute()
 {
+    LastValidSquadLeaderPos = SquadLeader.Pawn.Location;
 }
 
 // @STUB(M5c) @SYS-LOGIC-WATCHDOG legacy:KF2BotLogic.PromotionGapTimer
