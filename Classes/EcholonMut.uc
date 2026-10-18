@@ -1318,9 +1318,27 @@ final function EndObjective()
     }
 }
 
-// @STUB(M4) @SYS-MUT-WAVE legacy:KF2BotsMut.NearestValidPoint
 function NavigationPoint NearestValidPoint(vector Loc)
 {
+    local int i;
+    local NavigationPoint N, Best;
+    local float BestDistSq, DistSq;
+
+    Best = None;
+    BestDistSq = 9999999999.0;
+    for (i = 0; i < ValidPoints.Length; i++)
+    {
+        N = ValidPoints[i];
+        if (N == None)
+            continue;
+        DistSq = VSizeSq(N.Location - Loc);
+        if (DistSq < BestDistSq)
+        {
+            BestDistSq = DistSq;
+            Best = N;
+        }
+    }
+    return Best;
 }
 
 function string CoordStr(vector L)
