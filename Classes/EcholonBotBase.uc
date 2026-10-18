@@ -2820,9 +2820,17 @@ final function NotifyBlockedShooter(EcholonBot Shooter)
 	}
 }
 
-// @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.ShouldReload
 final function bool ShouldReload(KFWeapon W)
 {
+	if (W == None)
+	{
+		return false;
+	}
+	if (W.HasAmmo(BOTFM_PRIMARY, 1))
+	{
+		return false;
+	}
+	return W.HasAnyAmmo();
 }
 
 // @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.GetWeaponEffectiveRangeUU
