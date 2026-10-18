@@ -489,9 +489,9 @@ function VerifyWeapon()
     }
 }
 
-// @STUB(M5c) @SYS-LOGIC-HEAL legacy:KF2BotLogic.HealTimeOut
 function HealTimeOut()
 {
+    PickCombatStyle();
 }
 
 // @STUB(M5c) @SYS-LOGIC-GRUNTMOVE legacy:KF2BotLogic.ConsumePathToken
