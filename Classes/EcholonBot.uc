@@ -789,9 +789,9 @@ state Hunting
         }
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting.FinishedMove
     function FinishedMove()
     {
+        PickCombatStyle();
     }
 
     // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting.EnemyChanged
