@@ -2002,9 +2002,9 @@ function bool IsHealLockedOut()
     return false;
 }
 
-// @STUB(M5b) @SYS-BASE-HEALQ legacy:KF2BotBase.ShouldAbortRetreat
 function bool ShouldAbortRetreat()
 {
+    return false;
 }
 
 function vector GetObjectiveLocation()
