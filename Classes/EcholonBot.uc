@@ -3,9 +3,10 @@ class EcholonBot extends EcholonBotLogic hidecategories(Navigation);
 // @STUB(M6) @SYS-BOT-HUB legacy:KF2Bot.PickNextMove
 state PickNextMove
 {
-    // @STUB(M6) @SYS-BOT-HUB legacy:KF2Bot.PickNextMove.BeginState
     event BeginState(Name PreviousStateName)
     {
+        AuditStateEntry();
+        `log("EcholonBot: Entered PickNextMove from " $ PreviousStateName);
     }
 
     // @STUB(M6) @SYS-BOT-HUB legacy:KF2Bot.PickNextMove.EndState
