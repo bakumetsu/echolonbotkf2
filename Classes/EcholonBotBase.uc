@@ -4169,9 +4169,9 @@ final function PlayBotEmote()
     SetTimer(4.0, false, 'ClearEmoteFlag');
 }
 
-// @STUB(M5b) @SYS-BASE-EMOTE legacy:KF2BotBase.ClearEmoteFlag
 function ClearEmoteFlag()
 {
+    bPlayingEmote = false;
 }
 
 final function float GetWaveMomentum()
