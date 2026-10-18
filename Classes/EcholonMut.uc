@@ -422,9 +422,16 @@ function ShuffleActiveBots()
     }
 }
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.PruneInvalidBots
 function PruneInvalidBots()
 {
+    local int i;
+    for (i = ActiveBots.Length - 1; i >= 0; i--)
+    {
+        if (ActiveBots[i] == None || ActiveBots[i].bDeleteMe || ActiveBots[i].Pawn == None || ActiveBots[i].Pawn.Health <= 0)
+        {
+            ActiveBots.Remove(i, 1);
+        }
+    }
 }
 
 // @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.DetermineGroupCount
