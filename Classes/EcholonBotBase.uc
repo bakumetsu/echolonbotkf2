@@ -2854,9 +2854,27 @@ final function float GetWeaponEffectiveRangeUU(KFWeapon W)
 	return DefaultWeaponEffectiveRangeUU;
 }
 
-// @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.IsInEffectiveRange
 final function bool IsInEffectiveRange(Actor T)
 {
+	local KFWeapon W;
+	local float MaxRange;
+
+	W = KFWeapon(Pawn.Weapon);
+	if (W == None || T == None)
+	{
+		return false;
+	}
+	if (W != RangeCacheWeapon)
+	{
+		RangeCacheWeapon = W;
+		MaxRange = GetWeaponEffectiveRangeUU(W);
+		RangeCacheSq = MaxRange * MaxRange;
+	}
+	if (RangeCacheSq <= 0.0)
+	{
+		return true;
+	}
+	return VSizeSq(T.Location - Pawn.Location) <= RangeCacheSq;
 }
 
 // @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.CloseToEffectiveRange
