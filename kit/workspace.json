@@ -1,0 +1,45 @@
+{
+ "_comment": "Machine paths for the kit. Override any key in workspace.local.json (gitignored) instead of editing this file. {name} expands to another top-level string key.",
+ "package_name": "EcholonBot",
+ "sdk_root": "D:\\SteamLibrary\\steamapps\\common\\killingfloor2",
+ "kf2_userdir": "C:\\Users\\AnhBaSing\\Documents\\My Games\\KillingFloor2",
+ "kfeditor_path": "{sdk_root}\\Binaries\\Win64\\KFEditor.exe",
+ "sdk_src_dir": "{sdk_root}\\Development\\Src",
+ "package_src_dir": "{kf2_userdir}\\KFGame\\Src\\EcholonBot\\Classes",
+ "legacy_dir": "{kf2_userdir}\\KFGame\\Src\\KF2Bots\\Classes",
+ "doc_path": "{legacy_dir}\\Mod Architecture\\KF2_Current_Architecture.md",
+ "compile": {
+  "_status": "[UNVERIFIED] defaults from the Steam guide 1112644122; used by compile_loop in M0b",
+  "args": ["make", "-useunpublished", "-log", "-unattended"],
+  "editor_ini": "{kf2_userdir}\\KFGame\\Config\\KFEditor.ini",
+  "output_u": "{kf2_userdir}\\KFGame\\Unpublished\\BrewedPC\\Script\\EcholonBot.u",
+  "log_path": "{kf2_userdir}\\KFGame\\Logs\\Launch.log",
+  "error_regex": "^(?P<file>.+?\\.uc)\\((?P<line>\\d+)\\)\\s*:\\s*(?P<sev>Error|Warning),\\s*(?P<msg>.*)$",
+  "timeout_s": 300
+ },
+ "backend": {
+  "_status": "[UNVERIFIED] llama-swap on its default port; see kit/docs/LLAMA_SWAP_SETUP.md",
+  "kind": "llama_swap",
+  "endpoint": "http://127.0.0.1:8080/v1"
+ },
+ "budgets": {
+  "bible_core": 1800,
+  "doc_slice": 2000,
+  "contract": 1000,
+  "task": 500,
+  "hard_fail": 7000
+ },
+ "class_map": {
+  "_comment": "Legacy class -> new class. Package KF2Bots -> EcholonBot.",
+  "KF2BotsMut": "EcholonMut",
+  "KF2BotsFollowNavBase": "EcholonFollowNavBase",
+  "KF2BotBase": "EcholonBotBase",
+  "KF2BotLogic": "EcholonBotLogic",
+  "KF2Bot": "EcholonBot",
+  "AIWeaponInfo": "EcholonWeaponInfo",
+  "KF2BotChat": "EcholonChat",
+  "KF2BotBroadcastHandle": "EcholonBroadcastHandler",
+  "KFInventoryManager_Bot": "EcholonInventoryManager"
+ },
+ "aux_legacy_files": ["AIWeaponInfo.uc", "KF2BotChat.uc", "KF2BotBroadcastHandle.uc", "KFInventoryManager_Bot.uc"]
+}

@@ -1,0 +1,29 @@
+# llama-swap config for the Echolon agent kit (RTX 5060 Ti 16 GB).
+# Copy to C:\llama\config.yaml and fix the two paths marked EDIT.
+# llama-swap keeps ONE model loaded at a time and swaps when a request names another model.
+# Prompts are capped at 7k tokens by the kit, so 16k context is plenty; the VRAM goes to quality.
+
+healthCheckTimeout: 300   # seconds to wait for a model to load before giving up
+
+models:
+  # Coder / debugger: the 27B model. ~13 GB weights at Q3_K_M + ~1.5 GB KV cache at 16k (q8).
+  "coder":
+    cmd: >
+      C:\llama\llama-server.exe --port ${PORT}
+      -m C:\models\CODER-27B-Q3_K_M.gguf
+      -ngl 99 -c 16384 --flash-attn on
+      --cache-type-k q8_0 --cache-type-v q8_0
+      --jinja --temp 0.2
+    # EDIT the -m path to your 27B .gguf file name
+    ttl: 900              # unload after 15 idle minutes
+
+  # Planner / doc helper: a small fast model, optional.
+  "small":
+    cmd: >
+      C:\llama\llama-server.exe --port ${PORT}
+      -m C:\models\Qwen3-8B-Q6_K.gguf
+      -ngl 99 -c 16384 --flash-attn on
+      --cache-type-k q8_0 --cache-type-v q8_0
+      --jinja --temp 0.3
+    # EDIT the -m path, or delete this whole "small" block if you only use one model
+    ttl: 900
