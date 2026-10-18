@@ -2249,9 +2249,10 @@ final function ScanRoomForFormation()
     FormationEpoch++;
 }
 
-// @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.DeferredFormationScan
 function DeferredFormationScan()
 {
+	bFormationScanDeferred = false;
+	ScanRoomForFormation();
 }
 
 // @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.GetFormationBase
