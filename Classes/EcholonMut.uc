@@ -93,19 +93,108 @@ var transient array<Class<KFPerk> > PerkPool;
 var transient array<int> PerkPoolCounts;
 var float LastAuditLogTime;
 
-// @STUB(M1) @SYS-MUT-UTIL legacy:KF2BotsMut.EchelonLog
 function EchelonLog(string Msg)
 {
+    if (WorldInfo == None)
+        return;
+    if (Left(Msg, 6) ~= "ORDER_")
+    {
+        if (WorldInfo.TimeSeconds - LastAuditLogTime < 5.0)
+            return;
+        LastAuditLogTime = WorldInfo.TimeSeconds;
+    }
+    `log("[EcholonAudit] [Mut] " $ Msg);
 }
 
-// @STUB(M1) @SYS-MUT-BOOT legacy:KF2BotsMut.PostBeginPlay
 function PostBeginPlay()
 {
+    local int J;
+
+    if(WorldInfo.Game.BaseMutator == None)
+    {
+        WorldInfo.Game.BaseMutator = self;
+    }
+    else
+    {
+        WorldInfo.Game.BaseMutator.AddMutator(self);
+    }
+
+    if(bDeleteMe)
+    {
+        return;
+    }
+
+    KF = KFGameInfo_Survival(WorldInfo.Game);
+
+    if(ConfigVer != CUR_CONFIGVER)
+    {
+        NumBots = 7;
+        BotMaxPerkLv = 25;
+        BotsDamageScale = 1.0;
+        ZedCountScaling = 0.2;
+        bNoZerkerBots = true;
+        bUseCustomBotNames = true;
+        bShowBotLevel = false;
+        bShowBotRole = true;
+        CustomBotNames.Length = 0;
+        CustomBotNames.AddItem("Alex");
+        CustomBotNames.AddItem("Reaper");
+        CustomBotNames.AddItem("Ghost");
+        CustomBotNames.AddItem("Widow");
+        CustomBotNames.AddItem("Havoc");
+        CustomBotNames.AddItem("Ranger");
+        CustomBotNames.AddItem("Blaze");
+        CustomBotNames.AddItem("Cipher");
+        MaxBotsPerPerk = 2;
+        AllowedPerks.Length = 0;
+        J = 0;
+        while(J < Class'KFGame.KFPlayerController'.default.PerkList.Length)
+        {
+            AllowedPerks.AddItem(string(Class'KFGame.KFPlayerController'.default.PerkList[J].PerkClass.Name));
+            J++;
+        }
+        bDebugGrapple = false;
+        MaxZedsForFailsafe = 3;
+        FailsafeActivationDelay = 3.0;
+        _Separator1 = "--- BOT COUNT & SPAWNING ---";
+        _Separator2 = "--- PERK LEVEL RANGE ---";
+        _Separator3 = "--- DIFFICULTY & BALANCE ---";
+        _Separator4 = "--- CHEATS ---";
+        _Separator5 = "--- BOT NAMING & PERK RESTRICTIONS ---";
+        _Separator6 = "--- GRAPPLE ESCAPE SETTINGS ---";
+        HealCylinderRadius = 400.0;
+        HealCylinderHeight = 300.0;
+        HealMinHealthPct = 60.0;
+        bEnableFastTraceHealing = true;
+        _Separator7 = "--- HEALING SETTINGS ---";
+        ConfigVer = CUR_CONFIGVER;
+        SaveConfig();
+    }
+
+    if(!bChatterInit)
+    {
+        bChatterInit = true;
+        ActiveChat = Spawn(class'EcholonChat');
+    }
+
+    SetTimer(WAVE_POLL_INTERVAL, true, 'PollWaveStart');
+    SetTimer(3.0, true, 'RebuildHierarchy');
+    SetTimer(3.0, true, 'CacheHumans');
 }
 
-// @STUB(M1) @SYS-MUT-BOOT legacy:KF2BotsMut.AddMutator
 function AddMutator(Mutator M)
 {
+    if (M != self)
+    {
+        if (M.Class == class)
+        {
+            M.Destroy();
+        }
+        else
+        {
+            super(Mutator).AddMutator(M);
+        }
+    }
 }
 
 // @STUB(M1) @SYS-MUT-BOOT legacy:KF2BotsMut.MatchStarting
