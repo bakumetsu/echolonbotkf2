@@ -817,9 +817,25 @@ function RegisterRangedHealTarget(KFPawn_Human Target)
     RangedHealCooldownEnds.AddItem(WorldInfo.TimeSeconds + 25.0);
 }
 
-// @STUB(M4) @SYS-MUT-HEALCOOL legacy:KF2BotsMut.IsRangedHealTargetOnCooldown
 function bool IsRangedHealTargetOnCooldown(KFPawn_Human Target)
 {
+    local int I;
+
+    if (Target == None)
+    {
+        return false;
+    }
+
+    I = 0;
+    while (I < RangedHealTargets.Length)
+    {
+        if (RangedHealTargets[I] == Target)
+        {
+            return WorldInfo.TimeSeconds < RangedHealCooldownEnds[I];
+        }
+        I++;
+    }
+    return false;
 }
 
 // @STUB(M4) @SYS-MUT-HEALCOOL legacy:KF2BotsMut.CleanupRangedHealCooldowns
