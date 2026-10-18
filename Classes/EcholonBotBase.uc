@@ -2424,9 +2424,25 @@ final function bool HasOwnFireLine(Actor T)
     return bFireLineClear;
 }
 
-// @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.ValidateOffsetTarget
 final function bool ValidateOffsetTarget(Vector OffsetTarget)
 {
+    if (FastTrace(OffsetTarget, Pawn.Location))
+    {
+        BlockedCounter = 0;
+        return true;
+    }
+
+    BlockedCounter++;
+    if (BlockedCounter >= 3)
+    {
+        BlockedCounter = 0;
+        if ((SquadLeader != None) && (SquadLeader.Pawn != None) && SquadLeader.Pawn.IsAliveAndWell())
+        {
+            SquadLeader.RequestRerouteWithBlock(Pawn.Location);
+        }
+    }
+
+    return false;
 }
 
 // @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.RequestRerouteWithBlock
