@@ -466,9 +466,11 @@ function HealFail()
     PendingHeal = None;
 }
 
-// @STUB(M5c) @SYS-LOGIC-HEAL legacy:KF2BotLogic.HealSuccess
 function HealSuccess()
 {
+    FailStreak = 0;
+    SyringeRechargeEnd = WorldInfo.TimeSeconds + 15.0;
+    HealPacingEnd = WorldInfo.TimeSeconds + (20.0 + FRand() * 10.0);
 }
 
 // @STUB(M5c) @SYS-LOGIC-HEAL legacy:KF2BotLogic.VerifyWeapon
