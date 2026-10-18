@@ -740,9 +740,14 @@ state Hunting
         SetTimer(0.25, true);
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
+        SetTimer(0.0, false);
+        if (KPawn != None)
+        {
+            KPawn.SetSprinting(false);
+        }
     }
 
     // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting.PickStyle
