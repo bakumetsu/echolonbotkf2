@@ -239,9 +239,122 @@ function CheckGrabbed()
     }
 }
 
-// @STUB(M5c) @SYS-LOGIC-GRUNTMOVE legacy:KF2BotLogic.UpdateGruntOffset
 function UpdateGruntOffset()
 {
+    local vector GruntTarget;
+    local vector OverwatchMoveTarget;
+    local float sc;
+    local vector bOff;
+    local Controller VIP;
+
+    if (((KPawn != None) && KPawn.Health > 0) && KPawn.IsDoingSpecialMove(31) && KPawn.InteractionPawn != None)
+    {
+        GotoState('BreakLose');
+        return;
+    }
+
+    ApplyPanicVariance();
+    TrackReloadState();
+
+    if (SyncLineFocus())
+    {
+        return;
+    }
+
+    ApplySquadCrouchHold();
+
+    if (SquadLeader == None || SquadLeader.Pawn == None || SquadLeader.Pawn.Health <= 0)
+    {
+        if (LastValidSquadLeaderPos != vect(0, 0, 0))
+        {
+            MoveToX(LastValidSquadLeaderPos);
+        }
+        else
+        {
+            VIP = None;
+            if (mut != None)
+            {
+                VIP = mut.GetVIPController();
+            }
+            if (VIP != None && VIP.Pawn != None && VIP.Pawn.Health > 0)
+            {
+                MoveToX(VIP.Pawn.Location);
+            }
+        }
+        if (!bPromotionGapTimerActive)
+        {
+            bPromotionGapTimerActive = true;
+            SetTimer(10.0, false, 'PromotionGapTimer');
+        }
+        return;
+    }
+
+    LastValidSLTime = WorldInfo.TimeSeconds;
+
+    if (bPromotionGapTimerActive)
+    {
+        bPromotionGapTimerActive = false;
+        ClearTimer('PromotionGapTimer');
+    }
+
+    if (bOverwatchMoving)
+    {
+        if (UpdateOverwatchMovement(OverwatchMoveTarget))
+        {
+            MoveToX(OverwatchMoveTarget);
+        }
+        return;
+    }
+
+    if (CurrentOrder == 'CMD_HoldArea' && Enemy == None)
+    {
+        UpdateSectorWatch();
+        return;
+    }
+
+    HandleCQBProximity();
+
+    if (RescueUntil > WorldInfo.TimeSeconds)
+    {
+        MoveToX(RescueLoc);
+        return;
+    }
+
+    UpdateCoverCrouch();
+
+    if (bReloadDriftMove && ReloadDriftUntil > WorldInfo.TimeSeconds)
+    {
+        MoveToX(ReloadDriftLoc);
+        return;
+    }
+
+    if (SquadLeader != None && SquadLeader.bWedgeActive)
+    {
+        GruntTarget = SquadLeader.Pawn.Location;
+        ApplyWedgeTarget(GruntTarget);
+        GruntTarget = ApplyZStep(GruntTarget);
+        MoveToX(GruntTarget);
+        return;
+    }
+
+    GruntTarget = SquadLeader.Pawn.Location + ComputeSlotOffset();
+
+    sc = PanicVarianceMultiplier / GetWaveMomentum();
+    GruntTarget.X = SquadLeader.Pawn.Location.X + (GruntTarget.X - SquadLeader.Pawn.Location.X) * sc;
+    GruntTarget.Y = SquadLeader.Pawn.Location.Y + (GruntTarget.Y - SquadLeader.Pawn.Location.Y) * sc;
+
+    bOff.X = Sin(BreathingPhase) * 10.0;
+    bOff.Y = Cos(BreathingPhase) * 10.0;
+    GruntTarget = GruntTarget + bOff;
+
+    GruntTarget = ApplyZStep(GruntTarget);
+
+    if (!ValidateOffsetTarget(GruntTarget))
+    {
+        GruntTarget = SquadLeader.Pawn.Location;
+    }
+
+    MoveToX(GruntTarget);
 }
 
 // @STUB(M5c) @SYS-LOGIC-GRUNTMOVE legacy:KF2BotLogic.ApplyZStep
