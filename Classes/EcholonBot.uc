@@ -1187,9 +1187,37 @@ state DonatingMoney
         AuditStateExit(NextStateName);
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.DonatingMoney.Tick
     function Tick(float Delta)
     {
+        global.Tick(Delta);
+        if((DonateHuman == None) || (DonateHuman.Health <= 0) || (Pawn == None))
+        {
+            PickCombatStyle();
+            return;
+        }
+        if(VSizeSq(DonateHuman.Location - Pawn.Location) < 90000.0)
+        {
+            if(FastTrace(DonateHuman.Location, Pawn.Location))
+            {
+                PickCombatStyle();
+            }
+            else
+            {
+                if(MoveFlags != 0)
+                {
+                    AbortMove();
+                    GotoState('DonatingMoney', 'MoneyToss');
+                }
+                else
+                {
+                    Pawn.Acceleration = vect(0, 0, 0);
+                }
+            }
+        }
+        else
+        {
+            Pawn.Acceleration = DonateHuman.Location - Pawn.Location;
+        }
     }
 
     // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.DonatingMoney.FinishedMove
