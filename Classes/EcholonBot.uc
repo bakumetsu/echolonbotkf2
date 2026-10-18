@@ -940,9 +940,10 @@ state HealRanged
 {
     ignores FinishedMove;
 
-    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealRanged.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        AbortMove();
     }
 
     // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealRanged.EndState
