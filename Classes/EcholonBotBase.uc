@@ -1791,9 +1791,34 @@ function bool IsOnWalkableFloor()
     return (Pawn.Location.Z - Pawn.Base.Location.Z) < 80.0;
 }
 
-// @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.ComputeFormationOffset
 function vector ComputeFormationOffset(EcholonBot Leader, bool bSingleFile)
 {
+    local int FollowerIdx, GroupSize;
+    local float Angle;
+    local vector Forward, Right, Offset;
+
+    if (Leader == None || Leader.Pawn == None || Pawn == None)
+        return Pawn.Location;
+
+    FollowerIdx = mut.GetFollowerIndex(EcholonBot(self));
+    GroupSize = mut.GetGroupSize(GroupID);
+    if (GroupSize <= 0)
+        GroupSize = 1;
+
+    Forward = vector(Leader.Pawn.Rotation);
+    Right = Normal(Forward cross vect(0, 0, 1));
+
+    if (bSingleFile)
+    {
+        Offset = Leader.Pawn.Location - (Forward * (SINGLE_FILE_SPACING * FollowerIdx));
+    }
+    else
+    {
+        Angle = ((360.0 / GroupSize) * FollowerIdx) + (GroupID * 15.0);
+        Offset = Leader.Pawn.Location + (Forward * PERIMETER_RADIUS * cos(Angle * DEG_TO_RAD)) + (Right * PERIMETER_RADIUS * sin(Angle * DEG_TO_RAD));
+    }
+
+    return Offset;
 }
 
 final function int CountNearbyZeds(float Radius)
