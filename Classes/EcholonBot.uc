@@ -1020,9 +1020,15 @@ state GoShopping
         TraderRetryCount = 0;
     }
 
-    // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
+        ClearTimer('DoTrading');
+        SetTimer(0.0, false);
+        if (KPawn != None)
+        {
+            KPawn.SetSprinting(false);
+        }
     }
 
     // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.EnemyChanged
