@@ -722,9 +722,72 @@ function EcholonBot FindExpendableMember(array<EcholonBot> Candidates)
     return Worst;
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.ProcessPromotionQueue
 function ProcessPromotionQueue()
 {
+    local int i, MaxPerTick;
+    local int DeadGroupIdx;
+    local PromotionRequest Req;
+    local array<EcholonBot> Candidates;
+    local KFGameReplicationInfo KFGRI;
+
+    if (PendingPromotions.Length == 0)
+    {
+        return;
+    }
+
+    KFGRI = KFGameReplicationInfo(WorldInfo.GRI);
+
+    MaxPerTick = 1;
+    if (KFGRI != None && KFGRI.WaveNum > 5)
+    {
+        MaxPerTick = 2;
+    }
+
+    Candidates.Length = 0;
+    for (i = 0; i < ActiveBots.Length; i++)
+    {
+        if (ActiveBots[i] != None && ActiveBots[i].BotRank == GRUNT
+            && ActiveBots[i].Pawn != None && ActiveBots[i].Pawn.Health > 0)
+        {
+            Candidates.AddItem(ActiveBots[i]);
+        }
+    }
+
+    while (PendingPromotions.Length > 0 && MaxPerTick > 0)
+    {
+        Req = PendingPromotions[PendingPromotions.Length - 1];
+        PendingPromotions.Remove(PendingPromotions.Length - 1, 1);
+
+        if (Req.OldRank == SQUAD_LEADER && Req.DeadOfficer != None)
+        {
+            DeadGroupIdx = Req.DeadOfficer.GroupID - 1;
+            if (DeadGroupIdx >= 0 && DeadGroupIdx < Fireteams.Length)
+            {
+                if (Fireteams[DeadGroupIdx].Leader != None
+                    && Fireteams[DeadGroupIdx].Leader.bIsGroupLeader
+                    && Fireteams[DeadGroupIdx].Leader.Pawn != None
+                    && Fireteams[DeadGroupIdx].Leader.Pawn.Health > 0)
+                {
+                    continue;
+                }
+            }
+        }
+
+        if (Req.Replacement == None)
+        {
+            Req.Replacement = FindBestCandidate(Candidates);
+        }
+        if (Req.Replacement != None && Req.Replacement.Pawn != None && Req.Replacement.Pawn.Health > 0)
+        {
+            PromoteBot(Req.Replacement, Req.OldRank);
+            i = Candidates.Find(Req.Replacement);
+            if (i != INDEX_NONE)
+            {
+                Candidates.Remove(i, 1);
+            }
+            MaxPerTick = MaxPerTick - 1;
+        }
+    }
 }
 
 // @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.PromoteBot
