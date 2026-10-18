@@ -14,9 +14,198 @@ state PickNextMove
         AuditStateExit(NextStateName);
     }
 
-    // @STUB(M6) @SYS-BOT-HUB legacy:KF2Bot.PickNextMove.PickMove
     function PickMove()
     {
+        local bool bHasAmmo;
+        local float RegroupElapsed;
+        local int RegroupMyIdx, RegroupTargetIdx, RegroupMySize, RegroupTargetSize, ZedNearLeader;
+        local Controller RegroupAttach;
+        local EcholonBot RegroupAttachBot, RegroupHoldLeader;
+
+        // Priority 1: Match Ended
+        if (bInTerminalState)
+        {
+            GotoState('VictoryDance');
+            return;
+        }
+        if (mut != None && mut.KF != None && mut.KF.MyKFGRI != None && mut.KF.MyKFGRI.bMatchIsOver)
+        {
+            GotoState('VictoryDance');
+            return;
+        }
+
+        // Priority 3: Critical Survival
+        if (KPawn != None && CheckShouldSelfHeal())
+        {
+            GotoState('HealingSelf');
+            return;
+        }
+
+        // Priority 4: Tactical Retreat
+        if (bIsGroupLeader && KPawn != None && !bIsRetreating && ShouldTacticalRetreat())
+        {
+            bIsRetreating = true;
+            GotoState('TacticalRetreat');
+            return;
+        }
+
+        // Priority 4.5: Regroup
+        if (mut != None && mut.GetSquadPhase(self) == mut.PHASE_REGROUP
+            && !IsInState('FollowingLeader') && !IsInState('FollowingLeaderBasic'))
+        {
+            RegroupElapsed = WorldInfo.TimeSeconds - mut.GetSquadStartTime(self);
+            if (RegroupElapsed < REGROUP_HARD_TIMEOUT && Pawn != None)
+            {
+                if (RegroupElapsed < REGROUP_DURATION
+                    && KFGRI.bTraderIsOpen && NextShoppingTime < WorldInfo.TimeSeconds && KFGRI.OpenedTrader != None)
+                {
+                    EchelonLog("REGROUP_SHOP bot=" $ Name $ " src=PickMove");
+                    GotoState('GoShopping');
+                    return;
+                }
+                if (RegroupElapsed < REGROUP_DURATION
+                    && GlobalZedCount > 0 && GlobalZedCount != 15 && GlobalZedCount <= 30)
+                {
+                    EchelonLog("REGROUP_HUNT bot=" $ Name $ " zeds=" $ string(GlobalZedCount));
+                    GotoState('Hunting');
+                    return;
+                }
+                if (GlobalZedCount <= 30)
+                {
+                    if (bIsGroupLeader && !mut.HasSquadGoal(self))
+                    {
+                        ZedNearLeader = mut.CountZedsInRadius(Pawn.Location, mut.REGROUP_SCAN_RADIUS);
+                        if (ZedNearLeader == 0)
+                        {
+                            RegroupMyIdx = GroupID - 1;
+                            RegroupAttach = mut.FindNearestActiveLeader(self, AUDIT_ATTACH_RADIUS);
+                            RegroupAttachBot = EcholonBot(RegroupAttach);
+                            if (RegroupAttachBot != None && RegroupAttachBot.GroupID - 1 != RegroupMyIdx)
+                            {
+                                RegroupTargetIdx = RegroupAttachBot.GroupID - 1;
+                                RegroupMySize = mut.GetGroupSize(GroupID);
+                                RegroupTargetSize = mut.GetGroupSize(RegroupAttachBot.GroupID);
+                                if (RegroupMySize > RegroupTargetSize
+                                    && mut.GetSquadPhase(RegroupAttachBot) == mut.PHASE_REGROUP)
+                                {
+                                    mut.MoveSquadMembers(RegroupTargetIdx, RegroupMyIdx);
+                                }
+                                else
+                                {
+                                    mut.MoveSquadMembers(RegroupMyIdx, RegroupTargetIdx);
+                                }
+                                EchelonLog("REGROUP_ATTACH bot=" $ Name $ " target=" $ string(RegroupTargetIdx + 1) $ " size=" $ string(RegroupMySize));
+                                if (!bIsGroupLeader && SquadLeader != None && SquadLeader.Pawn != None)
+                                {
+                                    FollowStart(SquadLeader);
+                                    return;
+                                }
+                            }
+                            else if (RegroupAttach != None && RegroupAttach.PlayerReplicationInfo != None)
+                            {
+                                EchelonLog("REGROUP_ATTACH bot=" $ Name $ " human=" $ string(RegroupAttach.PlayerReplicationInfo.Name));
+                                FollowStart(RegroupAttach);
+                                return;
+                            }
+                        }
+                    }
+                    RegroupHoldLeader = SquadLeader;
+                    if (!bIsGroupLeader && RegroupHoldLeader != None && RegroupHoldLeader.Pawn != None
+                        && VSizeSq(RegroupHoldLeader.Pawn.Location - Pawn.Location) > REGROUP_HOLD_DIST_SQ)
+                    {
+                        EchelonLog("REGROUP_HOLD bot=" $ Name $ " toLeader");
+                        FollowStart(RegroupHoldLeader);
+                        return;
+                    }
+                }
+                if (bIsGroupLeader)
+                {
+                    ExecuteCampState();
+                    return;
+                }
+            }
+        }
+
+        // Priority 5: SYG Enforcement
+        if (mut.bObjectiveActive)
+        {
+            bHasAmmo = (Pawn != None) && (Pawn.Weapon != None)
+                && (KFWeapon(Pawn.Weapon).GetTotalAmmoAmount(0) > 0);
+            if (ObjectiveGoal == None)
+            {
+                if (bHasAmmo)
+                {
+                    ObjectiveGoal = mut.GetBotObjective(self);
+                    ObjectiveBailUntil = 0.0;
+                    AuditGoalLog("GOAL_SET", "PickMove");
+                }
+            }
+            if (ObjectiveGoal != None && bHasAmmo && VSizeSq(ObjectiveGoal.Location - Pawn.Location) > SYG_DISTANCE_SQ
+                && WorldInfo.TimeSeconds >= ObjectiveBailUntil)
+            {
+                GotoState('DoObjective');
+                return;
+            }
+        }
+
+        // Priority 6: Squad Medic (Triage)
+        if (KPawn != None && WorldInfo.TimeSeconds - LastTriageTime >= TRIAGE_INTERVAL)
+        {
+            LastTriageTime = WorldInfo.TimeSeconds;
+            if (CheckMedicGunHeal())
+            {
+                GotoState('HealRanged');
+                return;
+            }
+            if (CheckShouldHealMate())
+            {
+                GotoState('HealOther');
+                return;
+            }
+        }
+
+        // Priority 7: Combat Engagement
+        if (Enemy != None && Enemy.IsAliveAndWell() && !(KFPawn_Monster(Enemy) != None && KFPawn_Monster(Enemy).bIsHeadless))
+        {
+            if (VSizeSq(Enemy.Location - Pawn.Location) > LEASH_DROP_DIST_SQ)
+            {
+                Enemy = None;
+                LastLeashDropTime = WorldInfo.TimeSeconds;
+            }
+            else if (LineOfSightTo(Enemy))
+            {
+                GotoState('FightEnemy');
+                return;
+            }
+            else
+            {
+                GotoState('Hunting');
+                return;
+            }
+        }
+
+        // Priority 8: Squad Tethering
+        if (EvaluateSquadTether())
+        {
+            return;
+        }
+
+        // Priority 8.5: Low zed count
+        if (Enemy == None && GlobalZedCount > 0 && GlobalZedCount < HUNT_ZED_THRESHOLD)
+        {
+            GotoState('Hunting');
+            return;
+        }
+
+        // Priority 9: Economy
+        if (KFGRI.bTraderIsOpen && NextShoppingTime < WorldInfo.TimeSeconds && KFGRI.OpenedTrader != None)
+        {
+            GotoState('GoShopping');
+            return;
+        }
+
+        // Priority 10: Camp
+        ExecuteCampState();
     }
 
 Begin:
