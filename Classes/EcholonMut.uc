@@ -1569,9 +1569,18 @@ function int GetSquadPhase(EcholonBot B)
     return SquadOrders[GroupIdx].Phase;
 }
 
-// @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.IsSquadInObjectivePhase
 function bool IsSquadInObjectivePhase(EcholonBot B)
 {
+    local int GroupIdx;
+
+    if (B == None)
+        return false;
+
+    GroupIdx = B.GroupID - 1;
+    if (GroupIdx < 0 || GroupIdx >= SquadOrders.Length)
+        return false;
+
+    return (SquadOrders[GroupIdx].Phase == PHASE_ENROUTE) || (SquadOrders[GroupIdx].Phase == PHASE_HOLDING);
 }
 
 // @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.GetSlotLocation
