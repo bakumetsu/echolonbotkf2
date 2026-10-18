@@ -3,34 +3,43 @@ class EcholonBroadcastHandler extends BroadcastHandler config(Game) hidecategori
 var BroadcastHandler MainHandle;
 var EcholonMut mut;
 
-// @STUB(M1) - legacy:KF2BotBroadcastHandle.SpawnBBHandle
 static final function SpawnBBHandle(EcholonMut M)
 {
+    local EcholonBroadcastHandler B;
+
+    B = M.Spawn(Class'EcholonBot.EcholonBroadcastHandler');
+    B.mut = M;
+    B.MainHandle = M.WorldInfo.Game.BroadcastHandler;
+    M.WorldInfo.Game.BroadcastHandler = B;
 }
 
-// @STUB(M1) - legacy:KF2BotBroadcastHandle.UpdateSentText
 function UpdateSentText()
 {
+    MainHandle.UpdateSentText();
 }
 
-// @STUB(M1) - legacy:KF2BotBroadcastHandle.AllowsBroadcast
 function bool AllowsBroadcast(Actor broadcaster, int InLen)
 {
+    if (MainHandle == None)
+    {
+        return false;
+    }
+    return MainHandle.AllowsBroadcast(broadcaster, InLen);
 }
 
-// @STUB(M1) - legacy:KF2BotBroadcastHandle.Broadcast
 function Broadcast(Actor Sender, coerce string msg, optional name Type)
 {
+    MainHandle.Broadcast(Sender, msg, Type);
 }
 
-// @STUB(M1) - legacy:KF2BotBroadcastHandle.BroadcastTeam
 function BroadcastTeam(Controller Sender, coerce string msg, optional name Type)
 {
+    MainHandle.BroadcastTeam(Sender, msg, Type);
 }
 
-// @STUB(M1) - legacy:KF2BotBroadcastHandle.AllowBroadcastLocalized
 event AllowBroadcastLocalized(Actor Sender, Class<LocalMessage> Message, optional int Switch, optional PlayerReplicationInfo RelatedPRI_1, optional PlayerReplicationInfo RelatedPRI_2, optional Object OptionalObject)
 {
+    MainHandle.AllowBroadcastLocalized(Sender, Message, Switch, RelatedPRI_1, RelatedPRI_2, OptionalObject);
 }
 
 // @STUB(M1) - legacy:KF2BotBroadcastHandle.AllowBroadcastLocalizedTeam

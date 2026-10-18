@@ -242,24 +242,56 @@ final function CheckDebugTrigger(Actor Sender, coerce string msg, name Type)
     }
 }
 
-// @STUB(M1) - legacy:KF2BotChat.Broadcast
 function Broadcast(Actor Sender, coerce string msg, optional name Type)
 {
+    CheckDebugTrigger(Sender, msg, Type);
+
+    if(NextHandle != None)
+    {
+        NextHandle.Broadcast(Sender, msg, Type);
+    }
+    else
+    {
+        super.Broadcast(Sender, msg, Type);
+    }
 }
 
-// @STUB(M1) - legacy:KF2BotChat.BroadcastTeam
 function BroadcastTeam(Controller Sender, coerce string msg, optional name Type)
 {
+    CheckDebugTrigger(Sender, msg, Type);
+
+    if (NextHandle != None)
+    {
+        NextHandle.BroadcastTeam(Sender, msg, Type);
+    }
+    else
+    {
+        super.BroadcastTeam(Sender, msg, Type);
+    }
 }
 
-// @STUB(M1) - legacy:KF2BotChat.AllowBroadcastLocalized
 event AllowBroadcastLocalized(Actor Sender, Class<LocalMessage> Message, optional int Switch, optional PlayerReplicationInfo RelatedPRI_1, optional PlayerReplicationInfo RelatedPRI_2, optional Object OptionalObject)
 {
+    if(NextHandle != None)
+    {
+        NextHandle.AllowBroadcastLocalized(Sender, Message, Switch, RelatedPRI_1, RelatedPRI_2, OptionalObject);
+    }
+    else
+    {
+        super.AllowBroadcastLocalized(Sender, Message, Switch, RelatedPRI_1, RelatedPRI_2, OptionalObject);
+    }
 }
 
-// @STUB(M1) - legacy:KF2BotChat.AllowBroadcastLocalizedTeam
 event AllowBroadcastLocalizedTeam(int TeamIndex, Actor Sender, Class<LocalMessage> Message, optional int Switch, optional PlayerReplicationInfo RelatedPRI_1, optional PlayerReplicationInfo RelatedPRI_2, optional Object OptionalObject)
 {
+    if (NextHandle != None)
+    {
+        NextHandle.AllowBroadcastLocalizedTeam(TeamIndex, Sender, Message, Switch, RelatedPRI_1, RelatedPRI_2, OptionalObject);
+    }
+    else
+    {
+        super.AllowBroadcastLocalizedTeam(TeamIndex, Sender, Message, Switch, RelatedPRI_1, RelatedPRI_2, OptionalObject);
+    }
 }
 
 defaultproperties
