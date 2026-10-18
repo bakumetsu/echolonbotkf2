@@ -4102,9 +4102,9 @@ function ApplyWedgeTarget(out vector OutTarget)
     OutTarget = Human.Location + ComputeWedgeOffset(OverwatchSlot, Human);
 }
 
-// @STUB(M5b) @SYS-BASE-EMOTE legacy:KF2BotBase.StartEmoteEchoTimer
 function StartEmoteEchoTimer()
 {
+    SetTimer(FRand(), false, 'BeginEmoteEcho');
 }
 
 // @STUB(M5b) @SYS-BASE-EMOTE legacy:KF2BotBase.BeginEmoteEcho
