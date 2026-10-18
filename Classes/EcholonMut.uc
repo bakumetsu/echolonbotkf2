@@ -689,9 +689,20 @@ function int ComputeCommandScore(EcholonBot Bot)
     return (Bot.PlayerReplicationInfo.Kills * 10) + Bot.Pawn.Health;
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.FindBestCandidate
 function EcholonBot FindBestCandidate(array<EcholonBot> Candidates)
 {
+    local int i;
+    local EcholonBot Best;
+
+    Best = None;
+    for (i = 0; i < Candidates.Length; i++)
+    {
+        if (Candidates[i] == None || Candidates[i].Pawn == None || Candidates[i].Pawn.Health <= 0)
+            continue;
+        if (Best == None || ComputeCommandScore(Candidates[i]) > ComputeCommandScore(Best))
+            Best = Candidates[i];
+    }
+    return Best;
 }
 
 // @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.FindExpendableMember
