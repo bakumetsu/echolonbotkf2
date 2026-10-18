@@ -2822,9 +2822,12 @@ final function RefreshSquadZedCache()
 	}
 }
 
-// @STUB(M5a) @SYS-BASE-CQB legacy:KF2BotBase.ApplyCrouch
 final function ApplyCrouch(bool bWant)
 {
+    if (Pawn != None && Pawn.bWantsToCrouch != bWant)
+    {
+        Pawn.ShouldCrouch(bWant);
+    }
 }
 
 final function bool IsHostileZed(Pawn P)
