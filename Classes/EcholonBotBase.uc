@@ -2897,9 +2897,38 @@ final function CloseToEffectiveRange()
     }
 }
 
-// @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.CheckWeaponReequip
 final function CheckWeaponReequip()
 {
+	local bool bReady;
+
+	if (!bFallbackWeapon || (Pawn == None))
+	{
+		return;
+	}
+	if ((FallbackPrimary == None) || (Pawn.Weapon == FallbackPrimary))
+	{
+		bFallbackWeapon = false;
+		return;
+	}
+	if (bFallbackHadSpare)
+	{
+		bReady = ((WorldInfo.TimeSeconds - FallbackSince) > 1.5) && ((Enemy == None) || (CountNearbyZedsCached(500.0) < 3));
+	}
+	else
+	{
+		bReady = FallbackPrimary.HasAnyAmmo();
+	}
+	if (bReady)
+	{
+		bFallbackWeapon = false;
+		Pawn.InvManager.SetCurrentWeapon(FallbackPrimary);
+		return;
+	}
+	if ((Pawn.Weapon != None) && Pawn.Weapon.bMeleeWeapon && (NextFallbackPoll < WorldInfo.TimeSeconds))
+	{
+		NextFallbackPoll = WorldInfo.TimeSeconds + 1.0;
+		SwitchToBestWeapon(true);
+	}
 }
 
 // @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.ShouldThrowGrenade
