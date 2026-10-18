@@ -630,9 +630,12 @@ state TacticalRetreat
         }
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.TacticalRetreat.FinishedMove
     function FinishedMove()
     {
+        if (bIsRetreating)
+        {
+            PickRetreatMove();
+        }
     }
 
     // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.TacticalRetreat.EnemyChanged
