@@ -919,11 +919,9 @@ final function bool FindCollectable()
     return false;
 }
 
-// @STUB(M5c) @SYS-LOGIC-UTIL legacy:KF2BotLogic.NotifyJumpApex
 event NotifyJumpApex()
 {
-    // PASS-THROUGH: overrides Controller; keep the engine behaviour until the real port lands.
-    super.NotifyJumpApex();
+    Pawn.DoJump(false);
 }
 
 // @STUB(M5c) @SYS-LOGIC-UTIL legacy:KF2BotLogic.GetAIInfo
