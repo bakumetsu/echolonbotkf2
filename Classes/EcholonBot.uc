@@ -1225,9 +1225,46 @@ state DonatingMoney
         PickCombatStyle();
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.DonatingMoney.DropMoney
     final function bool DropMoney()
     {
+        local Vector TossVel, StartLocation;
+        local Rotator R;
+        local Vector X, Y, Z;
+        local KFDroppedPickup_Cash KFDP;
+        local int Amount;
+
+        X = DonateHuman.Location - Pawn.Location;
+        TossVel = Normal(X);
+        TossVel = (TossVel * ((Pawn.Velocity Dot TossVel) + float(500))) + vect(0, 0, 200);
+        X.Z = 0;
+        R = Rotator(X);
+        GetAxes(R, X, Y, Z);
+        StartLocation = (Pawn.Location + ((0.8 * Pawn.CylinderComponent.CollisionRadius) * X)) - ((0.5 * Pawn.CylinderComponent.CollisionRadius) * Y);
+        Amount = Min(50, int(PlayerReplicationInfo.Score));
+        if (Amount <= 0)
+        {
+            return false;
+        }
+        StartLocation.Z += (Pawn.BaseEyeHeight / float(2));
+        KFDP = Spawn(Class'KFGame.KFDroppedPickup_Cash', self,, StartLocation,,, true);
+        if (KFDP == None)
+        {
+            return false;
+        }
+        KFDP.SetPhysics(2);
+        KFDP.InventoryClass = Class'KFGameContent.KFInventory_Money';
+        KFDP.Velocity = TossVel * 1.6;
+        KFDP.Instigator = Pawn;
+        KFDP.SetPickupMesh(Class'KFGameContent.KFInventory_Money'.default.DroppedPickupMesh);
+        KFDP.SetPickupParticles(Class'KFGameContent.KFInventory_Money'.default.DroppedPickupParticles);
+        KFDP.CashAmount = Amount;
+        KFDP.TosserPRI = PlayerReplicationInfo;
+        PlayerReplicationInfo.Score -= float(Amount);
+        if ((Role == ROLE_Authority) && (KFGameInfo(WorldInfo.Game) != None) && (KFGameInfo(WorldInfo.Game).DialogManager != None))
+        {
+            KFGameInfo(WorldInfo.Game).DialogManager.PlayDoshTossDialog(KPawn);
+        }
+        return true;
     }
 
 Begin:
