@@ -584,9 +584,22 @@ function NavigationPoint FindNearestNavPoint(vector ProjectedLoc, float SearchRa
     return None;
 }
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.FindNearestChokepoint
 function NavigationPoint FindNearestChokepoint(Controller VIP)
 {
+    local vector ProjectedLoc, LateralVec;
+    local NavigationPoint FoundNav;
+
+    if (VIP == None || VIP.Pawn == None)
+        return None;
+
+    LateralVec = Normal(vector(VIP.Pawn.Rotation) cross vect(0,0,1));
+    ProjectedLoc = VIP.Pawn.Location + (LateralVec * CHOKEPOINT_LATERAL_OFFSET);
+
+    foreach WorldInfo.RadiusNavigationPoints(class'NavigationPoint', FoundNav, ProjectedLoc, NAV_SEARCH_RADIUS)
+    {
+        return FoundNav;
+    }
+    return None;
 }
 
 // @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.GetVIPController
