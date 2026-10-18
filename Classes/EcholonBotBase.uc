@@ -1987,9 +1987,9 @@ final function ForceBreakGrapple()
     KPawn.InteractionPawn = None;
 }
 
-// @STUB(M5b) @SYS-BASE-HEALQ legacy:KF2BotBase.IsBotAlive
 function bool IsBotAlive()
 {
+    return (Pawn != None) && (Pawn.Health > 0);
 }
 
 // @STUB(M5b) @SYS-BASE-HEALQ legacy:KF2BotBase.CanHealOthers
