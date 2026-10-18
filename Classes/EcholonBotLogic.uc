@@ -836,9 +836,54 @@ final function ActivatePlayerDiedSequenceEvents()
     }
 }
 
-// @STUB(M5c) @SYS-LOGIC-UTIL legacy:KF2BotLogic.PickRetreatMove
 final function PickRetreatMove()
 {
+    local NavigationPoint N, Best;
+    local float Score, BestScore;
+
+    Best = None;
+    BestScore = 0.0;
+
+    foreach WorldInfo.RadiusNavigationPoints(class'NavigationPoint', N, Pawn.Location, 1200.0)
+    {
+        if (VSizeSq2D(N.Location - Pawn.Location) < 6400.0)
+        {
+            continue;
+        }
+
+        if (Enemy != None)
+        {
+            Score = VSizeSq(N.Location - Enemy.Location) - VSizeSq(N.Location - Pawn.Location);
+        }
+        else
+        {
+            Score = VSizeSq(N.Location - Pawn.Location);
+        }
+
+        Score *= (0.5 + FRand());
+
+        if ((Best == None || BestScore < Score) && ActorReachable(N))
+        {
+            Best = N;
+            BestScore = Score;
+        }
+    }
+
+    if (Best == None)
+    {
+        if (Enemy == None)
+        {
+            MoveToX(Pawn.Location + (VRand() * 400.0));
+        }
+        else
+        {
+            MoveToX(((Normal(Pawn.Location - Enemy.Location) * 500.0) + Pawn.Location) + (VRand() * 200.0), Enemy);
+        }
+    }
+    else
+    {
+        MoveTowardX(Best, Enemy);
+    }
 }
 
 // @STUB(M5c) @SYS-LOGIC-UTIL legacy:KF2BotLogic.FindCollectable
