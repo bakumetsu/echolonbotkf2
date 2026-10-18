@@ -3237,9 +3237,23 @@ function BeginRescue(vector GrabLoc, Pawn Grabber)
     }
 }
 
-// @STUB(M5a) @SYS-BASE-CQB legacy:KF2BotBase.UpdateCoverCrouch
 function UpdateCoverCrouch()
 {
+    local bool bWantCrouch;
+
+    if (WorldInfo.TimeSeconds < StyleCrouchUntil)
+        return;
+
+    bWantCrouch = false;
+    if (SquadLeader != None && CurrentFormation == 'SingleFile' && SquadLeader.Enemy != None)
+    {
+        if (SquadLeader.Enemy.IsAliveAndWell()
+            && VSizeSq(SquadLeader.Enemy.Location - Pawn.Location) < COVER_RANGE_SQ)
+        {
+            bWantCrouch = true;
+        }
+    }
+    ApplyCrouch(bWantCrouch);
 }
 
 // @STUB(M5a) @SYS-BASE-GRUNT legacy:KF2BotBase.IsGruntCombatLocked
