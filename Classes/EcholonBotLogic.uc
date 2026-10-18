@@ -962,9 +962,13 @@ simulated event ReplicatedEvent(name VarName)
     }
 }
 
-// @STUB(M5c) @SYS-LOGIC-DEATH legacy:KF2BotLogic.FinishObjective
 function FinishObjective()
 {
+	AuditGoalLog("GOAL_CLEAR", "FinishObjective");
+	ObjectiveGoal = None;
+	ObjectiveBailUntil = 0.0;
+	LastNodeBlockTime = 0.0;
+	NodeBlockCount = 0;
 }
 
 // @STUB(M5c) @SYS-LOGIC-UTIL legacy:KF2BotLogic.GetPointNear
