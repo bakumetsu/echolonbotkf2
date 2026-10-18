@@ -1499,6 +1499,7 @@ state GoShopping
             {
                 TraderRetryCount = 0;
                 NextShoppingTime = WorldInfo.TimeSeconds + TRADER_GIVEUP_COOLDOWN;
+                EchelonLog("TRADER_GIVEUP bot=" $ Name $ " retries=" $ string(TRADER_MAX_RETRIES) $ " cooldown=" $ string(TRADER_GIVEUP_COOLDOWN));
                 PickCombatStyle();
                 return;
             }

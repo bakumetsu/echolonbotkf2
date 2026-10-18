@@ -463,6 +463,7 @@ function HealFail()
 {
     FailStreak++;
     HealRetryAfter = WorldInfo.TimeSeconds + FMin(4.0 * FailStreak, 20.0);
+    EchelonLog("HEAL_FAIL bot=" $ Name $ " target=" $ PendingHeal $ " streak=" $ string(FailStreak) $ " retryIn=" $ string(HealRetryAfter - WorldInfo.TimeSeconds));
     PendingHeal = None;
 }
 

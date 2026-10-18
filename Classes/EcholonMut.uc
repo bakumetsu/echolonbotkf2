@@ -86,6 +86,9 @@ var() config float HealCylinderRadius;
 var() config float HealCylinderHeight;
 var() config float HealMinHealthPct;
 var() config bool bEnableFastTraceHealing;
+// Set bDisableAuditLog=True in the mutator's ini section to silence every [EcholonAudit] log line.
+// Off by default (logs on) so a missing ini key keeps the debug trail.
+var() config bool bDisableAuditLog;
 var array<KFPawn_Human> RangedHealTargets;
 var array<float> RangedHealCooldownEnds;
 var transient array<string> AvailableBotNames;
@@ -95,7 +98,7 @@ var float LastAuditLogTime;
 
 function EchelonLog(string Msg)
 {
-    if (WorldInfo == None)
+    if (WorldInfo == None || bDisableAuditLog)
         return;
     if (Left(Msg, 6) ~= "ORDER_")
     {

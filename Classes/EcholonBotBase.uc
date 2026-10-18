@@ -2040,7 +2040,7 @@ function bool IsBossWaveActive()
 
 function EchelonLog(string Msg)
 {
-	if (WorldInfo == None)
+	if (WorldInfo == None || (mut != None && mut.bDisableAuditLog))
 	{
 		return;
 	}
@@ -2120,6 +2120,11 @@ function AuditStateEntry()
 		AuditStateEntryTime = WorldInfo.TimeSeconds;
 		AuditStateEntryName = GetStateName();
 		WdLastMoveIntentTime = WorldInfo.TimeSeconds;
+		// PickNextMove is the hub every decision passes through; logging it would drown the rest.
+		if (AuditStateEntryName != 'PickNextMove')
+		{
+			EchelonLog("STATE_ENTER bot=" $ Name $ " state=" $ AuditStateEntryName);
+		}
 	}
 }
 
