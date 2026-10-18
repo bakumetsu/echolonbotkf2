@@ -2445,9 +2445,12 @@ final function bool ValidateOffsetTarget(Vector OffsetTarget)
     return false;
 }
 
-// @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.RequestRerouteWithBlock
 function RequestRerouteWithBlock(Vector BlockedPos)
 {
+	if (BotRank == SQUAD_LEADER)
+	{
+		bRerouteRequested = true;
+	}
 }
 
 // @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.IsDirClearCached
