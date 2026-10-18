@@ -1282,9 +1282,40 @@ final function SetHoldObjective(Volume V)
     }
 }
 
-// @STUB(M4) @SYS-MUT-WAVE legacy:KF2BotsMut.EndObjective
 final function EndObjective()
 {
+    local EcholonBot B;
+    local int i;
+
+    bObjectiveActive = false;
+    ValidPoints.Length = 0;
+
+    for (i = 0; i < SquadOrders.Length; i++)
+    {
+        ReleaseSquadSlots(i, "EndObjective");
+        SquadOrders[i].Leader = None;
+        SquadOrders[i].Zone = None;
+        SquadOrders[i].GoalNav = None;
+        SquadOrders[i].GoalPoint = vect(0, 0, 0);
+        SquadOrders[i].Slots.Length = 0;
+        SquadOrders[i].NodeBlacklist.Length = 0;
+        SquadOrders[i].ObjectiveBailUntil = 0.0;
+
+        if (Fireteams[i].Members.Length > 0)
+        {
+            SquadOrders[i].Phase = PHASE_REGROUP;
+            SquadOrders[i].StartTime = WorldInfo.TimeSeconds;
+        }
+        else
+        {
+            SquadOrders[i].Phase = PHASE_IDLE;
+        }
+    }
+
+    foreach WorldInfo.AllControllers(class'EcholonBot', B)
+    {
+        B.FinishObjective();
+    }
 }
 
 // @STUB(M4) @SYS-MUT-WAVE legacy:KF2BotsMut.NearestValidPoint
