@@ -874,9 +874,55 @@ function HandleVIPSuccession()
     }
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.HandleFireteamCasualty
 function HandleFireteamCasualty(EcholonBot DeadBot)
 {
+    local int GroupIdx, MemberIdx;
+    local bool bWasLeader;
+    local EcholonBot NewLeader;
+
+    if (DeadBot == None)
+    {
+        return;
+    }
+
+    GroupIdx = DeadBot.GroupID - 1;
+    if (GroupIdx < 0 || GroupIdx >= Fireteams.Length)
+    {
+        return;
+    }
+
+    bWasLeader = DeadBot.bIsGroupLeader;
+
+    MemberIdx = Fireteams[GroupIdx].Members.Find(DeadBot);
+    if (MemberIdx != INDEX_NONE)
+    {
+        Fireteams[GroupIdx].Members.Remove(MemberIdx, 1);
+    }
+
+    if (bWasLeader)
+    {
+        NewLeader = FindBestCandidate(Fireteams[GroupIdx].Members);
+        if (NewLeader != None)
+        {
+            NewLeader.bIsGroupLeader = true;
+            NewLeader.BotRank = SQUAD_LEADER;
+            NewLeader.ResetStuckState();
+            Fireteams[GroupIdx].Leader = NewLeader;
+            InheritSquadOrder(GroupIdx, NewLeader);
+        }
+        else
+        {
+            Fireteams[GroupIdx].Leader = None;
+            if (GroupIdx < SquadOrders.Length)
+            {
+                SquadOrders[GroupIdx].Leader = None;
+                SquadOrders[GroupIdx].ObjectiveBailUntil = 0.0;
+            }
+        }
+    }
+
+    ConsolidateFireteams();
+    SampleSquadSlots(GroupIdx);
 }
 
 // @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.DemoteGroupLeader
