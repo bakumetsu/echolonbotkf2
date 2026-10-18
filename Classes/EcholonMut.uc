@@ -1536,9 +1536,25 @@ function ReleaseSquadSlots(int GroupIdx, string Reason)
     SquadOrders[GroupIdx] = O;
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.GetFollowerBySlot
 function EcholonBot GetFollowerBySlot(int GroupIdx, int SlotIdx)
 {
+    local int i, FollowerSlot;
+    local EcholonBot M;
+
+    if (GroupIdx < 0 || GroupIdx >= Fireteams.Length)
+        return None;
+
+    FollowerSlot = 0;
+    for (i = 0; i < Fireteams[GroupIdx].Members.Length; i++)
+    {
+        M = Fireteams[GroupIdx].Members[i];
+        if (M == None || M == Fireteams[GroupIdx].Leader)
+            continue;
+        if (FollowerSlot == SlotIdx)
+            return M;
+        FollowerSlot++;
+    }
+    return None;
 }
 
 // @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.GetSquadPhase
