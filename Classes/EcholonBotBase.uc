@@ -2298,9 +2298,67 @@ final function Vector GetFormationBase(int Slot, name Formation, bool bMirror)
 	return V;
 }
 
-// @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.ComputeSlotOffset
-function Vector ComputeSlotOffset(optional int Slot = - 1)
+function Vector ComputeSlotOffset(optional int Slot = -1)
 {
+	local EcholonBot SL;
+	local name Form;
+	local int Epoch, Yaw;
+	local float Jitter;
+	local Rotator R;
+	local Vector Fwd, Rgt, Up;
+
+	if(Slot < 0)
+	{
+		Slot = GruntSlot;
+	}
+	SL = SquadLeader;
+	if(SL != None)
+	{
+		Form = SL.CurrentFormation;
+		Epoch = SL.FormationEpoch;
+		Yaw = SL.FormationYaw;
+		LastFormationYaw = Yaw;
+	}
+	else
+	{
+		Form = CachedOffsetFormation;
+		Epoch = CachedOffsetEpoch;
+		Yaw = LastFormationYaw;
+	}
+	if(Form == 'None')
+	{
+		Form = 'StaggeredColumn';
+	}
+
+	if(!bOffsetCached || (Epoch != CachedOffsetEpoch) || (Slot != CachedOffsetSlot) || (Form != CachedOffsetFormation))
+	{
+		bOffsetCached = true;
+		CachedOffsetEpoch = Epoch;
+		CachedOffsetSlot = Slot;
+		CachedOffsetFormation = Form;
+		Jitter = 0.10 + (0.05 * FRand());
+		CachedLocalOffset = GetFormationBase(Slot, Form, Rand(2) == 0);
+		if(Rand(2) == 0)
+		{
+			CachedLocalOffset.X *= 1.0 + Jitter;
+		}
+		else
+		{
+			CachedLocalOffset.X *= 1.0 - Jitter;
+		}
+		if(Rand(2) == 0)
+		{
+			CachedLocalOffset.Y *= 1.0 + Jitter;
+		}
+		else
+		{
+			CachedLocalOffset.Y *= 1.0 - Jitter;
+		}
+	}
+
+	R.Yaw = Yaw;
+	GetAxes(R, Fwd, Rgt, Up);
+	return (Fwd * CachedLocalOffset.X) + (Rgt * CachedLocalOffset.Y);
 }
 
 // @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.SyncLineFocus
