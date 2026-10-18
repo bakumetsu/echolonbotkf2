@@ -98,6 +98,8 @@ function ProcessOverwatchPhase()
 // @STUB(M5c) @SYS-LOGIC-MOVEVAL legacy:KF2BotLogic.FollowCheckExit
 function bool FollowCheckExit()
 {
+    // PASS-THROUGH: overrides EcholonFollowNavBase; keep the engine behaviour until the real port lands.
+    return super.FollowCheckExit();
 }
 
 // @STUB(M5c) @SYS-LOGIC-DEATH legacy:KF2BotLogic.PawnDied

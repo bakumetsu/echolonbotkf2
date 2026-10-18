@@ -561,11 +561,15 @@ final function CheckBlockedPath(Actor Start, NavigationPoint End)
 // @STUB(M3) @SYS-BASE-MOVE legacy:KF2BotBase.FollowNotifyHub
 function FollowNotifyHub(EFollowStatus NewStatus)
 {
+    // PASS-THROUGH: overrides EcholonFollowNavBase; keep the engine behaviour until the real port lands.
+    super.FollowNotifyHub(NewStatus);
 }
 
 // @STUB(M3) @SYS-BASE-MOVE legacy:KF2BotBase.FollowOnGaveUp
 function FollowOnGaveUp()
 {
+    // PASS-THROUGH: overrides EcholonFollowNavBase; keep the engine behaviour until the real port lands.
+    super.FollowOnGaveUp();
 }
 
 // @STUB(M3) @SYS-BASE-MOVE legacy:KF2BotBase.Tick
@@ -742,6 +746,8 @@ function bool AuditRateLimit(string Msg)
 // @STUB(M5b) @SYS-BASE-AUDIT legacy:KF2BotBase.FollowGetOrderAnchor
 function bool FollowGetOrderAnchor(out vector OutLoc)
 {
+    // PASS-THROUGH: overrides EcholonFollowNavBase; keep the engine behaviour until the real port lands.
+    return super.FollowGetOrderAnchor(OutLoc);
 }
 
 // @STUB(M5b) @SYS-BASE-AUDIT legacy:KF2BotBase.AuditStateEntry
