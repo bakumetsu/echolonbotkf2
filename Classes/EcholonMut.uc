@@ -466,9 +466,9 @@ function NavigationPoint NearestValidPoint(vector Loc)
 {
 }
 
-// @STUB(M1) @SYS-MUT-UTIL legacy:KF2BotsMut.CoordStr
 function string CoordStr(vector L)
 {
+    return string(FFloor(L.X / 100.0)) $ "," $ string(FFloor(L.Y / 100.0)) $ "," $ string(FFloor(L.Z / 100.0));
 }
 
 // @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.EnsureSquadOrderTable
@@ -566,49 +566,248 @@ function AddNodeBlock(EcholonBot OwnerBot, NavigationPoint Node)
 {
 }
 
-// @STUB(M1) @SYS-MUT-UTIL legacy:KF2BotsMut.InitTraderList
 final function InitTraderList(KFGFxObject_TraderItems L)
 {
+    local int I;
+    local EcholonWeaponInfo A;
+
+    bTraderListInit = true;
+    I = L.SaleItems.Length - 1;
+    while (I >= 0)
+    {
+        if (A == None)
+        {
+            A = new class'EcholonBot.EcholonWeaponInfo';
+        }
+        if (A.InitInformation(L.SaleItems[I].WeaponDef, L.SaleItems[I].ClassName))
+        {
+            TraderList.AddItem(A);
+            A = None;
+        }
+        I--;
+    }
 }
 
-// @STUB(M1) @SYS-MUT-UTIL legacy:KF2BotsMut.FindWeaponByClass
 final function EcholonWeaponInfo FindWeaponByClass(Class<KFWeapon> W)
 {
+    local EcholonWeaponInfo A;
+    local int i;
+
+    for (i = 0; i < TraderList.Length; i++)
+    {
+        A = TraderList[i];
+        if (A.WeaponClass == W)
+        {
+            return A;
+        }
+    }
+    return None;
 }
 
-// @STUB(M1) @SYS-MUT-SPAWN legacy:KF2BotsMut.RespawnBots
 final function RespawnBots()
 {
+    local EcholonBot B;
+
+    foreach WorldInfo.AllControllers(class'EcholonBot', B)
+    {
+        B.NextShoppingTime = WorldInfo.TimeSeconds - 1.0;
+        if (B.Pawn == None || !B.Pawn.IsAliveAndWell())
+        {
+            RestartBot(B);
+            continue;
+        }
+        B.PlayerReplicationInfo.Score += 500.0;
+    }
 }
 
-// @STUB(M1) @SYS-MUT-SPAWN legacy:KF2BotsMut.PickCustomBotName
 final function string PickCustomBotName()
 {
+    local int Idx;
+    local string PickedName;
+
+    if (!bUseCustomBotNames || CustomBotNames.Length == 0)
+    {
+        return "";
+    }
+    if (AvailableBotNames.Length == 0)
+    {
+        AvailableBotNames = CustomBotNames;
+    }
+    Idx = Rand(AvailableBotNames.Length);
+    PickedName = AvailableBotNames[Idx];
+    AvailableBotNames.Remove(Idx, 1);
+    return PickedName;
 }
 
-// @STUB(M1) @SYS-MUT-SPAWN legacy:KF2BotsMut.InitBotCharacter
 final function InitBotCharacter(EcholonBot Bot)
 {
+    local byte I, C, lvl;
+    local EcholonBot B;
+    local KFPlayerReplicationInfo PRI;
+    local KFCharacterInfo_Human H;
+    local string BotName;
+
+    lvl = byte(BotMinPerkLv + Rand((BotMaxPerkLv - BotMinPerkLv) + 1));
+    Bot.CurrentLevel = lvl;
+    PRI = KFPlayerReplicationInfo(Bot.PlayerReplicationInfo);
+
+    if((PRI == None) || (PRI.CharacterArchetypes.Length == 0))
+    {
+        Bot.CharacterArch = None;
+    }
+    else
+    {
+        I = byte(Rand(PRI.CharacterArchetypes.Length));
+        H = PRI.CharacterArchetypes[I];
+
+        C = 0;
+        while((H == None || H.SoundGroupArch == None) && C < PRI.CharacterArchetypes.Length)
+        {
+            I = byte((I + 1) % PRI.CharacterArchetypes.Length);
+            H = PRI.CharacterArchetypes[I];
+            C++;
+        }
+
+        if(H == None || H.SoundGroupArch == None)
+        {
+            I = 0;
+            H = PRI.CharacterArchetypes[0];
+        }
+
+        if(PRI.CharacterArchetypes.Length > 1)
+        {
+            C = 0;
+            while(C < 4)
+            {
+                B = None;
+                // SDK-UNVERIFIED: WorldInfo.AllControllers
+                foreach WorldInfo.AllControllers(class'EcholonBot', B)
+                {
+                    if((B != None) && (B != Bot) && (B.CharacterArch == H))
+                    {
+                        break;
+                    }
+                    B = None;
+                }
+                if(B == None)
+                {
+                    break;
+                }
+                I = byte((I + 1) % PRI.CharacterArchetypes.Length);
+                H = PRI.CharacterArchetypes[I];
+                C++;
+            }
+        }
+        Bot.CharacterArch = H;
+    }
+
+    BotName = PickCustomBotName();
+    if(BotName == "")
+    {
+        if(Bot.CharacterArch != None)
+        {
+            BotName = string(Bot.CharacterArch.Name);
+        }
+        else
+        {
+            BotName = "Horzine_Bot";
+        }
+    }
+
+    if(bShowBotLevel)
+    {
+        BotName = ("[Lv" $ string(lvl) $ "] ") $ BotName;
+    }
+    if(bShowBotRole)
+    {
+        BotName = ("[" $ Bot.GetRankName() $ "] ") $ BotName;
+    }
+    if(PRI != None)
+    {
+        PRI.SetPlayerName(BotName);
+    }
 }
 
-// @STUB(M1) @SYS-MUT-PERK legacy:KF2BotsMut.PickFallbackPerk
 final function Class<KFPerk> PickFallbackPerk()
 {
+    local Class<KFPerk> P;
+    local int Idx;
+
+    while (true)
+    {
+        Idx = Rand(Class'KFGame.KFPlayerController'.default.PerkList.Length);
+        P = Class'KFGame.KFPlayerController'.default.PerkList[Idx].PerkClass;
+        if (!bNoZerkerBots || P != Class'KFGame.KFPerk_Berserker')
+        {
+            break;
+        }
+    }
+    return P;
 }
 
-// @STUB(M1) @SYS-MUT-PERK legacy:KF2BotsMut.ResolvePerkByName
 final function Class<KFPerk> ResolvePerkByName(string PerkName)
 {
+    local int I;
+
+    I = 0;
+    while (I < Class'KFGame.KFPlayerController'.default.PerkList.Length)
+    {
+        if (string(Class'KFGame.KFPlayerController'.default.PerkList[I].PerkClass.Name) ~= PerkName)
+        {
+            return Class'KFGame.KFPlayerController'.default.PerkList[I].PerkClass;
+        }
+        I++;
+    }
+    return None;
 }
 
-// @STUB(M1) @SYS-MUT-PERK legacy:KF2BotsMut.ResetPerkPool
 final function ResetPerkPool()
 {
+    local int I;
+    local Class<KFPerk> P;
+
+    PerkPool.Length = 0;
+    PerkPoolCounts.Length = 0;
+    for (I = 0; I < AllowedPerks.Length; I++)
+    {
+        P = ResolvePerkByName(AllowedPerks[I]);
+        if ((P != None) && (!bNoZerkerBots || P != Class'KFGame.KFPerk_Berserker'))
+        {
+            PerkPool.AddItem(P);
+            PerkPoolCounts.AddItem(0);
+        }
+    }
 }
 
-// @STUB(M1) @SYS-MUT-PERK legacy:KF2BotsMut.PickBotPerk
 final function Class<KFPerk> PickBotPerk()
 {
+    local int Idx;
+    local Class<KFPerk> Picked;
+
+    if (AllowedPerks.Length == 0)
+    {
+        return PickFallbackPerk();
+    }
+    if (PerkPool.Length == 0)
+    {
+        ResetPerkPool();
+    }
+    if (PerkPool.Length == 0)
+    {
+        return PickFallbackPerk();
+    }
+    Idx = Rand(PerkPool.Length);
+    Picked = PerkPool[Idx];
+    if (MaxBotsPerPerk > 0)
+    {
+        ++PerkPoolCounts[Idx];
+        if (PerkPoolCounts[Idx] >= MaxBotsPerPerk)
+        {
+            PerkPool.Remove(Idx, 1);
+            PerkPoolCounts.Remove(Idx, 1);
+        }
+    }
+    return Picked;
 }
 
 // @STUB(M1) @SYS-MUT-SPAWN legacy:KF2BotsMut.AddBot
