@@ -655,9 +655,31 @@ function Pawn FindBossPawn()
     return BestBoss;
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.OnBotKilled
 function OnBotKilled(EcholonBot DeadBot)
 {
+    local PromotionRequest Req;
+
+    if (DeadBot == None)
+    {
+        return;
+    }
+
+    if (DeadBot.BotRank == SQUAD_LEADER || DeadBot.BotRank == LIEUTENANT || DeadBot.BotRank == CAPTAIN)
+    {
+        Req.DeadOfficer = DeadBot;
+        Req.OldRank = DeadBot.BotRank;
+        Req.Replacement = None;
+        Req.Score = 0;
+        PendingPromotions.AddItem(Req);
+    }
+
+    if (DeadBot == VIPController)
+    {
+        HandleVIPSuccession();
+        UpdateMacroWaypoints();
+    }
+
+    UnregisterBot(DeadBot);
 }
 
 // @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.ComputeCommandScore
