@@ -2914,9 +2914,49 @@ function UpdateOverwatchTimer()
     }
 }
 
-// @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.CheckOverwatchStall
 function CheckOverwatchStall()
 {
+    local int i, stuckCount;
+    local EcholonBot G;
+    local vector newAnchor;
+
+    stuckCount = 0;
+
+    if (!IsTimerActive('ToggleOverwatchPhase') || bOverwatchAllMove)
+    {
+        StuckCounter = 0;
+        return;
+    }
+
+    for (i = 0; i < 4; i++)
+    {
+        G = SquadMembers[i];
+        if (G != None && G.Pawn != None && G.GetStateName() != 'BreakLose' && G.IsOverwatchStuck())
+        {
+            stuckCount++;
+        }
+    }
+
+    if (stuckCount < 2)
+    {
+        StuckCounter = 0;
+        return;
+    }
+
+    StuckCounter++;
+    if (int(StuckCounter) < 2)
+    {
+        return;
+    }
+
+    StuckCounter = 0;
+    bOverwatchAllMove = true;
+    OverwatchResetUntil = WorldInfo.TimeSeconds + OW_TOGGLE_INTERVAL;
+    BroadcastOverwatchState();
+
+    newAnchor = OrderAnchor + (VRand() * 150.0);
+    newAnchor.Z = OrderAnchor.Z;
+    IssueCommand(CurrentOrder, newAnchor);
 }
 
 // @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.ReceiveOverwatchState
