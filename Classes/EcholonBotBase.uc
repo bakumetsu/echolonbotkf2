@@ -2878,9 +2878,40 @@ function AssignSquadSlots()
     }
 }
 
-// @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.UpdateOverwatchTimer
 function UpdateOverwatchTimer()
 {
+    local int i;
+    local bool bMoveOrder;
+
+    bMoveOrder = (CurrentOrder == 'CMD_PushAnchor' || CurrentOrder == 'CMD_TacticalRetreat');
+    if (bMoveOrder)
+    {
+        if (!IsTimerActive('ToggleOverwatchPhase'))
+        {
+            bOverwatchAllMove = false;
+            StuckCounter = 0;
+            BroadcastOverwatchState();
+            SetTimer(OW_TOGGLE_INTERVAL, true, 'ToggleOverwatchPhase');
+        }
+    }
+    else
+    {
+        AssignSquadSlots();
+        if (IsTimerActive('ToggleOverwatchPhase'))
+        {
+            ClearTimer('ToggleOverwatchPhase');
+            bOverwatchAllMove = false;
+            StuckCounter = 0;
+            for (i = 0; i < 4; i++)
+            {
+                if (SquadMembers[i] != None)
+                {
+                    SquadMembers[i].bOverwatchMoving = false;
+                    SquadMembers[i].OverwatchStuckTime = 0.0;
+                }
+            }
+        }
+    }
 }
 
 // @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.CheckOverwatchStall
