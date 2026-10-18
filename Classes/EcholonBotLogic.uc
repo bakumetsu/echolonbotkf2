@@ -716,9 +716,25 @@ function IdleWatchdog()
     }
 }
 
-// @STUB(M5c) @SYS-LOGIC-WATCHDOG legacy:KF2BotLogic.ProcessOverwatchPhase
 function ProcessOverwatchPhase()
 {
+    local string PhaseStr;
+
+    if (BotRank != CAPTAIN)
+        return;
+
+    if (WorldInfo.TimeSeconds > EngageExpireTime)
+    {
+        bOverwatchPhase = !bOverwatchPhase;
+        EngageExpireTime = WorldInfo.TimeSeconds + 5.0;
+
+        if (bOverwatchPhase)
+            PhaseStr = "HOLD";
+        else
+            PhaseStr = "ADVANCE";
+
+        EchelonLog("Overwatch phase toggled: " $ PhaseStr);
+    }
 }
 
 // @STUB(M5c) @SYS-LOGIC-MOVEVAL legacy:KF2BotLogic.FollowCheckExit
