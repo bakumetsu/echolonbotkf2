@@ -1194,9 +1194,14 @@ final function byte PickRandEmote()
 	return byte(Rand(MaxEmoteCount));
 }
 
-// @STUB(M1) @SYS-MUT-BOOT legacy:KF2BotsMut.ShouldDoVictoryDance
 final function bool ShouldDoVictoryDance()
 {
+    if (NextVictoryDance > WorldInfo.TimeSeconds)
+    {
+        return false;
+    }
+    NextVictoryDance = WorldInfo.TimeSeconds + 5.0;
+    return true;
 }
 
 // @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.CacheHumans
@@ -1214,19 +1219,122 @@ function vector GetObjectiveLocation()
 {
 }
 
-// @STUB(M1) @SYS-MUT-SPAWN legacy:KF2BotsMut.SetupSquadSpawns
 function SetupSquadSpawns(int NumSquads)
 {
+    local int i, j, NumFactories, NumAssigned;
+    local array<KFPickupFactory> AmmoFactories;
+    local KFPickupFactory Temp;
+    local NavigationPoint PS;
+
+    if (NumSquads <= 0)
+    {
+        return;
+    }
+
+    for (i = 0; i < KF.AllPickupFactories.Length; i++)
+    {
+        if (KFPickupFactory_Ammo(KF.AllPickupFactories[i]) != None)
+        {
+            AmmoFactories.AddItem(KF.AllPickupFactories[i]);
+        }
+    }
+    NumFactories = AmmoFactories.Length;
+    NumAssigned = Min(NumFactories, NumSquads);
+
+    for (i = 0; i < NumAssigned; i++)
+    {
+        j = i + Rand(NumFactories - i);
+        Temp = AmmoFactories[i];
+        AmmoFactories[i] = AmmoFactories[j];
+        AmmoFactories[j] = Temp;
+        SpawnSquadAt(AmmoFactories[i].Location, i);
+    }
+
+    for (i = NumAssigned; i < NumSquads; i++)
+    {
+        PS = KF.FindPlayerStart(None, 0);
+        if (PS != None)
+        {
+            SpawnSquadAt(PS.Location, i);
+        }
+        else if (NumAssigned > 0)
+        {
+            SpawnSquadAt(AmmoFactories[0].Location, i);
+        }
+    }
+
+    HideAllPickups();
 }
 
-// @STUB(M1) @SYS-MUT-SPAWN legacy:KF2BotsMut.RelocateBotsToAmmoCrates
 function RelocateBotsToAmmoCrates()
 {
+    local int i, j, NumFactories, GroupIdx;
+    local array<KFPickupFactory> AmmoFactories;
+    local KFPickupFactory Temp;
+    local EcholonBot Bot;
+    local vector AnchorPos;
+
+    if (ActiveBots.Length == 0)
+        return;
+
+    AmmoFactories.Length = 0;
+    for (i = 0; i < KF.AllPickupFactories.Length; i++)
+    {
+        if (KFPickupFactory_Ammo(KF.AllPickupFactories[i]) != None)
+        {
+            AmmoFactories.AddItem(KF.AllPickupFactories[i]);
+        }
+    }
+    NumFactories = AmmoFactories.Length;
+    if (NumFactories == 0)
+        return;
+
+    for (i = 0; i < NumFactories; i++)
+    {
+        j = i + Rand(NumFactories - i);
+        Temp = AmmoFactories[i];
+        AmmoFactories[i] = AmmoFactories[j];
+        AmmoFactories[j] = Temp;
+    }
+
+    for (GroupIdx = 0; GroupIdx < Fireteams.Length; GroupIdx++)
+    {
+        if (GroupIdx >= NumFactories)
+            break;
+        AnchorPos = AmmoFactories[GroupIdx].Location;
+
+        for (i = 0; i < Fireteams[GroupIdx].Members.Length; i++)
+        {
+            Bot = Fireteams[GroupIdx].Members[i];
+            if (Bot == None || Bot.Pawn == None)
+                continue;
+            if (!Bot.bJustSpawned)
+                continue;
+
+            if (Bot.bIsGroupLeader)
+            {
+                Bot.Pawn.SetLocation(AnchorPos);
+            }
+            else
+            {
+                Bot.Pawn.SetLocation(PickSquadSpawnPoint(AnchorPos, 90.0, 150.0));
+            }
+        }
+    }
 }
 
-// @STUB(M1) @SYS-MUT-SPAWN legacy:KF2BotsMut.SpawnSquadAt
 function SpawnSquadAt(vector AnchorPos, int SquadIndex)
 {
+    local int i;
+    local vector GruntPos;
+
+    SpawnBotWithRank(SQUAD_LEADER, PickSquadSpawnPoint(AnchorPos, 60.0, 90.0));
+
+    for (i = 0; i < 3; i++)
+    {
+        GruntPos = PickSquadSpawnPoint(AnchorPos, 90.0, 150.0);
+        SpawnBotWithRank(GRUNT, GruntPos);
+    }
 }
 
 // @STUB(M1) @SYS-MUT-SPAWN legacy:KF2BotsMut.PickSquadSpawnPoint
@@ -1234,19 +1342,38 @@ function vector PickSquadSpawnPoint(vector AnchorPos, float MinR, float MaxR)
 {
 }
 
-// @STUB(M1) @SYS-MUT-SPAWN legacy:KF2BotsMut.SpawnBotWithRank
 function EcholonBot SpawnBotWithRank(EBotRank Rank, vector SpawnPos)
 {
+    local EcholonBot B;
+
+    B = Spawn(class'EcholonBot', Self, '', SpawnPos, rot(0,0,0));
+    if (B != None)
+    {
+        B.BotRank = Rank;
+        RegisterBot(B);
+    }
+    return B;
 }
 
-// @STUB(M1) @SYS-MUT-SPAWN legacy:KF2BotsMut.HideAllPickups
 function HideAllPickups()
 {
+    local int i;
+
+    for (i = 0; i < KF.AllPickupFactories.Length; i++)
+    {
+        KF.AllPickupFactories[i].bPickupHidden = true;
+    }
+    SetTimer(10.0, false, 'ReEnableAmmoFactories');
 }
 
-// @STUB(M1) @SYS-MUT-SPAWN legacy:KF2BotsMut.ReEnableAmmoFactories
 function ReEnableAmmoFactories()
 {
+    local int i;
+
+    for (i = 0; i < KF.AllPickupFactories.Length; i++)
+    {
+        KF.AllPickupFactories[i].bPickupHidden = false;
+    }
 }
 
 defaultproperties

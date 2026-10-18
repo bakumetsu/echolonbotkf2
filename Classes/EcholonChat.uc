@@ -15,14 +15,54 @@ var() config float ChatIntervalMax;
 var config string _Separator4;
 var() config string DebugTriggerWord;
 
-// @STUB(M1) - legacy:KF2BotChat.PostBeginPlay
 function PostBeginPlay()
 {
+    InitConfigDefaults();
+
+    if (!bBotsChat)
+    {
+        Destroy();
+        return;
+    }
+
+    NextHandle = WorldInfo.Game.BroadcastHandler;
+    WorldInfo.Game.BroadcastHandler = self;
+
+    SetTimer(GetNextChatDelay(), false, 'BotChatterTimer');
 }
 
-// @STUB(M1) - legacy:KF2BotChat.InitConfigDefaults
 final function InitConfigDefaults()
 {
+    if (ConfigVer == CUR_CHAT_CONFIGVER)
+    {
+        return;
+    }
+
+    ConfigVer = CUR_CHAT_CONFIGVER;
+
+    _Separator1 = "--- GENERAL ---";
+    _Separator2 = "--- CHAT LINES ---";
+    _Separator3 = "--- TIMING ---";
+    _Separator4 = "--- DEBUG TRIGGER ---";
+
+    bBotsChat = true;
+    ChatIntervalMin = 30.0;
+    ChatIntervalMax = 90.0;
+    DebugTriggerWord = "!botchat";
+
+    PresetSentences.Length = 0;
+    PresetSentences.AddItem("Watch out, more zeds incoming!");
+    PresetSentences.AddItem("Nice shot!");
+    PresetSentences.AddItem("I'm low on ammo.");
+    PresetSentences.AddItem("Heads up, big one coming.");
+    PresetSentences.AddItem("Anyone need healing?");
+    PresetSentences.AddItem("Let's stick together.");
+    PresetSentences.AddItem("That was close...");
+    PresetSentences.AddItem("Trader's open, grab your gear.");
+    PresetSentences.AddItem("On your six!");
+    PresetSentences.AddItem("Reloading!");
+
+    SaveConfig();
 }
 
 // @STUB(M1) - legacy:KF2BotChat.GetNextChatDelay
