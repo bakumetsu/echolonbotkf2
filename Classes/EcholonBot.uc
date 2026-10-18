@@ -690,9 +690,39 @@ state BreakLose
         }
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.BreakLose.Timer
     function Timer()
     {
+        local int NearbyZeds;
+
+        if( (KPawn != None) && (KPawn.Health > 0) && KPawn.IsDoingSpecialMove(31) && (KPawn.InteractionPawn != None) )
+        {
+            Focus = KPawn.InteractionPawn;
+
+            if( WorldInfo.TimeSeconds >= NextEscapeAttempt )
+            {
+                NextEscapeAttempt = WorldInfo.TimeSeconds + 1.5;
+                BreakFreeAttempts++;
+                TryBreakFree();
+                if( (mut != None) && mut.bDebugGrapple )
+                {
+                    mut.DebugMessage( GetHumanReadableName() $ " struggling free (attempt " $ string(BreakFreeAttempts) $ ")" );
+                }
+            }
+
+            if( (mut != None) && !bGrappleFailsafeTriggered && (WorldInfo.TimeSeconds - GrabStartTime) >= mut.FailsafeActivationDelay )
+            {
+                NearbyZeds = CountNearbyZeds(600.0);
+                if( NearbyZeds <= mut.MaxZedsForFailsafe )
+                {
+                    bGrappleFailsafeTriggered = true;
+                    ForceBreakGrapple();
+                }
+            }
+        }
+        else
+        {
+            PickCombatStyle();
+        }
     }
 }
 
