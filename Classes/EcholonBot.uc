@@ -1284,9 +1284,10 @@ state Dead
         SetTimer(1.0, true, 'ReassertScoreboardFlags');
     }
 
-    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.Dead.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
+        ClearTimer('ReassertScoreboardFlags');
     }
 
     // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.Dead.ReassertScoreboardFlags
