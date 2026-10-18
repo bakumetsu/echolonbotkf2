@@ -1125,9 +1125,15 @@ Begin:
 // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.GetItem UNVERIFIED-ENTRY
 state GetItem
 {
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.GetItem.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        AbortMove();
+        KPawn.SetSprinting(Enemy == None);
+        if ((Enemy != None) && LineOfSightTo(Enemy))
+        {
+            SetTimer(0.1 + FRand() * 0.15, true, 'FireWeaponAt');
+        }
     }
 
     // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.GetItem.EndState
