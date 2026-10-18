@@ -848,7 +848,6 @@ final function SimulateBashHit(KFPawn TargetZed, KFWeapon W)
     TargetZed.TakeDamage(BashDamage, self, TargetZed.Location, vect(0.0, 0.0, 0.0), Class'Engine.DamageType');
 }
 
-// @STUB(M5b) @SYS-BASE-HEALQ legacy:KF2BotBase.EnemyChanged
 function EnemyChanged()
 {
 }
