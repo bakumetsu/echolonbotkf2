@@ -1230,9 +1230,10 @@ function bool ExecuteCampState()
     return true;
 }
 
-// @STUB(M5c) @SYS-LOGIC-MOVEVAL legacy:KF2BotLogic.ResetStuckState
 function ResetStuckState()
 {
+    bHasStuckBaseline = false;
+    bIsStuck = false;
 }
 
 defaultproperties
