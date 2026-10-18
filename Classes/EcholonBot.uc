@@ -996,9 +996,9 @@ state GrenadeTarget
         }
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.GrenadeTarget.FinishedMove
     function FinishedMove()
     {
+        PickCombatStyle();
     }
 
 Begin:
