@@ -620,41 +620,232 @@ final function bool TargetLowHealth(Pawn Other)
     return false;
 }
 
-// @STUB(M3) @SYS-BASE-PERCEPT legacy:KF2BotBase.EyeSightCheck
 function EyeSightCheck()
 {
+    if ((Pawn != None) && Pawn.IsAliveAndWell())
+    {
+        if (Enemy != None && Enemy.IsAliveAndWell())
+            return;
+        if (WorldInfo.TimeSeconds - LastEnemyScanTime < ENEMY_SCAN_INTERVAL)
+            return;
+        LastEnemyScanTime = WorldInfo.TimeSeconds;
+        PickNextEnemy();
+    }
 }
 
-// @STUB(M3) @SYS-BASE-PERCEPT legacy:KF2BotBase.PickNextEnemy
 final function bool PickNextEnemy()
 {
+    local KFPawn_Monster P;
+    local bool bResult;
+
+    if (WorldInfo.TimeSeconds - LastLeashDropTime < LEASH_COOLDOWN)
+    {
+        return false;
+    }
+
+    bResult = false;
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', P, Pawn.Location, ENEMY_SCAN_RADIUS)
+    {
+        if ((P != Pawn) && P.IsAliveAndWell() && FastTrace(P.Location, Pawn.Location))
+        {
+            bResult = SetEnemy(P, true) || bResult;
+        }
+    }
+    return bResult;
 }
 
-// @STUB(M3) @SYS-BASE-PERCEPT legacy:KF2BotBase.SetEnemy
 function bool SetEnemy(Pawn Other, optional bool bNoNotify)
 {
+    local KFPawn_Monster M;
+
+    if (Other == None || Other == Pawn || Other.SpawnTime == WorldInfo.TimeSeconds || !Other.IsAliveAndWell())
+    {
+        return false;
+    }
+
+    M = KFPawn_Monster(Other);
+    if (M != None && M.bIsHeadless)
+    {
+        return false;
+    }
+
+    if (Other.Health > BOSS_HEALTH_THRESHOLD && IsMeleeOnly())
+    {
+        return false;
+    }
+
+    if (Pawn.IsSameTeam(Other))
+    {
+        if (PlayStyle == 1 && KPawn != None && FollowingHuman == None && KFPawn_Human(Other) != None && Other.IsHumanControlled() && Rand(3) == 0)
+        {
+            FollowingHuman = Other;
+        }
+        if (Enemy == None && NextDoshShareTime > WorldInfo.TimeSeconds && PlayerReplicationInfo != None && PlayerReplicationInfo.Score > 800.0 && Other.PlayerReplicationInfo != None && Other.PlayerReplicationInfo.Score < 500.0)
+        {
+            DonateMoney(Other);
+        }
+        return false;
+    }
+
+    EnemyEncounterTime = WorldInfo.TimeSeconds;
+
+    if (Enemy != None && GetEnemyThreat(Enemy) > GetEnemyThreat(Other))
+    {
+        return false;
+    }
+
+    Enemy = Other;
+
+    if (!bNoNotify)
+    {
+        EnemyChanged();
+    }
+
+    if (bIsGroupLeader && mut != None && VSizeSq(Other.Location - Pawn.Location) <= SPOT_RADIUS_SQ)
+    {
+        mut.BroadcastSpottedEnemy(GroupID, Other);
+    }
+
+    return true;
 }
 
-// @STUB(M3) @SYS-BASE-PERCEPT legacy:KF2BotBase.GetEnemyThreat
 function float GetEnemyThreat(Pawn Other)
 {
+    local float V;
+
+    V = FMin(float(Other.Health), 600.0) + 100.0;
+    if (V < 30.0)
+    {
+        V += 800.0;
+    }
+    V -= (VSize(Other.Location - Pawn.Location) / 2.0);
+    if (Other == Enemy)
+    {
+        V *= 1.25;
+    }
+    return V;
 }
 
-// @STUB(M3) @SYS-BASE-FIRE legacy:KF2BotBase.FireWeaponAt
 function bool FireWeaponAt(Actor inActor)
 {
-    // PASS-THROUGH: overrides Controller; keep the engine behaviour until the real port lands.
-    return super.FireWeaponAt(inActor);
+	local KFWeapon W;
+
+	bOutOfEffectiveRange = false;
+
+	if ((InheritedEnemy != None) && (inActor == InheritedEnemy) && !HasOwnFireLine(inActor))
+	{
+		Pawn.StopFiring();
+		return false;
+	}
+	if (Pawn.IsFiring())
+	{
+		return true;
+	}
+	if ((inActor == None) || NeedToTurn(inActor.Location) || !Pawn.CanAttack(inActor))
+	{
+		return false;
+	}
+	Target = inActor;
+	W = KFWeapon(Pawn.Weapon);
+	if (W != None)
+	{
+		if (HandleWeaponManagement(W))
+		{
+			return false;
+		}
+		if (TryThrowGrenade(W, inActor))
+		{
+			return true;
+		}
+		if (W.bMeleeWeapon)
+		{
+			W.StartFire(BOTFM_PRIMARY);
+		}
+		else if (VSizeSq(inActor.Location - Pawn.Location) < 40000.0)
+		{
+			W.StartFire(BOTFM_BASH);
+		}
+		else
+		{
+			if (!IsInEffectiveRange(inActor))
+			{
+				bOutOfEffectiveRange = true;
+				return false;
+			}
+			W.StartFire(BOTFM_PRIMARY);
+		}
+	}
+	return Pawn.BotFire(false);
 }
 
-// @STUB(M3) @SYS-BASE-OBJ legacy:KF2BotBase.TryBreakFree
 final function TryBreakFree()
 {
+    local KFWeapon W;
+    local KFPawn GrabbingZed;
+
+    if (Pawn == None)
+    {
+        return;
+    }
+    if (Pawn.Weapon == None)
+    {
+        if (Pawn.InvManager != None)
+        {
+            Pawn.InvManager.SwitchToBestWeapon(true);
+        }
+        return;
+    }
+    W = KFWeapon(Pawn.Weapon);
+    if (W == None)
+    {
+        return;
+    }
+    GrabbingZed = KPawn.InteractionPawn;
+    if (W.bMeleeWeapon)
+    {
+        W.StartFire(0);
+        SimulateBashHit(GrabbingZed, W);
+    }
+    else if (W == MedicGun)
+    {
+        if (Pawn.InvManager != None)
+        {
+            Pawn.InvManager.SwitchToBestWeapon(true);
+        }
+    }
+    else
+    {
+        W.StartFire(3);
+        SimulateBashHit(GrabbingZed, W);
+    }
 }
 
-// @STUB(M3) @SYS-BASE-FIRE legacy:KF2BotBase.SimulateBashHit
 final function SimulateBashHit(KFPawn TargetZed, KFWeapon W)
 {
+    local float RngRoll;
+    local int BashDamage;
+
+    if (TargetZed == None || !TargetZed.IsAliveAndWell())
+    {
+        return;
+    }
+
+    if (W == MedicGun)
+    {
+        return;
+    }
+
+    RngRoll = FRand();
+    if (RngRoll < 0.30)
+    {
+        BashDamage = 200;
+    }
+    else
+    {
+        BashDamage = 25;
+    }
+
+    TargetZed.TakeDamage(BashDamage, self, TargetZed.Location, vect(0.0, 0.0, 0.0), Class'Engine.DamageType');
 }
 
 // @STUB(M5b) @SYS-BASE-HEALQ legacy:KF2BotBase.EnemyChanged
@@ -662,23 +853,41 @@ function EnemyChanged()
 {
 }
 
-// @STUB(M3) @SYS-BASE-SHOP legacy:KF2BotBase.DonateMoney
 function DonateMoney(Pawn Other)
 {
 }
 
-// @STUB(M3) @SYS-BASE-SHOP legacy:KF2BotBase.SwitchToBestWeapon
 exec function SwitchToBestWeapon(optional bool bForceNewWeapon, optional bool check_9mm_logic = false)
 {
-    // PASS-THROUGH: overrides Controller; keep the engine behaviour until the real port lands.
-    super.SwitchToBestWeapon(bForceNewWeapon, check_9mm_logic);
+	if (Pawn != None && Pawn.InvManager != None)
+	{
+		Pawn.InvManager.SwitchToBestWeapon(bForceNewWeapon, check_9mm_logic);
+	}
 }
 
-// @STUB(M3) @SYS-BASE-FIRE legacy:KF2BotBase.GetAdjustedAimFor
 function Rotator GetAdjustedAimFor(Weapon W, Vector StartFireLoc)
 {
-    // PASS-THROUGH: overrides Controller; keep the engine behaviour until the real port lands.
-    return super.GetAdjustedAimFor(W, StartFireLoc);
+    local Vector TargetPos;
+
+    if(Target == None)
+    {
+        Target = Enemy;
+        if(Target == None)
+        {
+            return super(Controller).GetAdjustedAimFor(W, StartFireLoc);
+        }
+    }
+
+    if((W != None) && (KFPawn(Target) != None))
+    {
+        TargetPos = KFPawn(Target).Mesh.GetBoneLocation(KFPawn(Target).HeadBoneName);
+    }
+    else
+    {
+        TargetPos = Target.Location;
+    }
+
+    return Rotator(TargetPos - StartFireLoc);
 }
 
 // @STUB(M3) @SYS-BASE-FIRE legacy:KF2BotBase.GetPlayerViewPoint
