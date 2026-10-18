@@ -3481,9 +3481,28 @@ function HandleReloadDrift()
     }
 }
 
-// @STUB(M5a) @SYS-BASE-RELOAD legacy:KF2BotBase.ReceiveReloadDrift
 function ReceiveReloadDrift(vector Anchor, bool bMove, float Lease)
 {
+    local float now;
+    local bool bNewEpisode;
+
+    now = WorldInfo.TimeSeconds;
+    bNewEpisode = (ReloadDriftUntil <= now);
+    ReloadDriftUntil = now + Lease;
+    bReloadDriftMove = bMove;
+
+    if (bMove)
+    {
+        if (bNewEpisode)
+        {
+            ReloadDriftOffset = ComputeFormationOffset(SquadLeader, false);
+        }
+        OnReloadDriftAnchor(Anchor);
+    }
+    else
+    {
+        ApplyCrouch(true);
+    }
 }
 
 // @STUB(M5a) @SYS-BASE-RELOAD legacy:KF2BotBase.OnReloadDriftAnchor
