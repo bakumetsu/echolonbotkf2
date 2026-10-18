@@ -2255,9 +2255,47 @@ function DeferredFormationScan()
 	ScanRoomForFormation();
 }
 
-// @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.GetFormationBase
 final function Vector GetFormationBase(int Slot, name Formation, bool bMirror)
 {
+	local Vector V;
+	local float SideSign, Tier;
+
+	Slot = Slot % 4;
+	if ((Slot % 2) == 0)
+	{
+		SideSign = -1.0;
+	}
+	else
+	{
+		SideSign = 1.0;
+	}
+	Tier = float((Slot / 2) + 1);
+	switch (Formation)
+	{
+		case 'Arrowhead':
+			V.X = -150.0 * Tier;
+			V.Y = SideSign * 150.0 * Tier;
+			break;
+		case 'LineFormation':
+			V.X = -40.0;
+			V.Y = SideSign * (120.0 * Tier);
+			break;
+		case 'SingleFile':
+			V.X = -150.0 * float(Slot + 1);
+			break;
+		default:
+			V.X = -130.0 * float(Slot + 1);
+			if (bMirror)
+			{
+				V.Y = SideSign * 70.0 * -1.0;
+			}
+			else
+			{
+				V.Y = SideSign * 70.0;
+			}
+			break;
+	}
+	return V;
 }
 
 // @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.ComputeSlotOffset
