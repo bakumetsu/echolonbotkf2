@@ -3518,9 +3518,16 @@ function OnReloadComplete()
 	ApplyCrouch(false);
 }
 
-// @STUB(M5a) @SYS-BASE-RELOAD legacy:KF2BotBase.TrackReloadState
 function TrackReloadState()
 {
+    local bool bNow;
+
+    bNow = IsReloading();
+    if (bWasReloading && !bNow)
+    {
+        OnReloadComplete();
+    }
+    bWasReloading = bNow;
 }
 
 // @STUB(M5b) @SYS-BASE-LTBOUND legacy:KF2BotBase.StartLtHumanBounding
