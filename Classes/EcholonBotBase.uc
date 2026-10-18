@@ -2853,9 +2853,16 @@ function ToggleOverwatchPhase()
     BroadcastOverwatchState();
 }
 
-// @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.BroadcastOverwatchState
 function BroadcastOverwatchState()
 {
+    local int i;
+    for (i = 0; i < 4; i++)
+    {
+        if (SquadMembers[i] != None && SquadMembers[i].Pawn != None)
+        {
+            SquadMembers[i].ReceiveOverwatchState(bOverwatchPhase, byte(i), bOverwatchAllMove);
+        }
+    }
 }
 
 // @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.AssignSquadSlots
