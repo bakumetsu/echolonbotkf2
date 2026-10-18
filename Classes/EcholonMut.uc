@@ -971,9 +971,22 @@ function RequestLeaderDemotion(EcholonBot StuckLeader)
     DemoteGroupLeader(StuckLeader);
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.ConsolidateFireteams
 function ConsolidateFireteams()
 {
+    local int GroupIdx;
+
+    if (Fireteams.Length > 0 && Fireteams[0].Members.Length < VIP_ESCORT_MIN_SIZE)
+    {
+        PullBotFromNearestGroup(0);
+    }
+    for (GroupIdx = 0; GroupIdx < Fireteams.Length; GroupIdx++)
+    {
+        if (Fireteams[GroupIdx].Members.Length == GROUP_DISSOLVE_SIZE)
+        {
+            DissolveGroup(GroupIdx);
+        }
+    }
+    SyncSquadLeaders();
 }
 
 // @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.PullBotFromNearestGroup
