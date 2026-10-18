@@ -1,1 +1,0 @@
-class WrongName extends Actor;

@@ -1,8 +1,7 @@
 __pycache__/
 *.pyc
 .pytest_cache/
-kit/workspace.local.json
-kit/runs/
 *.u
-kit/generated/sdk_symbols.json
-kit/tasks/
+
+# The agent kit lives only on the developer PC.
+kit/

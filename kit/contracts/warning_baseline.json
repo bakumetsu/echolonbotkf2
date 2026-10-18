@@ -1,4 +1,0 @@
-{
- "_comment": "Compiler warnings to ignore, as 'File.uc|message' (no line numbers so edits don't break the match). Add entries only for warnings you have decided to accept.",
- "warnings": []
-}
