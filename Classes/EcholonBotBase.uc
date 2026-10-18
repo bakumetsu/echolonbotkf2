@@ -290,50 +290,81 @@ var float WdLastStepTime;
 var float WdProgressGoalD2;
 var vector WdIdleStartLoc;
 
-// @STUB(M3) @SYS-BASE-BOOT legacy:KF2BotBase.PreBeginPlay
 simulated function PreBeginPlay()
 {
-    // BRIDGE(M1): minimal engine pass-through so bots spawn; replaced by the full port in M3.
     local Mutator M;
+    local float WatchdogDelay;
 
-    for (M = WorldInfo.Game.BaseMutator; M != None; M = M.NextMutator)
+    M = WorldInfo.Game.BaseMutator;
+    while (M != None)
     {
         mut = EcholonMut(M);
         if (mut != None)
         {
             break;
         }
+        M = M.NextMutator;
     }
+
     super.PreBeginPlay();
-    WorldInfo.Game.NumBots++;
+
+    if (WorldInfo.Game.NumBots < 255)
+    {
+        ++WorldInfo.Game.NumBots;
+    }
+
     KFGRI = KFGameReplicationInfo(WorldInfo.GRI);
+
+    SetTimer(0.5 + (FRand() * 0.5), true, 'EyeSightCheck');
+
     if (mut != None)
     {
         mut.RegisterBot(EcholonBot(self));
     }
+
     bJustSpawned = true;
+
+    WatchdogDelay = 0.5;
+    if (GroupID > 0)
+    {
+        WatchdogDelay += GroupID * 0.1;
+    }
+    SetTimer(WatchdogDelay, false, 'IdleWatchdogTimer');
+
+    if (BotRank == CAPTAIN)
+    {
+        SetTimer(5.0, true, 'ProcessOverwatchPhase');
+    }
+    if (BotRank == GRUNT)
+    {
+        SetTimer(1.5, true, 'GruntDecisionTimer');
+    }
+
+    BreathingPhase = FRand() * 6.2831853;
+    StartEmoteEchoTimer();
 }
 
-// @STUB(M3) @SYS-BASE-BOOT legacy:KF2BotBase.Destroyed
 simulated function Destroyed()
 {
-    // BRIDGE(M1): minimal engine pass-through so bots spawn; replaced by the full port in M3.
+    ClearRankTimers();
     super(Controller).Destroyed();
-    WorldInfo.Game.NumBots--;
+    if (WorldInfo.Game.NumBots > 0)
+    {
+        --WorldInfo.Game.NumBots;
+    }
     if (mut != None)
     {
         mut.UnregisterBot(EcholonBot(self));
     }
 }
 
-// @STUB(M3) @SYS-BASE-BOOT legacy:KF2BotBase.InitPlayerReplicationInfo
 function InitPlayerReplicationInfo()
 {
-    // BRIDGE(M1): minimal engine pass-through so bots spawn; replaced by the full port in M3.
     local KFGameInfo KFGI;
     local KFPlayerReplicationInfo KFPRI;
 
     super(Controller).InitPlayerReplicationInfo();
+
     if (PlayerReplicationInfo != None)
     {
         PlayerReplicationInfo.bBot = false;
@@ -342,64 +373,86 @@ function InitPlayerReplicationInfo()
         {
             PlayerReplicationInfo.PlayerName = "Bot_" $ Rand(9999);
         }
+
         KFPRI = KFPlayerReplicationInfo(PlayerReplicationInfo);
         if (KFPRI != None)
         {
             KFPRI.bHasSpawnedIn = true;
         }
+
         KFGI = KFGameInfo(WorldInfo.Game);
-        if (KFGI != None && KFGI.Teams[0] != None)
+        if ((KFGI != None) && KFGI.Teams[0] != None)
         {
             KFGI.SetTeam(self, KFGI.Teams[0]);
         }
+
         if (WorldInfo.GRI != None)
         {
             WorldInfo.GRI.AddPRI(PlayerReplicationInfo);
         }
     }
+
     if (mut != None)
     {
         mut.InitBotCharacter(EcholonBot(self));
     }
 }
 
-// @STUB(M3) @SYS-BASE-BOOT legacy:KF2BotBase.GiveWeaponDef
 final function GiveWeaponDef(Class<KFWeaponDefinition> W)
 {
-    // BRIDGE(M1): minimal engine pass-through so bots spawn; replaced by the full port in M3.
     local Class<Weapon> WC;
 
     if (W == None)
     {
         return;
     }
+
     WC = Class<Weapon>(DynamicLoadObject(W.default.WeaponClassPath, Class'Core.Class'));
+
     if (WC != None)
     {
         Pawn.InvManager.CreateInventory(WC);
     }
 }
 
-// @STUB(M3) @SYS-BASE-BOOT legacy:KF2BotBase.Restart
 function Restart(bool bVehicleTransition)
 {
-    // BRIDGE(M1): minimal engine pass-through so bots spawn; replaced by the full port in M3.
+    local KFPlayerReplicationInfo KFPRI;
+
+    FollowingHuman = None;
+    LastFactory = None;
+    FavoriteWeapon = None;
     NextShoppingTime = WorldInfo.TimeSeconds - 1.0;
-    if (KFInventoryManager(Pawn.InvManager) != None && Pawn.InvManager.Class != Class'EcholonBot.EcholonInventoryManager')
+
+    if ((KFInventoryManager(Pawn.InvManager) != None) && (Pawn.InvManager.Class != Class'EcholonBot.EcholonInventoryManager'))
     {
         Pawn.InvManager.Destroy();
         Pawn.InvManager = Spawn(Class'EcholonBot.EcholonInventoryManager', Pawn);
         Pawn.InvManager.SetupFor(Pawn);
     }
+
     super(Controller).Restart(bVehicleTransition);
+
     BotRank = GRUNT;
     bIsGroupLeader = false;
+    ArmRankTimers();
+    bFallbackWeapon = false;
+    FallbackPrimary = None;
+    NextGrenadeTimer = 0.0;
+    Pawn.PeripheralVision = -0.2;
+    Pawn.JumpZ = FMax(Pawn.JumpZ, 750.0);
+
     KPawn = KFPawn_Human(Pawn);
-    if (Pawn.Physics == PHYS_None)
+    KPawn.NumJumpsAllowed = 2;
+
+    if (Pawn.Physics == 0)
     {
-        Pawn.SetPhysics(PHYS_Falling);
+        Pawn.SetPhysics(2);
     }
+
+    SetTimer(0.2 + (FRand() * 0.1), true, 'CheckGrabbed');
     KFInvManager = KFInventoryManager(Pawn.InvManager);
+
     if (KFInvManager != None)
     {
         if (Perk != None)
@@ -411,43 +464,160 @@ function Restart(bool bVehicleTransition)
         }
         KFInvManager.GrenadeCount = 2;
     }
-    if (KFPlayerReplicationInfo(PlayerReplicationInfo) != None)
+
+    KFPRI = KFPlayerReplicationInfo(PlayerReplicationInfo);
+    Pawn.bModifyReachSpecCost = false;
+    Pawn.PathSearchType = 1;
+
+    AuditGoalLog("GOAL_CLEAR", "Restart");
+    ObjectiveGoal = None;
+    ObjectiveBailUntil = 0.0;
+    LastNodeBlockTime = 0.0;
+    NodeBlockCount = 0;
+    ValidateAndNudgeSpawn();
+    GotoState('Roaming');
+
+    if (KPawn != None)
     {
-        KFPlayerReplicationInfo(PlayerReplicationInfo).bHasSpawnedIn = true;
+        if ((Perk == Class'KFGame.KFPerk_Berserker') || (Perk == Class'KFGame.KFPerk_FieldMedic'))
+        {
+            KPawn.HealthMax = 100 + Min(CurrentLevel * 4, 100);
+            KPawn.Health = KPawn.HealthMax;
+
+            if (KFPRI != None)
+            {
+                KFPRI.PlayerHealthPercent = FloatToByte(float(KPawn.Health) / float(KPawn.HealthMax));
+                KFPRI.PlayerHealth = KPawn.Health;
+            }
+
+            KPawn.MaxArmor = byte(100 + Min(CurrentLevel * 2, 150));
+
+            if (CurrentLevel > 20)
+            {
+                KPawn.Armor = KPawn.MaxArmor;
+            }
+        }
+    }
+
+    if (KFPRI != None)
+    {
+        KFPRI.bHasSpawnedIn = true;
     }
 }
 
-// @STUB(M3) @SYS-BASE-PERCEPT legacy:KF2BotBase.NotifyTakeHit
 function NotifyTakeHit(Controller InstigatedBy, Vector HitLocation, int Damage, Class<DamageType> DamageType, Vector Momentum)
 {
-    // BRIDGE(M1): minimal engine pass-through so bots spawn; replaced by the full port in M3.
-    super.NotifyTakeHit(InstigatedBy, HitLocation, Damage, DamageType, Momentum);
+    if ((InstigatedBy != None) && (InstigatedBy.Pawn != None))
+    {
+        SetEnemy(InstigatedBy.Pawn);
+    }
 }
 
-// @STUB(M3) @SYS-BASE-PERCEPT legacy:KF2BotBase.SeePlayer
 function SeePlayer(Pawn Seen)
 {
-    // BRIDGE(M1): minimal engine pass-through so bots spawn; replaced by the full port in M3.
-    super.SeePlayer(Seen);
+    if (BotRank == GRUNT)
+    {
+        GruntOnSight(Seen);
+        return;
+    }
+    SetEnemy(Seen);
 }
 
-// @STUB(M3) @SYS-BASE-PERCEPT legacy:KF2BotBase.SeeMonster
 function SeeMonster(Pawn Seen)
 {
-    // PASS-THROUGH: overrides Controller; keep the engine behaviour until the real port lands.
-    super.SeeMonster(Seen);
+    if (BotRank == GRUNT)
+    {
+        GruntOnSight(Seen);
+        return;
+    }
+    SetEnemy(Seen);
 }
 
-// @STUB(M3) @SYS-BASE-PERCEPT legacy:KF2BotBase.NotifyBump
 event bool NotifyBump(Actor Other, Vector HitNormal)
 {
-    // PASS-THROUGH: overrides Controller; keep the engine behaviour until the real port lands.
-    return super.NotifyBump(Other, HitNormal);
+    local Vector Dir;
+
+    if (FollowOwnsEvents() && FollowHandleBump(Other, HitNormal))
+    {
+        return true;
+    }
+
+    super.NotifyBump(Other, HitNormal);
+    Enable('NotifyBump');
+
+    if ((Pawn(Other) != None) && !SetEnemy(Pawn(Other)))
+    {
+        if (MoveFlags > 0)
+        {
+            Dir = GetMoveDirection();
+            if ((Dir Dot (Other.Location - Pawn.Location)) > 0.0)
+            {
+                HitNormal.X = -Dir.Y;
+                HitNormal.Y = Dir.X;
+                HitNormal.Z = 0.0;
+                HitNormal = Normal(HitNormal);
+                bAdjusting = true;
+                if ((HitNormal Dot Dir) < 0.0)
+                {
+                    AdjustPosition.Position = Pawn.Location + (HitNormal * 80.0);
+                }
+                else
+                {
+                    AdjustPosition.Position = Pawn.Location - (HitNormal * 80.0);
+                }
+            }
+        }
+        else
+        {
+            if (!bAdjusting)
+            {
+                bAdjusting = true;
+                AdjustPosition.Position = ((Normal(Pawn.Location - Other.Location) * 45.0) + (VRand() * 25.0)) + Pawn.Location;
+                SetTimer(0.5, false, 'StopAdjusting');
+            }
+        }
+    }
+    else
+    {
+        if (KFDoorActor(Other) != None)
+        {
+            if (!MarkDoorPath(KFDoorActor(Other)))
+            {
+                KFDoorActor(Other).UseDoor(Pawn);
+            }
+            else
+            {
+                EndMoveTime = WorldInfo.TimeSeconds - 1.0;
+            }
+        }
+    }
+    return false;
 }
 
-// @STUB(M3) @SYS-BASE-PERCEPT legacy:KF2BotBase.TargetLowHealth
 final function bool TargetLowHealth(Pawn Other)
 {
+    local float T;
+    local int H;
+
+    H = Other.Health;
+    if (KFPawn_Human(Other) != None)
+    {
+        H += int(KFPawn_Human(Other).HealthToRegen);
+    }
+    if (H < Other.HealthMax)
+    {
+        T = WorldInfo.TimeSeconds - EnemyEncounterTime;
+        if (T > 4.0)
+        {
+            return true;
+        }
+        if (T > 2.0)
+        {
+            return H < 85;
+        }
+        return H < 70;
+    }
+    return false;
 }
 
 // @STUB(M3) @SYS-BASE-PERCEPT legacy:KF2BotBase.EyeSightCheck
