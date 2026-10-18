@@ -445,9 +445,113 @@ function int DetermineGroupCount(int BotCount)
     return Count;
 }
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.UpdateMacroWaypoints
 function UpdateMacroWaypoints()
 {
+    local int GroupIdx;
+    local EcholonBot GroupLeader;
+    local KFGameReplicationInfo KFGRI;
+    local Pawn BossPawn;
+    local Actor NewAnchor;
+    local vector ProjectedLoc;
+    local Controller VIP;
+
+    PruneInvalidBots();
+    ProcessPromotionQueue();
+    CleanupRangedHealCooldowns();
+
+    if (VIPController != None && (VIPController.Pawn == None || VIPController.Pawn.Health <= 0))
+    {
+        HandleVIPSuccession();
+    }
+
+    if (ActiveBots.Length == 0 || NumGroups <= 0)
+    {
+        return;
+    }
+
+    EvaluateRegroupEntries();
+
+    KFGRI = KFGameReplicationInfo(WorldInfo.GRI);
+
+    if (KFGRI != None && KFGRI.IsBossWave())
+    {
+        BossPawn = FindBossPawn();
+        if (BossPawn != None)
+        {
+            for (GroupIdx = 0; GroupIdx < NumGroups; GroupIdx++)
+            {
+                GroupLeader = Fireteams[GroupIdx].Leader;
+                if (GroupLeader == None)
+                {
+                    continue;
+                }
+                Fireteams[GroupIdx].Anchor = None;
+                GroupLeader.AssignedAnchor = BossPawn;
+                PropagateAnchorToFollowers(GroupIdx);
+            }
+            return;
+        }
+    }
+
+    VIP = GetVIPController();
+
+    for (GroupIdx = 0; GroupIdx < NumGroups; GroupIdx++)
+    {
+        GroupLeader = Fireteams[GroupIdx].Leader;
+        if (GroupLeader == None)
+        {
+            continue;
+        }
+
+        switch (GroupIdx)
+        {
+            case 0:
+                if (KFGRI != None && KFGRI.bTraderIsOpen)
+                {
+                    Fireteams[GroupIdx].Anchor = None;
+                    GroupLeader.AssignedAnchor = None;
+                }
+                else if (VIP != None && VIP.Pawn != None)
+                {
+                    Fireteams[GroupIdx].Anchor = None;
+                    GroupLeader.AssignedAnchor = VIP.Pawn;
+                }
+                break;
+            case 1:
+                if (VIP != None && VIP.Pawn != None)
+                {
+                    ProjectedLoc = VIP.Pawn.Location + (vector(VIP.Pawn.Rotation) * VANGUARD_OFFSET);
+                    NewAnchor = FindNearestNavPoint(ProjectedLoc, NAV_SEARCH_RADIUS);
+                    if (NewAnchor != None)
+                    {
+                        Fireteams[GroupIdx].Anchor = NavigationPoint(NewAnchor);
+                        GroupLeader.AssignedAnchor = NewAnchor;
+                    }
+                }
+                break;
+            case 2:
+                if (VIP != None && VIP.Pawn != None)
+                {
+                    ProjectedLoc = VIP.Pawn.Location - (vector(VIP.Pawn.Rotation) * REARGUARD_OFFSET);
+                    NewAnchor = FindNearestNavPoint(ProjectedLoc, NAV_SEARCH_RADIUS);
+                    if (NewAnchor != None)
+                    {
+                        Fireteams[GroupIdx].Anchor = NavigationPoint(NewAnchor);
+                        GroupLeader.AssignedAnchor = NewAnchor;
+                    }
+                }
+                break;
+            case 3:
+                NewAnchor = FindNearestChokepoint(VIP);
+                if (NewAnchor != None)
+                {
+                    Fireteams[GroupIdx].Anchor = NavigationPoint(NewAnchor);
+                    GroupLeader.AssignedAnchor = NewAnchor;
+                }
+                break;
+        }
+        PropagateAnchorToFollowers(GroupIdx);
+    }
 }
 
 // @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.PropagateAnchorToFollowers
