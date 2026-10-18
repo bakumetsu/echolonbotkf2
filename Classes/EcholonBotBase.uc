@@ -4038,9 +4038,21 @@ function UpdateWedgeMode()
     }
 }
 
-// @STUB(M5b) @SYS-BASE-WEDGE legacy:KF2BotBase.ClearWedge
 function ClearWedge()
 {
+    local int i;
+
+    bWedgeActive = false;
+    WedgeHuman = None;
+    WedgeExpireTime = 0.0;
+    CurrentFormation = 'StaggeredColumn';
+    for (i = 0; i < 4; i++)
+    {
+        if (SquadMembers[i] != None)
+        {
+            SquadMembers[i].CurrentFormation = 'StaggeredColumn';
+        }
+    }
 }
 
 // @STUB(M5b) @SYS-BASE-WEDGE legacy:KF2BotBase.ComputeWedgeOffset
