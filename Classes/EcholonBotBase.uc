@@ -3081,9 +3081,11 @@ function SLGrenadeLOSPhase()
 	}
 }
 
-// @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.ClearGrenadeSignal
 function ClearGrenadeSignal()
 {
+	GrenadeSignal = false;
+	GrenadeThrowsLeft = 0;
+	GrenadeTargetPawn = None;
 }
 
 // @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.HandleWeaponManagement
