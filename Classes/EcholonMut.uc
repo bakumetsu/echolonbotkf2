@@ -1956,9 +1956,46 @@ function bool IsNodeBlocked(EcholonBot OwnerBot, NavigationPoint Node)
     return false;
 }
 
-// @STUB(M4) @SYS-MUT-NODEBLOCK legacy:KF2BotsMut.AddNodeBlock
 function AddNodeBlock(EcholonBot OwnerBot, NavigationPoint Node)
 {
+    local int GroupIdx, i;
+    local SquadOrder O;
+    local NavNodeBlock B;
+    local float Now;
+
+    if (OwnerBot == None || Node == None)
+        return;
+
+    GroupIdx = OwnerBot.GroupID - 1;
+    if (GroupIdx < 0 || GroupIdx >= SquadOrders.Length)
+        return;
+
+    Now = WorldInfo.TimeSeconds;
+    O = SquadOrders[GroupIdx];
+
+    for (i = O.NodeBlacklist.Length - 1; i >= 0; i--)
+    {
+        if (O.NodeBlacklist[i].ExpiresAt <= Now)
+        {
+            O.NodeBlacklist.Remove(i, 1);
+        }
+    }
+
+    for (i = 0; i < O.NodeBlacklist.Length; i++)
+    {
+        if (O.NodeBlacklist[i].Owner == OwnerBot && O.NodeBlacklist[i].Node == Node.Name)
+        {
+            O.NodeBlacklist[i].ExpiresAt = Now + OBJ_BAIL_COOLDOWN;
+            SquadOrders[GroupIdx] = O;
+            return;
+        }
+    }
+
+    B.Node = Node.Name;
+    B.Owner = OwnerBot;
+    B.ExpiresAt = Now + OBJ_BAIL_COOLDOWN;
+    O.NodeBlacklist.AddItem(B);
+    SquadOrders[GroupIdx] = O;
 }
 
 final function InitTraderList(KFGFxObject_TraderItems L)
