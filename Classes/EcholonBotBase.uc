@@ -1791,9 +1791,34 @@ function bool IsOnWalkableFloor()
     return (Pawn.Location.Z - Pawn.Base.Location.Z) < 80.0;
 }
 
-// @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.ComputeFormationOffset
 function vector ComputeFormationOffset(EcholonBot Leader, bool bSingleFile)
 {
+    local int FollowerIdx, GroupSize;
+    local float Angle;
+    local vector Forward, Right, Offset;
+
+    if (Leader == None || Leader.Pawn == None || Pawn == None)
+        return Pawn.Location;
+
+    FollowerIdx = mut.GetFollowerIndex(EcholonBot(self));
+    GroupSize = mut.GetGroupSize(GroupID);
+    if (GroupSize <= 0)
+        GroupSize = 1;
+
+    Forward = vector(Leader.Pawn.Rotation);
+    Right = Normal(Forward cross vect(0, 0, 1));
+
+    if (bSingleFile)
+    {
+        Offset = Leader.Pawn.Location - (Forward * (SINGLE_FILE_SPACING * FollowerIdx));
+    }
+    else
+    {
+        Angle = ((360.0 / GroupSize) * FollowerIdx) + (GroupID * 15.0);
+        Offset = Leader.Pawn.Location + (Forward * PERIMETER_RADIUS * cos(Angle * DEG_TO_RAD)) + (Right * PERIMETER_RADIUS * sin(Angle * DEG_TO_RAD));
+    }
+
+    return Offset;
 }
 
 final function int CountNearbyZeds(float Radius)
@@ -2103,49 +2128,366 @@ function LTDispatchLoop()
     EchelonLog("LTDispatchLoop");
 }
 
-// @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.ScanRoomForFormation
 final function ScanRoomForFormation()
 {
+    local Vector Src, X, Y, Z, EndPt, HitLoc, HitNorm;
+    local Rotator FlatRot;
+    local Actor HitActor;
+    local float FwdDistSq;
+    local int ClearCount;
+    local bool bFwd, bLeft, bRight, bBack;
+    local name Wanted;
+
+    if (BotRank != SQUAD_LEADER || Pawn == None || bFormationScanDeferred)
+    {
+        return;
+    }
+
+    FormationYaw = Pawn.Rotation.Yaw;
+
+    if (bRerouteRequested)
+    {
+        bRerouteRequested = false;
+        FormationEpoch++;
+        if (WorldInfo.TimeSeconds - LastRerouteTime < 4.0)
+        {
+            CurrentFormation = 'SingleFile';
+            PendingFormationCount = 0;
+            FormationHoldUntil = WorldInfo.TimeSeconds + 3.0;
+        }
+        LastRerouteTime = WorldInfo.TimeSeconds;
+    }
+
+    if (WorldInfo.TimeSeconds < FormationHoldUntil)
+    {
+        return;
+    }
+
+    if (Class'EcholonBotBase'.default.LastFormationScanTime == WorldInfo.TimeSeconds)
+    {
+        bFormationScanDeferred = true;
+        SetTimer(0.034, false, 'DeferredFormationScan');
+        return;
+    }
+    LastFormationScanTime = WorldInfo.TimeSeconds;
+
+    Src = Pawn.Location;
+    FlatRot.Yaw = Pawn.Rotation.Yaw;
+    GetAxes(FlatRot, X, Y, Z);
+
+    EndPt = Src + (X * FORM_LINE_DIST);
+    HitActor = Trace(HitLoc, HitNorm, EndPt, Src, false);
+    if (HitActor != None && KFPawn_Human(HitActor) == None)
+    {
+        FwdDistSq = VSizeSq(HitLoc - Src);
+    }
+    else
+    {
+        FwdDistSq = FORM_LINE_DIST * FORM_LINE_DIST;
+    }
+    bFwd = FwdDistSq >= FORM_SCAN_DIST * FORM_SCAN_DIST;
+
+    bLeft = FastTrace(Src - (Y * FORM_SCAN_DIST), Src);
+    bRight = FastTrace(Src + (Y * FORM_SCAN_DIST), Src);
+    bBack = FastTrace(Src - (X * FORM_SCAN_DIST), Src);
+
+    ScanMask = 0;
+    if (bFwd)
+    {
+        ScanMask = byte(ScanMask | 1);
+        ClearCount++;
+    }
+    if (bLeft)
+    {
+        ScanMask = byte(ScanMask | 2);
+        ClearCount++;
+    }
+    if (bRight)
+    {
+        ScanMask = byte(ScanMask | 4);
+        ClearCount++;
+    }
+    if (bBack)
+    {
+        ScanMask = byte(ScanMask | 8);
+        ClearCount++;
+    }
+
+    if (ClearCount >= 3)
+    {
+        Wanted = 'Arrowhead';
+    }
+    else if (ClearCount >= 2)
+    {
+        Wanted = 'StaggeredColumn';
+    }
+    else
+    {
+        Wanted = 'SingleFile';
+    }
+
+    if (FwdDistSq >= 360000.0 && bLeft && bRight && Enemy != None && Enemy.IsAliveAndWell()
+        && (X Dot Normal(Enemy.Location - Src)) > 0.5
+        && WorldInfo.TimeSeconds >= LineSuppressUntil)
+    {
+        Wanted = 'LineFormation';
+    }
+
+    if (Wanted == CurrentFormation)
+    {
+        PendingFormationCount = 0;
+        return;
+    }
+    if (Wanted != PendingFormation)
+    {
+        PendingFormation = Wanted;
+        PendingFormationCount = 1;
+        return;
+    }
+    CurrentFormation = Wanted;
+    PendingFormationCount = 0;
+    FormationEpoch++;
 }
 
-// @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.DeferredFormationScan
 function DeferredFormationScan()
 {
+	bFormationScanDeferred = false;
+	ScanRoomForFormation();
 }
 
-// @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.GetFormationBase
 final function Vector GetFormationBase(int Slot, name Formation, bool bMirror)
 {
+	local Vector V;
+	local float SideSign, Tier;
+
+	Slot = Slot % 4;
+	if ((Slot % 2) == 0)
+	{
+		SideSign = -1.0;
+	}
+	else
+	{
+		SideSign = 1.0;
+	}
+	Tier = float((Slot / 2) + 1);
+	switch (Formation)
+	{
+		case 'Arrowhead':
+			V.X = -150.0 * Tier;
+			V.Y = SideSign * 150.0 * Tier;
+			break;
+		case 'LineFormation':
+			V.X = -40.0;
+			V.Y = SideSign * (120.0 * Tier);
+			break;
+		case 'SingleFile':
+			V.X = -150.0 * float(Slot + 1);
+			break;
+		default:
+			V.X = -130.0 * float(Slot + 1);
+			if (bMirror)
+			{
+				V.Y = SideSign * 70.0 * -1.0;
+			}
+			else
+			{
+				V.Y = SideSign * 70.0;
+			}
+			break;
+	}
+	return V;
 }
 
-// @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.ComputeSlotOffset
-function Vector ComputeSlotOffset(optional int Slot = - 1)
+function Vector ComputeSlotOffset(optional int Slot = -1)
 {
+	local EcholonBot SL;
+	local name Form;
+	local int Epoch, Yaw;
+	local float Jitter;
+	local Rotator R;
+	local Vector Fwd, Rgt, Up;
+
+	if(Slot < 0)
+	{
+		Slot = GruntSlot;
+	}
+	SL = SquadLeader;
+	if(SL != None)
+	{
+		Form = SL.CurrentFormation;
+		Epoch = SL.FormationEpoch;
+		Yaw = SL.FormationYaw;
+		LastFormationYaw = Yaw;
+	}
+	else
+	{
+		Form = CachedOffsetFormation;
+		Epoch = CachedOffsetEpoch;
+		Yaw = LastFormationYaw;
+	}
+	if(Form == 'None')
+	{
+		Form = 'StaggeredColumn';
+	}
+
+	if(!bOffsetCached || (Epoch != CachedOffsetEpoch) || (Slot != CachedOffsetSlot) || (Form != CachedOffsetFormation))
+	{
+		bOffsetCached = true;
+		CachedOffsetEpoch = Epoch;
+		CachedOffsetSlot = Slot;
+		CachedOffsetFormation = Form;
+		Jitter = 0.10 + (0.05 * FRand());
+		CachedLocalOffset = GetFormationBase(Slot, Form, Rand(2) == 0);
+		if(Rand(2) == 0)
+		{
+			CachedLocalOffset.X *= 1.0 + Jitter;
+		}
+		else
+		{
+			CachedLocalOffset.X *= 1.0 - Jitter;
+		}
+		if(Rand(2) == 0)
+		{
+			CachedLocalOffset.Y *= 1.0 + Jitter;
+		}
+		else
+		{
+			CachedLocalOffset.Y *= 1.0 - Jitter;
+		}
+	}
+
+	R.Yaw = Yaw;
+	GetAxes(R, Fwd, Rgt, Up);
+	return (Fwd * CachedLocalOffset.X) + (Rgt * CachedLocalOffset.Y);
 }
 
-// @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.SyncLineFocus
 final function bool SyncLineFocus()
 {
+	local Pawn LT;
+
+	if ((BotRank != GRUNT) || (Pawn == None))
+	{
+		return false;
+	}
+
+	if ((SquadLeader != None) && (SquadLeader.CurrentFormation == 'LineFormation'))
+	{
+		LT = SquadLeader.Enemy;
+		if ((LT != None) && LT.IsAliveAndWell())
+		{
+			if (InheritedEnemy != LT)
+			{
+				InheritedEnemy = LT;
+				Enemy = LT;
+				Focus = LT;
+				if (GetStateName() != 'FightEnemy')
+				{
+					GotoState('FightEnemy');
+				}
+			}
+			return false;
+		}
+	}
+
+	if (InheritedEnemy != None)
+	{
+		if (Enemy == InheritedEnemy)
+		{
+			Enemy = None;
+			Focus = None;
+			Pawn.StopFiring();
+			InheritedEnemy = None;
+			if (GetStateName() == 'FightEnemy')
+			{
+				PickCombatStyle();
+				return true;
+			}
+		}
+		InheritedEnemy = None;
+	}
+
+	return false;
 }
 
-// @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.HasOwnFireLine
 final function bool HasOwnFireLine(Actor T)
 {
+    if ((T == None) || (Pawn == None))
+    {
+        return false;
+    }
+    if ((T != FireLineTarget) || (WorldInfo.TimeSeconds >= NextFireLineCheck))
+    {
+        FireLineTarget = T;
+        NextFireLineCheck = WorldInfo.TimeSeconds + 0.5;
+        bFireLineClear = FastTrace(T.Location, Pawn.Location + (vect(0.0, 0.0, 1.0) * Pawn.BaseEyeHeight));
+    }
+    return bFireLineClear;
 }
 
-// @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.ValidateOffsetTarget
 final function bool ValidateOffsetTarget(Vector OffsetTarget)
 {
+    if (FastTrace(OffsetTarget, Pawn.Location))
+    {
+        BlockedCounter = 0;
+        return true;
+    }
+
+    BlockedCounter++;
+    if (BlockedCounter >= 3)
+    {
+        BlockedCounter = 0;
+        if ((SquadLeader != None) && (SquadLeader.Pawn != None) && SquadLeader.Pawn.IsAliveAndWell())
+        {
+            SquadLeader.RequestRerouteWithBlock(Pawn.Location);
+        }
+    }
+
+    return false;
 }
 
-// @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.RequestRerouteWithBlock
 function RequestRerouteWithBlock(Vector BlockedPos)
 {
+	if (BotRank == SQUAD_LEADER)
+	{
+		bRerouteRequested = true;
+	}
 }
 
-// @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.IsDirClearCached
 final function bool IsDirClearCached(Vector Dest)
 {
+	local Vector X, Y, Z, Dir;
+	local Rotator R;
+	local float DX, DY;
+	local byte Bit;
+
+	R.Yaw = FormationYaw;
+	GetAxes(R, X, Y, Z);
+	Dir = Normal2D(Dest - Pawn.Location);
+	DX = Dir Dot X;
+	DY = Dir Dot Y;
+	if ((DX * DX) >= (DY * DY))
+	{
+		if (DX > 0.0)
+		{
+			Bit = 1;
+		}
+		else
+		{
+			Bit = 8;
+		}
+	}
+	else
+	{
+		if (DY > 0.0)
+		{
+			Bit = 4;
+		}
+		else
+		{
+			Bit = 2;
+		}
+	}
+	return (ScanMask & Bit) != 0;
 }
 
 final function bool IsRetreatSafe(Vector RetreatDest)
@@ -2168,29 +2510,45 @@ final function bool IsRetreatSafe(Vector RetreatDest)
 	return true;
 }
 
-// @STUB(M5a) @SYS-BASE-CQB legacy:KF2BotBase.SetSquadCrouchHold
 final function SetSquadCrouchHold()
 {
+	bSquadCrouchHold = true;
+	SetTimer(3.0, false, 'ClearSquadCrouchHold');
 }
 
-// @STUB(M5a) @SYS-BASE-CQB legacy:KF2BotBase.ClearSquadCrouchHold
 function ClearSquadCrouchHold()
 {
+	bSquadCrouchHold = false;
 }
 
-// @STUB(M5a) @SYS-BASE-CQB legacy:KF2BotBase.HoldAndCrouch
 final function HoldAndCrouch()
 {
+	IssueCommand('CMD_HoldArea', Pawn.Location);
+	SetSquadCrouchHold();
 }
 
-// @STUB(M5a) @SYS-BASE-CQB legacy:KF2BotBase.TryIssueSafeAnchor
 final function bool TryIssueSafeAnchor(Vector NewAnchor)
 {
+    if ((Pawn != None) && IsDirClearCached(NewAnchor))
+    {
+        bSquadCrouchHold = false;
+        IssueCommand('CMD_HoldArea', NewAnchor);
+        return true;
+    }
+    SetSquadCrouchHold();
+    return false;
 }
 
-// @STUB(M5a) @SYS-BASE-CQB legacy:KF2BotBase.ApplySquadCrouchHold
 final function ApplySquadCrouchHold()
 {
+	local bool bWant;
+
+	bWant = (SquadLeader != None) && SquadLeader.bSquadCrouchHold;
+	if (bWant != bHoldCrouching)
+	{
+		bHoldCrouching = bWant;
+		Pawn.ShouldCrouch(bWant);
+	}
 }
 
 final function ClearRankTimers()
@@ -2338,9 +2696,30 @@ final function SetBotRank(EBotRank NewRank)
     ArmRankTimers();
 }
 
-// @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.NotifyBlockedShooter
 final function NotifyBlockedShooter(EcholonBot Shooter)
 {
+	if (BotRank != SQUAD_LEADER)
+	{
+		return;
+	}
+
+	if ((WorldInfo.TimeSeconds - BlockedShooterWindowStart) > 1.5)
+	{
+		BlockedShooterWindowStart = WorldInfo.TimeSeconds;
+		BlockedShooterCount = 0;
+	}
+
+	if (++BlockedShooterCount >= 2)
+	{
+		BlockedShooterCount = 0;
+		LineSuppressUntil = WorldInfo.TimeSeconds + 4.0;
+		if (CurrentFormation == 'LineFormation')
+		{
+			CurrentFormation = 'StaggeredColumn';
+			PendingFormationCount = 0;
+			++FormationEpoch;
+		}
+	}
 }
 
 // @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.ShouldReload
@@ -2443,9 +2822,12 @@ final function RefreshSquadZedCache()
 	}
 }
 
-// @STUB(M5a) @SYS-BASE-CQB legacy:KF2BotBase.ApplyCrouch
 final function ApplyCrouch(bool bWant)
 {
+    if (Pawn != None && Pawn.bWantsToCrouch != bWant)
+    {
+        Pawn.ShouldCrouch(bWant);
+    }
 }
 
 final function bool IsHostileZed(Pawn P)
@@ -2456,94 +2838,490 @@ final function bool IsHostileZed(Pawn P)
     return (M != None && M.IsAliveAndWell());
 }
 
-// @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.ToggleOverwatchPhase
 function ToggleOverwatchPhase()
 {
+    if (BotRank != SQUAD_LEADER || Pawn == None)
+    {
+        ClearTimer('ToggleOverwatchPhase');
+        return;
+    }
+    bOverwatchPhase = !bOverwatchPhase;
+    if (bOverwatchAllMove && WorldInfo.TimeSeconds >= OverwatchResetUntil)
+    {
+        bOverwatchAllMove = false;
+    }
+    BroadcastOverwatchState();
 }
 
-// @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.BroadcastOverwatchState
 function BroadcastOverwatchState()
 {
+    local int i;
+    for (i = 0; i < 4; i++)
+    {
+        if (SquadMembers[i] != None && SquadMembers[i].Pawn != None)
+        {
+            SquadMembers[i].ReceiveOverwatchState(bOverwatchPhase, byte(i), bOverwatchAllMove);
+        }
+    }
 }
 
-// @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.AssignSquadSlots
 function AssignSquadSlots()
 {
+    local int i;
+
+    for (i = 0; i < 4; i++)
+    {
+        if (SquadMembers[i] != None)
+        {
+            SquadMembers[i].OverwatchSlot = byte(i);
+        }
+    }
 }
 
-// @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.UpdateOverwatchTimer
 function UpdateOverwatchTimer()
 {
+    local int i;
+    local bool bMoveOrder;
+
+    bMoveOrder = (CurrentOrder == 'CMD_PushAnchor' || CurrentOrder == 'CMD_TacticalRetreat');
+    if (bMoveOrder)
+    {
+        if (!IsTimerActive('ToggleOverwatchPhase'))
+        {
+            bOverwatchAllMove = false;
+            StuckCounter = 0;
+            BroadcastOverwatchState();
+            SetTimer(OW_TOGGLE_INTERVAL, true, 'ToggleOverwatchPhase');
+        }
+    }
+    else
+    {
+        AssignSquadSlots();
+        if (IsTimerActive('ToggleOverwatchPhase'))
+        {
+            ClearTimer('ToggleOverwatchPhase');
+            bOverwatchAllMove = false;
+            StuckCounter = 0;
+            for (i = 0; i < 4; i++)
+            {
+                if (SquadMembers[i] != None)
+                {
+                    SquadMembers[i].bOverwatchMoving = false;
+                    SquadMembers[i].OverwatchStuckTime = 0.0;
+                }
+            }
+        }
+    }
 }
 
-// @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.CheckOverwatchStall
 function CheckOverwatchStall()
 {
+    local int i, stuckCount;
+    local EcholonBot G;
+    local vector newAnchor;
+
+    stuckCount = 0;
+
+    if (!IsTimerActive('ToggleOverwatchPhase') || bOverwatchAllMove)
+    {
+        StuckCounter = 0;
+        return;
+    }
+
+    for (i = 0; i < 4; i++)
+    {
+        G = SquadMembers[i];
+        if (G != None && G.Pawn != None && G.GetStateName() != 'BreakLose' && G.IsOverwatchStuck())
+        {
+            stuckCount++;
+        }
+    }
+
+    if (stuckCount < 2)
+    {
+        StuckCounter = 0;
+        return;
+    }
+
+    StuckCounter++;
+    if (int(StuckCounter) < 2)
+    {
+        return;
+    }
+
+    StuckCounter = 0;
+    bOverwatchAllMove = true;
+    OverwatchResetUntil = WorldInfo.TimeSeconds + OW_TOGGLE_INTERVAL;
+    BroadcastOverwatchState();
+
+    newAnchor = OrderAnchor + (VRand() * 150.0);
+    newAnchor.Z = OrderAnchor.Z;
+    IssueCommand(CurrentOrder, newAnchor);
 }
 
-// @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.ReceiveOverwatchState
 function ReceiveOverwatchState(bool bPhase, byte InSlot, bool bAllMove)
 {
+    if (Pawn == None)
+        return;
+    GruntOverwatchPhase = bPhase;
+    OverwatchSlot = InSlot;
+    bOverwatchAllMove = bAllMove;
+    OverwatchOffset = ComputeSlotOffset(InSlot);
 }
 
-// @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.IsOverwatchStuck
 final function bool IsOverwatchStuck()
 {
+    return (bOverwatchMoving && OverwatchStuckTime >= OW_STUCK_TIME);
 }
 
-// @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.UpdateOverwatchMovement
 function bool UpdateOverwatchMovement(out vector OutMovePos)
 {
+    local bool bMovingTeam;
+    local float now;
+    local vector moved, toGoal;
+    local Pawn tgt;
+
+    if (SquadLeader == None || SquadLeader.Pawn == None)
+    {
+        bOverwatchMoving = false;
+        return true;
+    }
+
+    now = WorldInfo.TimeSeconds;
+
+    if (bOverwatchAllMove)
+    {
+        bMovingTeam = true;
+    }
+    else if ((OverwatchSlot & 1) == 1)
+    {
+        bMovingTeam = GruntOverwatchPhase;
+    }
+    else
+    {
+        bMovingTeam = !GruntOverwatchPhase;
+    }
+    bOverwatchMoving = bMovingTeam;
+
+    if (bMovingTeam)
+    {
+        ApplyCrouch(false);
+        OutMovePos = SquadLeader.Pawn.Location + OverwatchOffset;
+
+        if (now - OverwatchSampleTime >= 0.5)
+        {
+            moved = Pawn.Location - OverwatchSamplePos;
+            moved.Z = 0.0;
+            toGoal = OutMovePos - Pawn.Location;
+            toGoal.Z = 0.0;
+            if (VSizeSq(toGoal) > OW_STUCK_MIN_DIST_SQ && VSizeSq(moved) < OW_STUCK_MOVE_SQ)
+            {
+                OverwatchStuckTime += (now - OverwatchSampleTime);
+            }
+            else
+            {
+                OverwatchStuckTime = 0.0;
+            }
+            OverwatchSamplePos = Pawn.Location;
+            OverwatchSampleTime = now;
+        }
+        return true;
+    }
+
+    OverwatchStuckTime = 0.0;
+    OverwatchSampleTime = now;
+    OverwatchSamplePos = Pawn.Location;
+    ApplyCrouch(true);
+
+    if (GetStateName() != 'FightEnemy')
+    {
+        tgt = Enemy;
+        if (tgt == None)
+        {
+            tgt = SquadLeader.Enemy;
+        }
+        if (tgt != None && tgt.IsAliveAndWell())
+        {
+            if (now >= NextOverwatchLOSTime)
+            {
+                NextOverwatchLOSTime = now + 0.5;
+                bOverwatchLOS = FastTrace(tgt.Location, Pawn.Location);
+            }
+            if (bOverwatchLOS)
+            {
+                FireWeaponAt(tgt);
+            }
+        }
+    }
+    return false;
 }
 
-// @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.OnBreakLoseComplete
 function OnBreakLoseComplete()
 {
+    if (SquadLeader != None && SquadLeader.Pawn != None)
+    {
+        ReceiveOverwatchState(SquadLeader.bOverwatchPhase, OverwatchSlot, SquadLeader.bOverwatchAllMove);
+    }
+    OverwatchStuckTime = 0.0;
+    OverwatchSampleTime = WorldInfo.TimeSeconds;
+    RescueUntil = 0.0;
 }
 
-// @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.UpdateSectorWatch
 function UpdateSectorWatch()
 {
+    local float now, dt;
+    local int baseYaw, scanOffset;
+    local Rotator R;
+
+    if (Pawn == None)
+        return;
+
+    now = WorldInfo.TimeSeconds;
+
+    ApplyCrouch(true);
+
+    if ((Enemy != None && Enemy.IsAliveAndWell()) || now < NoiseGlanceUntil)
+    {
+        SectorLastTime = now;
+        return;
+    }
+
+    if (SquadLeader != None && SquadLeader.Pawn != None && SquadLeader.Pawn.IsAliveAndWell())
+    {
+        LastValidSquadLeaderYaw = SquadLeader.Pawn.Rotation.Yaw;
+    }
+    else if (LastValidSquadLeaderYaw == 0)
+    {
+        LastValidSquadLeaderYaw = Pawn.Rotation.Yaw;
+    }
+
+    dt = now - SectorLastTime;
+    SectorLastTime = now;
+    if (dt > 0.5)
+        dt = 0.2;
+
+    SectorScanPhase += dt * SW_SCAN_OMEGA * PanicScanSpeedMultiplier;
+    if (SectorScanPhase > SW_TWO_PI)
+        SectorScanPhase -= SW_TWO_PI;
+
+    baseYaw = LastValidSquadLeaderYaw + (OverwatchSlot * 16384);
+    scanOffset = int(SW_SCAN_AMP_DEG * PanicScanSpeedMultiplier * Sin(SectorScanPhase + (float(OverwatchSlot) * 0.7853982)) * SW_DEG_TO_URU);
+
+    R.Pitch = 0;
+    R.Roll = 0;
+    R.Yaw = (baseYaw + scanOffset) & 65535;
+
+    SetFocalPoint(Pawn.Location + (vector(R) * 512.0));
 }
 
-// @STUB(M5a) @SYS-BASE-CQB legacy:KF2BotBase.HandleCQBProximity
 function HandleCQBProximity()
 {
+    local float distSq, now;
+    local KFWeapon W;
+    local KFPawn_Human KFPH;
+    local vector awayDir;
+    local bool bWantLight;
+
+    if (Pawn == None || Enemy == None || Enemy.Health <= 0 || CurrentFormation != 'SingleFile')
+    {
+        return;
+    }
+
+    now = WorldInfo.TimeSeconds;
+    KFPH = KFPawn_Human(Pawn);
+    distSq = VSizeSq(Enemy.Location - Pawn.Location);
+
+    if (distSq < CQB_BASH_SQ)
+    {
+        if (now >= NextBashTime)
+        {
+            NextBashTime = now + CQB_BASH_INTERVAL;
+
+            W = KFWeapon(Pawn.Weapon);
+            if (W != None)
+            {
+                if (W.bMeleeWeapon)
+                {
+                    W.StartFire(0);
+                }
+                else
+                {
+                    W.StartFire(3);
+                }
+            }
+
+            if (Pawn.Physics == PHYS_Walking)
+            {
+                awayDir = Pawn.Location - Enemy.Location;
+                awayDir.Z = 0.0;
+                Pawn.Velocity = Normal(awayDir) * CQB_STEPBACK_SPEED;
+            }
+
+            if (KFPH != None)
+            {
+                KFPH.SetFlashlight(!KFPH.bFlashlightOn, false);
+            }
+        }
+    }
+    else if (KFPH != None)
+    {
+        bWantLight = (distSq >= CQB_MID_SQ);
+        if (KFPH.bFlashlightOn != bWantLight)
+        {
+            KFPH.SetFlashlight(bWantLight, false);
+        }
+    }
 }
 
-// @STUB(M5a) @SYS-BASE-GRUNT legacy:KF2BotBase.OnGruntGrabbed
 function OnGruntGrabbed(EcholonBot GruntBot)
 {
+    local int i;
+    local EcholonBot M, N1, N2;
+    local float d, D1, D2;
+    local vector grabLoc;
+    local Pawn grabber;
+    local KFPawn KFP;
+
+    if (GruntBot == None || GruntBot.Pawn == None)
+        return;
+
+    grabLoc = GruntBot.Pawn.Location;
+    KFP = KFPawn(GruntBot.Pawn);
+    if (KFP != None)
+        grabber = KFP.InteractionPawn;
+
+    D1 = RESCUE_RANGE_SQ;
+    D2 = RESCUE_RANGE_SQ;
+    N1 = None;
+    N2 = None;
+
+    for (i = 0; i < 4; i++)
+    {
+        M = SquadMembers[i];
+        if (M == None || M == GruntBot || M.Pawn == None || M.GetStateName() == 'BreakLose' || !M.Pawn.IsAliveAndWell())
+            continue;
+        d = VSizeSq(M.Pawn.Location - grabLoc);
+        if (d < D1)
+        {
+            D2 = D1;
+            N2 = N1;
+            D1 = d;
+            N1 = M;
+        }
+        else if (d < D2)
+        {
+            D2 = d;
+            N2 = M;
+        }
+    }
+
+    if (N1 != None)
+        N1.BeginRescue(grabLoc, grabber);
+    if (N2 != None)
+        N2.BeginRescue(grabLoc, grabber);
 }
 
-// @STUB(M5a) @SYS-BASE-GRUNT legacy:KF2BotBase.BeginRescue
 function BeginRescue(vector GrabLoc, Pawn Grabber)
 {
+    if (Pawn == None || IsGruntCombatLocked())
+        return;
+
+    RescueLoc = GrabLoc;
+    RescueUntil = WorldInfo.TimeSeconds + RESCUE_DURATION;
+    IssueCommand('CMD_FocusTarget', GrabLoc);
+
+    if (IsHostileZed(Grabber))
+    {
+        SetEnemy(Grabber);
+        GruntEnterCombat(Grabber);
+    }
 }
 
-// @STUB(M5a) @SYS-BASE-CQB legacy:KF2BotBase.UpdateCoverCrouch
 function UpdateCoverCrouch()
 {
+    local bool bWantCrouch;
+
+    if (WorldInfo.TimeSeconds < StyleCrouchUntil)
+        return;
+
+    bWantCrouch = false;
+    if (SquadLeader != None && CurrentFormation == 'SingleFile' && SquadLeader.Enemy != None)
+    {
+        if (SquadLeader.Enemy.IsAliveAndWell()
+            && VSizeSq(SquadLeader.Enemy.Location - Pawn.Location) < COVER_RANGE_SQ)
+        {
+            bWantCrouch = true;
+        }
+    }
+    ApplyCrouch(bWantCrouch);
 }
 
-// @STUB(M5a) @SYS-BASE-GRUNT legacy:KF2BotBase.IsGruntCombatLocked
 final function bool IsGruntCombatLocked()
 {
+    return (GetStateName() == 'BreakLose' || GetStateName() == 'HealingSelf' || GetStateName() == 'HealOther'
+        || GetStateName() == 'HealRanged' || GetStateName() == 'TacticalRetreat' || GetStateName() == 'IsRagdolled'
+        || GetStateName() == 'Dead' || GetStateName() == 'VictoryDance');
 }
 
-// @STUB(M5a) @SYS-BASE-GRUNT legacy:KF2BotBase.GruntOnSight
 function GruntOnSight(Pawn Seen)
 {
+    if (Pawn == None || !IsHostileZed(Seen))
+        return;
+
+    if (GetStateName() == 'FightEnemy')
+    {
+        if (Enemy == None || !Enemy.IsAliveAndWell())
+            SetEnemy(Seen);
+        return;
+    }
+    GruntEnterCombat(Seen);
 }
 
-// @STUB(M5a) @SYS-BASE-GRUNT legacy:KF2BotBase.GruntEnterCombat
 function GruntEnterCombat(Pawn NewEnemy)
 {
+    if (Pawn == None || NewEnemy == None || IsGruntCombatLocked())
+        return;
+
+    if (Enemy != NewEnemy && (Enemy == None || !Enemy.IsAliveAndWell()))
+    {
+        SetEnemy(NewEnemy);
+    }
+    if (Enemy == None)
+        return;
+
+    bGruntMeleeStyle = IsMeleeOnly();
+    GotoState('FightEnemy');
 }
 
-// @STUB(M5a) @SYS-BASE-GRUNT legacy:KF2BotBase.GruntPickCombatStyle
 function GruntPickCombatStyle()
 {
+    local vector toEnemy, strafeDir;
+
+    if (Pawn == None || Enemy == None)
+        return;
+
+    if (bGruntMeleeStyle)
+    {
+        ApplyCrouch(false);
+        MoveTowardX(Enemy);
+        return;
+    }
+
+    if (FRand() < 0.5)
+    {
+        ApplyCrouch(false);
+        toEnemy = Enemy.Location - Pawn.Location;
+        toEnemy.Z = 0.0;
+        strafeDir = Normal(toEnemy Cross vect(0,0,1));
+        if (FRand() < 0.5)
+            strafeDir = -strafeDir;
+        MoveToX(Pawn.Location + (strafeDir * 150.0));
+    }
+    else
+    {
+        StyleCrouchUntil = WorldInfo.TimeSeconds + 1.0 + FRand();
+        ApplyCrouch(true);
+    }
 }
 
 event HearNoise(float Loudness, Actor NoiseMaker, optional Name NoiseType)
@@ -2594,49 +3372,162 @@ final function bool IsHeavyZedPawn(Pawn P)
     return (M != None && M.bLargeZed);
 }
 
-// @STUB(M5a) @SYS-BASE-PANIC legacy:KF2BotBase.UpdatePanicBroadcast
 function UpdatePanicBroadcast()
 {
+    local int i;
+    local bool bWantPanic;
+
+    bWantPanic = (Enemy != None && Enemy.IsAliveAndWell() && IsHeavyZedPawn(Enemy)
+               && VSizeSq(Enemy.Location - Pawn.Location) < 90000.0);
+
+    for (i = 0; i < 4; i++)
+    {
+        if (SquadMembers[i] != None)
+        {
+            SquadMembers[i].ReceivePanic(bWantPanic);
+        }
+    }
 }
 
-// @STUB(M5a) @SYS-BASE-PANIC legacy:KF2BotBase.ReceivePanic
 function ReceivePanic(bool bPanic)
 {
+	if (PanicActive == bPanic)
+		return;
+	PanicActive = bPanic;
+	ApplyPanicVariance();
 }
 
-// @STUB(M5a) @SYS-BASE-PANIC legacy:KF2BotBase.ApplyPanicVariance
 function ApplyPanicVariance()
 {
+    local float wantMult;
+
+    if (PanicActive)
+        wantMult = 2.0;
+    else
+        wantMult = 1.0;
+
+    PanicScanSpeedMultiplier = wantMult;
+
+    if (PanicVarianceMultiplier != wantMult)
+    {
+        PanicVarianceMultiplier = wantMult;
+    }
 }
 
-// @STUB(M5a) @SYS-BASE-RELOAD legacy:KF2BotBase.IsReloading
 final function bool IsReloading()
 {
+    local KFWeapon W;
+
+    if (Pawn == None)
+        return false;
+
+    W = KFWeapon(Pawn.Weapon);
+    return (W != None && W.IsInState('Reloading'));
 }
 
-// @STUB(M5a) @SYS-BASE-RELOAD legacy:KF2BotBase.HandleReloadDrift
 function HandleReloadDrift()
 {
+    local int i, reloadingCount;
+    local float now;
+    local vector dir;
+    local EcholonBot Grunt;
+
+    if (Pawn == None)
+        return;
+    if (CurrentOrder == 'CMD_PushAnchor' || CurrentOrder == 'CMD_TacticalRetreat')
+        return;
+
+    now = WorldInfo.TimeSeconds;
+
+    for (i = 0; i < 4; i++)
+    {
+        Grunt = SquadMembers[i];
+        if (Grunt != None && Grunt.Pawn != None && Grunt.IsReloading())
+        {
+            reloadingCount++;
+        }
+    }
+    if (reloadingCount < 2)
+        return;
+
+    if (now - ReloadPullStamp > 0.75)
+    {
+        if (Enemy != None)
+            dir = Enemy.Location - Pawn.Location;
+        else
+            dir = vector(Pawn.Rotation);
+        dir.Z = 0.0;
+        if (VSizeSq(dir) < 1.0)
+            dir = vect(1, 0, 0);
+        dir = Normal(dir);
+
+        ReloadPullAnchor = Pawn.Location - (dir * RELOAD_DRIFT_DIST);
+        bReloadPullClear = FastTrace(ReloadPullAnchor, Pawn.Location);
+
+        if (bReloadPullClear)
+        {
+            HoldAreaAnchor = ReloadPullAnchor;
+            IssueCommand('CMD_HoldArea', ReloadPullAnchor);
+        }
+    }
+    ReloadPullStamp = now;
+
+    for (i = 0; i < 4; i++)
+    {
+        if (SquadMembers[i] != None && SquadMembers[i].Pawn != None)
+        {
+            SquadMembers[i].ReceiveReloadDrift(ReloadPullAnchor, bReloadPullClear, RELOAD_DRIFT_LEASE);
+        }
+    }
 }
 
-// @STUB(M5a) @SYS-BASE-RELOAD legacy:KF2BotBase.ReceiveReloadDrift
 function ReceiveReloadDrift(vector Anchor, bool bMove, float Lease)
 {
+    local float now;
+    local bool bNewEpisode;
+
+    now = WorldInfo.TimeSeconds;
+    bNewEpisode = (ReloadDriftUntil <= now);
+    ReloadDriftUntil = now + Lease;
+    bReloadDriftMove = bMove;
+
+    if (bMove)
+    {
+        if (bNewEpisode)
+        {
+            ReloadDriftOffset = ComputeFormationOffset(SquadLeader, false);
+        }
+        OnReloadDriftAnchor(Anchor);
+    }
+    else
+    {
+        ApplyCrouch(true);
+    }
 }
 
-// @STUB(M5a) @SYS-BASE-RELOAD legacy:KF2BotBase.OnReloadDriftAnchor
 function OnReloadDriftAnchor(vector Anchor)
 {
+    ReloadDriftLoc = Anchor + ReloadDriftOffset;
+    ApplyCrouch(true);
+    MoveToX(ReloadDriftLoc);
 }
 
-// @STUB(M5a) @SYS-BASE-RELOAD legacy:KF2BotBase.OnReloadComplete
 function OnReloadComplete()
 {
+	ReloadDriftUntil = 0.0;
+	ApplyCrouch(false);
 }
 
-// @STUB(M5a) @SYS-BASE-RELOAD legacy:KF2BotBase.TrackReloadState
 function TrackReloadState()
 {
+    local bool bNow;
+
+    bNow = IsReloading();
+    if (bWasReloading && !bNow)
+    {
+        OnReloadComplete();
+    }
+    bWasReloading = bNow;
 }
 
 // @STUB(M5b) @SYS-BASE-LTBOUND legacy:KF2BotBase.StartLtHumanBounding
