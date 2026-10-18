@@ -1017,11 +1017,15 @@ final function Vector GetPointNear(Pawn Other, float MaxDist)
     return V;
 }
 
-// @STUB(M5c) @SYS-LOGIC-DEATH legacy:KF2BotLogic.NotifyKilled
 function NotifyKilled(Controller Killer, Controller Killed, Pawn KilledPawn, Class<DamageType> damageTyp)
 {
-    // PASS-THROUGH: overrides Controller; keep the engine behaviour until the real port lands.
-    super.NotifyKilled(Killer, Killed, KilledPawn, damageTyp);
+    super(Controller).NotifyKilled(Killer, Killed, KilledPawn, damageTyp);
+    if (KFPawn_MonsterBoss(KilledPawn) != None)
+    {
+        bBossKillVictory = true;
+        GotoState('VictoryDance');
+        return;
+    }
 }
 
 // @STUB(M5c) @SYS-LOGIC-MOVEVAL legacy:KF2BotLogic.EvaluateSquadTether
