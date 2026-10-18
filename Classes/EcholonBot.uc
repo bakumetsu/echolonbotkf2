@@ -1069,9 +1069,21 @@ state GoShopping
         }
     }
 
-    // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.Timer
     function Timer()
     {
+        if (KFGRI.OpenedTrader == None)
+        {
+            PickCombatStyle();
+        }
+        else
+        {
+            if (Pawn.IsOverlapping(KFGRI.OpenedTrader))
+            {
+                AbortMove();
+                SetTimer(0.0, false);
+                SetTimer(1.0 + (FRand() * 2.0), false, 'DoTrading');
+            }
+        }
     }
 
     // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.FinishedMove
