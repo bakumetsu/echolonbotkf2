@@ -1091,9 +1091,22 @@ state GoShopping
         PickCombatStyle();
     }
 
-    // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.DoTrading
     function DoTrading()
     {
+        if (KFGRI.TraderItems != None)
+        {
+            ProcessPurchase(KFGRI.TraderItems);
+        }
+        NextShoppingTime = WorldInfo.TimeSeconds + 60.0;
+        NextDoshShareTime = WorldInfo.TimeSeconds + 50.0;
+        if (Rand(3) == 0)
+        {
+            GotoState('VictoryDance', 'MoveTaunt');
+        }
+        else
+        {
+            PickCombatStyle();
+        }
     }
 
     // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.NotifyBump
