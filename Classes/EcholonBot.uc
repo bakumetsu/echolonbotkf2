@@ -896,9 +896,10 @@ state HealOther
 {
     ignores FinishedMove;
 
-    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealOther.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        AbortMove();
     }
 
     // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealOther.EndState
