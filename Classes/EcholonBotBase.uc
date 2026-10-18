@@ -3277,9 +3277,20 @@ function GruntOnSight(Pawn Seen)
     GruntEnterCombat(Seen);
 }
 
-// @STUB(M5a) @SYS-BASE-GRUNT legacy:KF2BotBase.GruntEnterCombat
 function GruntEnterCombat(Pawn NewEnemy)
 {
+    if (Pawn == None || NewEnemy == None || IsGruntCombatLocked())
+        return;
+
+    if (Enemy != NewEnemy && (Enemy == None || !Enemy.IsAliveAndWell()))
+    {
+        SetEnemy(NewEnemy);
+    }
+    if (Enemy == None)
+        return;
+
+    bGruntMeleeStyle = IsMeleeOnly();
+    GotoState('FightEnemy');
 }
 
 // @STUB(M5a) @SYS-BASE-GRUNT legacy:KF2BotBase.GruntPickCombatStyle
