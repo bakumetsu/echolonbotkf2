@@ -605,9 +605,15 @@ state TacticalRetreat
         SetTimer(ZED_COUNT_INTERVAL, true, 'CheckRetreatStatus');
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.TacticalRetreat.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
+        ClearTimer('CheckRetreatStatus');
+        bIsRetreating = false;
+        if (KPawn != None)
+        {
+            KPawn.SetSprinting(false);
+        }
     }
 
     // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.TacticalRetreat.CheckRetreatStatus
