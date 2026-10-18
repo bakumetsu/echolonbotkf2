@@ -3876,9 +3876,9 @@ function TrackReloadState()
     bWasReloading = bNow;
 }
 
-// @STUB(M5b) @SYS-BASE-LTBOUND legacy:KF2BotBase.StartLtHumanBounding
 function StartLtHumanBounding()
 {
+    SetTimer(FRand() * HUMAN_BOUND_INTERVAL, false, 'BeginLtHumanBounding');
 }
 
 // @STUB(M5b) @SYS-BASE-LTBOUND legacy:KF2BotBase.BeginLtHumanBounding
