@@ -675,9 +675,19 @@ state BreakLose
         }
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.BreakLose.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
+        SetTimer(0.0, false);
+        if (Pawn != None)
+        {
+            Pawn.StopFiring();
+        }
+        OnBreakLoseComplete();
+        if (((mut != None) && mut.bDebugGrapple) && (Pawn != None) && (Pawn.IsAliveAndWell() && ((KPawn == None) || !KPawn.IsDoingSpecialMove(31))))
+        {
+            mut.DebugMessage(GetHumanReadableName() $ " broke free after " $ string(BreakFreeAttempts) $ " attempt(s), " $ string(int(WorldInfo.TimeSeconds - GrabStartTime)) $ "s.");
+        }
     }
 
     // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.BreakLose.Timer
