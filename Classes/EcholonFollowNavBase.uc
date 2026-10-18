@@ -667,54 +667,223 @@ function FollowOnMoveBegin(bool bDirect)
     }
 }
 
-// @STUB(M2) @SYS-NAV-PATH legacy:KF2BotsFollowNavBase.FollowOnMoveEnd
 function FollowOnMoveEnd(bool bDirect)
 {
+    bFollowMoveActive = false;
+    bFollowDirectActive = false;
+
+    if (bDirect && Pawn != None && FollowLeaderPawn != None)
+    {
+        Pawn.DestinationOffset = FollowGetArrivalRadius();
+        if (Pawn.ReachedDestination(FollowLeaderPawn))
+        {
+            bFollowArrived = true;
+        }
+    }
 }
 
-// @STUB(M2) @SYS-NAV-PATH legacy:KF2BotsFollowNavBase.FollowOnNodeMoveEnd
 function FollowOnNodeMoveEnd(Actor IterNode)
 {
+    FollowOnMoveEnd(false);
+
+    if (Pawn == None || IterNode == None)
+    {
+        return;
+    }
+
+    Pawn.DestinationOffset = 0.0;
+
+    if (IterNode == FollowNodeLast)
+    {
+        FollowSameNodeCount++;
+    }
+    else
+    {
+        FollowNodeLast = IterNode;
+        FollowSameNodeCount = 1;
+    }
+
+    if (Pawn.ReachedDestination(IterNode))
+    {
+        FollowSameNodeCount = 0;
+        if (FollowLeaderPawn != None && VSizeSq(FollowLeaderPawn.Location - FollowLastPawnTargetPathLoc) > FollowNodeRepathDistSq)
+        {
+            bFollowRouteStale = true;
+            FollowLastPawnTargetPathLoc = FollowLeaderPawn.Location;
+        }
+    }
+    else if (FollowSameNodeCount > FollowSameNodeLimit && VSizeSq(Pawn.Velocity) < 600.0)
+    {
+        FollowOnStuck('SameNode');
+    }
 }
 
-// @STUB(M2) @SYS-NAV-STUCK legacy:KF2BotsFollowNavBase.FollowGuessStuckCause
 function Name FollowGuessStuckCause()
 {
+    local float IterNow;
+
+    IterNow = WorldInfo.TimeSeconds;
+    if ((IterNow - FollowLastBumpTime) < 1.0)
+    {
+        return 'Pawn';
+    }
+    if (FollowLastWall != None && (IterNow - FollowLastWallTime) < 2.0 && !FollowLastWall.IsA('Pawn'))
+    {
+        return 'Wall';
+    }
+    return 'Unknown';
 }
 
-// @STUB(M2) @SYS-NAV-STUCK legacy:KF2BotsFollowNavBase.FollowOnStuck
 function FollowOnStuck(Name IterCause)
 {
+    local float IterNow;
+
+    IterNow = WorldInfo.TimeSeconds;
+    if (IterNow < FollowRepathPauseUntil)
+    {
+        return;
+    }
+
+    FollowRetries++;
+    `log("[FollowNav]" @ string(Name) @ " stuck cause=" $ string(IterCause) @ " retries=" $ string(FollowRetries));
+
+    FollowRepathPauseUntil = IterNow + 0.25 + FRand() + FollowSlotPhase();
+    bFollowRouteStale = true;
+
+    if (bFollowDirectActive)
+    {
+        FollowForcePathUntil = IterNow + FollowForcePathDuration;
+    }
+
+    if (IterCause == 'Pawn')
+    {
+        bFollowYieldPending = true;
+    }
+    else if (IterCause == 'SameNode' || ((IterCause == 'Wall' || IterCause == 'Unreachable') && FollowRetries >= FollowRetriesBlockAt))
+    {
+        FollowTryBlockNode(FollowNodeLast);
+    }
+
+    FollowNodeLast = None;
+    FollowSameNodeCount = 0;
+    if (Pawn != None)
+    {
+        FollowStuckRefLoc = Pawn.Location;
+    }
+    FollowStuckRefTime = IterNow;
+    FollowRequestDispatch();
 }
 
-// @STUB(M2) @SYS-NAV-STUCK legacy:KF2BotsFollowNavBase.FollowTryBlockNode
 function bool FollowTryBlockNode(Actor IterNodeActor)
 {
+	// PLAN B: node blacklist is intentionally unavailable.
+	// Persistent blockers are handled by force-repath + wall-escape (FollowSetWallEscape),
+	// not by blocking the navigation node.
+	return false;
 }
 
-// @STUB(M2) @SYS-NAV-HANDLE legacy:KF2BotsFollowNavBase.FollowOwnsEvents
 function bool FollowOwnsEvents()
 {
+    return (bEnableAdvancedLocomotion && IsInState('FollowingLeader'));
 }
 
-// @STUB(M2) @SYS-NAV-HANDLE legacy:KF2BotsFollowNavBase.FollowHandleHitWall
 function bool FollowHandleHitWall(vector HitNormal, Actor Wall)
 {
+    local float IterNow;
+
+    IterNow = WorldInfo.TimeSeconds;
+
+    if ((IterNow - FollowLastWallTime) < FollowWallDebounce)
+    {
+        return false;
+    }
+
+    if (Pawn != None && Pawn.Physics == PHYS_Falling)
+    {
+        return true;
+    }
+
+    if (Wall != FollowLastWall || (IterNow - FollowWallWindowStart) > FollowWallWindow)
+    {
+        FollowLastWall = Wall;
+        FollowWallWindowStart = IterNow;
+        FollowWallHitCount = 0;
+    }
+    FollowLastWallTime = IterNow;
+    FollowWallHitCount++;
+
+    if (FollowWallHitCount >= FollowWallHitThreshold && bFollowMoveActive)
+    {
+        FollowWallHitCount = 0;
+
+        if (Wall != None && Wall.IsA('Pawn'))
+        {
+            FollowOnStuck('Pawn');
+        }
+        else
+        {
+            FollowOnStuck('Wall');
+            FollowSetWallEscape(HitNormal);
+        }
+    }
+
+    return false;
 }
 
-// @STUB(M2) @SYS-NAV-STUCK legacy:KF2BotsFollowNavBase.FollowSetWallEscape
 function FollowSetWallEscape(vector HitNormal)
 {
+    local float Now;
+    local float NormLen;
+
+    Now = WorldInfo.TimeSeconds;
+    NormLen = VSize(HitNormal);
+    if (NormLen < 0.01)
+    {
+        return;
+    }
+    FollowEscapeNormal.X = HitNormal.X / NormLen;
+    FollowEscapeNormal.Y = HitNormal.Y / NormLen;
+    FollowEscapeNormal.Z = HitNormal.Z / NormLen;
+    bFollowEscaping = true;
+    FollowEscapeUntil = Now + FollowEscapeDuration;
+    `log("[FollowNav] wall-escape set: nx=" $ string(FollowEscapeNormal.X) $ " ny=" $ string(FollowEscapeNormal.Y) $ " for=" $ string(FollowEscapeDuration) $ "s (slot=" $ string(FollowSlotIndex) $ ")");
 }
 
-// @STUB(M2) @SYS-NAV-HANDLE legacy:KF2BotsFollowNavBase.FollowIsFriendly
 function bool FollowIsFriendly(Pawn IterOther)
 {
+    if (IterOther == None)
+    {
+        return false;
+    }
+    if (IterOther == FollowLeaderPawn)
+    {
+        return true;
+    }
+    if (PlayerController(IterOther.Controller) != None)
+    {
+        return true;
+    }
+    return (EcholonFollowNavBase(IterOther.Controller) != None);
 }
 
-// @STUB(M2) @SYS-NAV-HANDLE legacy:KF2BotsFollowNavBase.FollowShouldYieldTo
 function bool FollowShouldYieldTo(Pawn IterOther)
 {
+    local EcholonFollowNavBase IterBot;
+
+    if (IterOther == FollowLeaderPawn)
+    {
+        return true;
+    }
+    IterBot = EcholonFollowNavBase(IterOther.Controller);
+    if (IterBot == None)
+    {
+        return true;
+    }
+    if (IterBot.FollowSlotIndex == FollowSlotIndex)
+    {
+        return (string(IterBot.Name) < string(Name));
+    }
+    return (IterBot.FollowSlotIndex < FollowSlotIndex);
 }
 
 // @STUB(M2) @SYS-NAV-HANDLE legacy:KF2BotsFollowNavBase.FollowHandleBump
