@@ -2091,11 +2091,26 @@ function bool AuditRateLimit(string Msg)
 	return true;
 }
 
-// @STUB(M5b) @SYS-BASE-AUDIT legacy:KF2BotBase.FollowGetOrderAnchor
 function bool FollowGetOrderAnchor(out vector OutLoc)
 {
-    // PASS-THROUGH: overrides EcholonFollowNavBase; keep the engine behaviour until the real port lands.
-    return super.FollowGetOrderAnchor(OutLoc);
+    local vector Loc;
+
+    OutLoc = vect(0, 0, 0);
+    if (mut == None)
+    {
+        return false;
+    }
+    if (!mut.IsSquadInObjectivePhase(EcholonBot(self)))
+    {
+        return false;
+    }
+    Loc = mut.GetSlotLocation(EcholonBot(self));
+    if (Loc == vect(0, 0, 0))
+    {
+        return false;
+    }
+    OutLoc = Loc;
+    return true;
 }
 
 // @STUB(M5b) @SYS-BASE-AUDIT legacy:KF2BotBase.AuditStateEntry
