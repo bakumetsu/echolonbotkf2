@@ -1114,9 +1114,15 @@ function ReassignBotToGroup(EcholonBot Bot, int NewGroupIdx)
 	}
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.GetGroupLeader
 function EcholonBot GetGroupLeader(int GroupID)
 {
+    local int GroupIdx;
+    GroupIdx = GroupID - 1;
+    if (GroupIdx < 0 || GroupIdx >= Fireteams.Length)
+    {
+        return None;
+    }
+    return Fireteams[GroupIdx].Leader;
 }
 
 // @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.GetGroupSize
