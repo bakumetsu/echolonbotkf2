@@ -26,9 +26,29 @@ Begin:
 // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming
 state Roaming
 {
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming.BeginState
     event BeginState(name PreviousStateName)
     {
+        local KFWeapon MW;
+
+        AuditStateEntry();
+        AbortMove();
+
+        if (KPawn != None)
+        {
+            KPawn.SetSprinting(!bIsGroupLeader);
+
+            if (KFGRI != None && KFGRI.bTraderIsOpen && Pawn.Weapon != None && !Pawn.Weapon.bMeleeWeapon)
+            {
+                foreach Pawn.InvManager.InventoryActors(class'KFWeapon', MW)
+                {
+                    if (MW != None && MW.bMeleeWeapon)
+                    {
+                        Pawn.InvManager.SetCurrentWeapon(MW);
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming.EndState
