@@ -3512,9 +3512,10 @@ function OnReloadDriftAnchor(vector Anchor)
     MoveToX(ReloadDriftLoc);
 }
 
-// @STUB(M5a) @SYS-BASE-RELOAD legacy:KF2BotBase.OnReloadComplete
 function OnReloadComplete()
 {
+	ReloadDriftUntil = 0.0;
+	ApplyCrouch(false);
 }
 
 // @STUB(M5a) @SYS-BASE-RELOAD legacy:KF2BotBase.TrackReloadState
