@@ -1401,9 +1401,12 @@ state VictoryDance
         return V;
     }
 
-    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.VictoryDance.EnemyChanged
     function EnemyChanged()
     {
+        if (!bBossKillVictory)
+        {
+            PickCombatStyle();
+        }
     }
 
 MoveTaunt:
