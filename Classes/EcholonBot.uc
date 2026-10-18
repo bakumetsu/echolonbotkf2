@@ -1369,9 +1369,15 @@ state VictoryDance
         }
     }
 
-    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.VictoryDance.FinishedMove
     function FinishedMove()
     {
+        local Vector V;
+
+        V.X = FRand() - 0.5;
+        V.Y = FRand() - 0.5;
+        Focus = None;
+        SetFocalPoint(Pawn.Location + (Normal2D(V) * 1000.0));
+        GotoState('VictoryDance', 'Begin');
     }
 
     // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.VictoryDance.GetRandMove
