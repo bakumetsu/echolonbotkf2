@@ -705,6 +705,13 @@ state FightEnemy
             }
         }
 
+        // Bug hunt: Enemy can be cleared (killed, NotifyKilled) between the hub and here; the
+        // Enemy.Health reads below would be Accessed None.
+        if (Enemy == None)
+        {
+            PickCombatStyle();
+            return;
+        }
         bMelee = IsMeleeOnly();
 
         if (bOutOfEffectiveRange && !bMelee)
@@ -1089,7 +1096,7 @@ state HealingSelf
         if(Pawn != None)
         {
             Pawn.StopFiring();
-            if(KFWeap_HealerBase(Pawn.Weapon) != None)
+            if(KFWeap_HealerBase(Pawn.Weapon) != None && Pawn.InvManager != None)
             {
                 Pawn.InvManager.SwitchToBestWeapon(true);
             }
@@ -1187,7 +1194,7 @@ state HealOther
         if(Pawn != None)
         {
             Pawn.StopFiring();
-            if(KFWeap_HealerBase(Pawn.Weapon) != None)
+            if(KFWeap_HealerBase(Pawn.Weapon) != None && Pawn.InvManager != None)
             {
                 Pawn.InvManager.SwitchToBestWeapon(true);
             }
@@ -1266,11 +1273,25 @@ Begin:
     Target = PendingHeal;
     FinishRotation();
 
+    // Bug hunt: the target can die or be cleared while the waits above run.
+    if (PendingHeal == None || PendingHeal.Health <= 0)
+    {
+        HealFail();
+        PickCombatStyle();
+        Stop;
+    }
+
     MedicGun.AmmoCount[0] -= 100;
     MedicGun.PerformReload();
     MedicGun.PlayAnimation('Heal_Team');
     PendingHeal.HealthToRegen += 20;
     Sleep(FMin(FMax(MedicGun.MySkelMesh.GetAnimInterruptTime('Heal_Team'), 0.1), 3.0));
+    if (PendingHeal == None)  // cleared during the heal animation; the charge is already spent
+    {
+        HealSuccess();
+        PickCombatStyle();
+        Stop;
+    }
 
     if(PendingHeal.Health + PendingHeal.HealthToRegen > PendingHeal.HealthMax)
     {
@@ -1383,6 +1404,14 @@ Begin:
     Target = PendingHeal;
     FinishRotation();
 
+    // Bug hunt: the target can die or be cleared while the waits above run.
+    if (PendingHeal == None || PendingHeal.Health <= 0)
+    {
+        HealFail();
+        PickCombatStyle();
+        Stop;
+    }
+
     RangeMedicGun.AmmoCount[1] -= 50;
     RangeMedicGun.StartHealRecharge();
     RangeMedicGun.PlayAnimation('Shoot_Dart');
@@ -1392,6 +1421,12 @@ Begin:
     }
     PendingHeal.HealthToRegen += RangeMedicGun.default.HealAmount;
     Sleep(FMin(RangeMedicGun.GetFireInterval(1), 3.0));
+    if (PendingHeal == None)  // cleared during the heal animation; the charge is already spent
+    {
+        HealSuccess();
+        PickCombatStyle();
+        Stop;
+    }
 
     if(PendingHeal.Health + PendingHeal.HealthToRegen > PendingHeal.HealthMax)
     {
@@ -1434,7 +1469,10 @@ Begin:
     }
     Focus = Target;
     FinishRotation();
-    Pawn.Weapon.StartFire(4);
+    if (Pawn.Weapon != None)  // bug hunt: no weapon equipped during a swap
+    {
+        Pawn.Weapon.StartFire(4);
+    }
     Sleep(0.2);
     Enemy = Pawn(Target);
     PickRetreatMove();
