@@ -1084,9 +1084,34 @@ function int FindNearestEligibleGroup(int ExcludeGroupIdx, EcholonBot Bot)
     return BestIdx;
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.ReassignBotToGroup
 function ReassignBotToGroup(EcholonBot Bot, int NewGroupIdx)
 {
+	local int OldGroupIdx, MemberIdx;
+
+	if (Bot == None)
+	{
+		return;
+	}
+
+	OldGroupIdx = Bot.GroupID - 1;
+	if (OldGroupIdx >= 0 && OldGroupIdx < Fireteams.Length)
+	{
+		MemberIdx = Fireteams[OldGroupIdx].Members.Find(Bot);
+		if (MemberIdx != INDEX_NONE)
+		{
+			Fireteams[OldGroupIdx].Members.Remove(MemberIdx, 1);
+		}
+	}
+
+	Bot.bIsGroupLeader = false;
+	Bot.GroupID = NewGroupIdx + 1;
+	Bot.ResetStuckState();
+	Fireteams[NewGroupIdx].Members.AddItem(Bot);
+
+	if (Fireteams[NewGroupIdx].Leader != None)
+	{
+		Bot.AssignedAnchor = Fireteams[NewGroupIdx].Leader.AssignedAnchor;
+	}
 }
 
 // @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.GetGroupLeader
