@@ -729,9 +729,15 @@ state BreakLose
 // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting
 state Hunting
 {
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        AbortMove();
+        if (KPawn != None)
+        {
+            KPawn.SetSprinting(true);
+        }
+        SetTimer(0.25, true);
     }
 
     // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting.EndState
