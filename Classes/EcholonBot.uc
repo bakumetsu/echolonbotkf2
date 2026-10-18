@@ -226,6 +226,14 @@ state Camp
     }
 
 Begin:
+    if (Pawn.Physics == 2)
+    {
+        WaitForLanding(2.0);
+    }
+    Focus = None;
+    SetFocalPoint(Pawn.Location + (VRand() * 1000.0));
+    Sleep(1.0 + FRand());
+    PickCombatStyle();
     Stop;
 }
 
@@ -653,6 +661,11 @@ state TacticalRetreat
     }
 
 Begin:
+    if (Pawn.Physics == 2)
+    {
+        WaitForLanding(2.0);
+    }
+    PickRetreatMove();
     Stop;
 }
 
@@ -852,6 +865,11 @@ state Hunting
     }
 
 Begin:
+    if (Pawn.Physics == 2)
+    {
+        WaitForLanding(2.0);
+    }
+    PickStyle();
     Stop;
 }
 
@@ -896,6 +914,60 @@ state HealingSelf
     }
 
 Begin:
+    if(Pawn.Physics == PHYS_Walking)
+    {
+        landingDeadline = WorldInfo.TimeSeconds + 2.0;
+        while(Pawn.Physics == PHYS_Walking && WorldInfo.TimeSeconds < landingDeadline)
+        {
+            Sleep(0.1);
+        }
+    }
+    SetTimer(8.0, false, 'HealFailsafe');
+
+    if((KPawn == None) || KPawn.Health <= 0)
+    {
+        HealFail();
+        PickCombatStyle();
+        Stop;
+    }
+
+    if(!CanAffordHeal(0))
+    {
+        HealFail();
+        PickCombatStyle();
+        Stop;
+    }
+
+    equipDeadline = WorldInfo.TimeSeconds + 3.0;
+    while(Pawn.Weapon != MedicGun && WorldInfo.TimeSeconds < equipDeadline)
+    {
+        Pawn.InvManager.SetCurrentWeapon(MedicGun);
+        Sleep(0.1);
+    }
+    if(Pawn.Weapon != MedicGun)
+    {
+        HealFail();
+        PickCombatStyle();
+        Stop;
+    }
+
+    Focus = Pawn;
+
+    MedicGun.AmmoCount[0] -= 100;
+    MedicGun.PerformReload();
+    MedicGun.PlayAnimation('Heal_Self');
+    KPawn.HealthToRegen += 20;
+    Sleep(FMin(FMax(MedicGun.MySkelMesh.GetAnimInterruptTime('Heal_Self'), 0.1), 3.0));
+
+    if(KPawn.Health + KPawn.HealthToRegen > KPawn.HealthMax)
+    {
+        KPawn.HealthToRegen = KPawn.HealthMax - KPawn.Health;
+    }
+    KPawn.SetTimer(KPawn.HealthRegenRate, true, 'GiveHealthOverTime');
+    KPawn.PlayHeal(class'KFDT_Healing');
+
+    HealSuccess();
+    PickCombatStyle();
     Stop;
 }
 
@@ -940,6 +1012,79 @@ state HealOther
     }
 
 Begin:
+    if(Pawn.Physics == PHYS_Walking)
+    {
+        landingDeadline = WorldInfo.TimeSeconds + 2.0;
+        while(Pawn.Physics == PHYS_Walking && WorldInfo.TimeSeconds < landingDeadline)
+        {
+            Sleep(0.1);
+        }
+    }
+    SetTimer(8.0, false, 'HealFailsafe');
+
+    if(PendingHeal == None)
+    {
+        HealFail();
+        PickCombatStyle();
+        Stop;
+    }
+
+    while(true)
+    {
+        if((PendingHeal == None) || !PendingHeal.IsAliveAndWell() || PendingHeal.Health >= (HEAL_MIN_NEED_PCT / 100.0) * PendingHeal.HealthMax)
+        {
+            HealFail();
+            PickCombatStyle();
+            Stop;
+        }
+        if((VSize(PendingHeal.Location - Pawn.Location) <= 200.0) && LineOfSightTo(PendingHeal))
+        {
+            break;
+        }
+        MoveTowardX(PendingHeal);
+        Sleep(0.1);
+    }
+
+    if(!CanAffordHeal(0))
+    {
+        HealFail();
+        PickCombatStyle();
+        Stop;
+    }
+    equipDeadline = WorldInfo.TimeSeconds + 3.0;
+    while(Pawn.Weapon != MedicGun && WorldInfo.TimeSeconds < equipDeadline)
+    {
+        Pawn.InvManager.SetCurrentWeapon(MedicGun);
+        Sleep(0.1);
+    }
+    if(Pawn.Weapon != MedicGun)
+    {
+        HealFail();
+        PickCombatStyle();
+        Stop;
+    }
+
+    AbortMove();
+    Pawn.Acceleration = vect(0, 0, 0);
+    Focus = PendingHeal;
+    Target = PendingHeal;
+    FinishRotation();
+
+    MedicGun.AmmoCount[0] -= 100;
+    MedicGun.PerformReload();
+    MedicGun.PlayAnimation('Heal_Team');
+    PendingHeal.HealthToRegen += 20;
+    Sleep(FMin(FMax(MedicGun.MySkelMesh.GetAnimInterruptTime('Heal_Team'), 0.1), 3.0));
+
+    if(PendingHeal.Health + PendingHeal.HealthToRegen > PendingHeal.HealthMax)
+    {
+        PendingHeal.HealthToRegen = PendingHeal.HealthMax - PendingHeal.Health;
+    }
+    PendingHeal.SetTimer(PendingHeal.HealthRegenRate, true, 'GiveHealthOverTime');
+    PendingHeal.PlayHeal(class'KFDT_Healing');
+
+    HealSuccess();
+    PickCombatStyle();
     Stop;
 }
 
@@ -984,6 +1129,83 @@ state HealRanged
     }
 
 Begin:
+    if(Pawn.Physics == PHYS_Walking)
+    {
+        landingDeadline = WorldInfo.TimeSeconds + 2.0;
+        while(Pawn.Physics == PHYS_Walking && WorldInfo.TimeSeconds < landingDeadline)
+        {
+            Sleep(0.1);
+        }
+    }
+    SetTimer(8.0, false, 'HealFailsafe');
+
+    if(PendingHeal == None)
+    {
+        HealFail();
+        PickCombatStyle();
+        Stop;
+    }
+
+    while(true)
+    {
+        if((PendingHeal == None) || !PendingHeal.IsAliveAndWell() || PendingHeal.Health >= (HEAL_MIN_NEED_PCT / 100.0) * PendingHeal.HealthMax)
+        {
+            HealFail();
+            PickCombatStyle();
+            Stop;
+        }
+        if((VSize(PendingHeal.Location - Pawn.Location) <= 1500.0) && LineOfSightTo(PendingHeal))
+        {
+            break;
+        }
+        MoveTowardX(PendingHeal);
+        Sleep(0.1);
+    }
+
+    if(!CanAffordHeal(1))
+    {
+        HealFail();
+        PickCombatStyle();
+        Stop;
+    }
+    equipDeadline = WorldInfo.TimeSeconds + 3.0;
+    while(Pawn.Weapon != RangeMedicGun && WorldInfo.TimeSeconds < equipDeadline)
+    {
+        Pawn.InvManager.SetCurrentWeapon(RangeMedicGun);
+        Sleep(0.1);
+    }
+    if(Pawn.Weapon != RangeMedicGun)
+    {
+        HealFail();
+        PickCombatStyle();
+        Stop;
+    }
+
+    AbortMove();
+    Pawn.Acceleration = vect(0, 0, 0);
+    Focus = PendingHeal;
+    Target = PendingHeal;
+    FinishRotation();
+
+    RangeMedicGun.AmmoCount[1] -= 50;
+    RangeMedicGun.StartHealRecharge();
+    RangeMedicGun.PlayAnimation('Shoot_Dart');
+    if(mut != None)
+    {
+        mut.RegisterRangedHealTarget(PendingHeal);
+    }
+    PendingHeal.HealthToRegen += RangeMedicGun.default.HealAmount;
+    Sleep(FMin(RangeMedicGun.GetFireInterval(1), 3.0));
+
+    if(PendingHeal.Health + PendingHeal.HealthToRegen > PendingHeal.HealthMax)
+    {
+        PendingHeal.HealthToRegen = PendingHeal.HealthMax - PendingHeal.Health;
+    }
+    PendingHeal.SetTimer(PendingHeal.HealthRegenRate, true, 'GiveHealthOverTime');
+    PendingHeal.PlayHeal(class'KFDT_Healing');
+
+    HealSuccess();
+    PickCombatStyle();
     Stop;
 }
 
@@ -1010,6 +1232,16 @@ state GrenadeTarget
     }
 
 Begin:
+    if (Pawn.Physics == 2)
+    {
+        WaitForLanding(2.0);
+    }
+    Focus = Target;
+    FinishRotation();
+    Pawn.Weapon.StartFire(4);
+    Sleep(0.2);
+    Enemy = Pawn(Target);
+    PickRetreatMove();
     Stop;
 }
 
@@ -1128,6 +1360,11 @@ state GoShopping
     }
 
 Begin:
+    if (Pawn.Physics == 2)
+    {
+        WaitForLanding();
+    }
+    PickStyle();
     Stop;
 }
 
@@ -1175,6 +1412,11 @@ state GetItem
     }
 
 Begin:
+    if (Pawn.Physics == 2)
+    {
+        WaitForLanding(2.0);
+    }
+    MoveTowardX(LastFactory, Enemy);
     Stop;
 }
 
