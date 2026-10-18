@@ -3088,9 +3088,39 @@ function ClearGrenadeSignal()
 	GrenadeTargetPawn = None;
 }
 
-// @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.HandleWeaponManagement
 final function bool HandleWeaponManagement(KFWeapon W)
 {
+	local KFWeapon Best;
+
+	if (ShouldReload(W))
+	{
+		if (NextReloadAttempt < WorldInfo.TimeSeconds)
+		{
+			NextReloadAttempt = WorldInfo.TimeSeconds + 1.0;
+			W.StartFire(BOTFM_RELOAD);
+		}
+		return true;
+	}
+
+	if (!W.HasAnyAmmo())
+	{
+		SwitchToBestWeapon(true);
+		Best = KFWeapon(Pawn.Weapon);
+		if (Best != W)
+		{
+			bFallbackWeapon = true;
+			bFallbackHadSpare = W.HasAnyAmmo();
+			FallbackPrimary = W;
+			FallbackSince = WorldInfo.TimeSeconds;
+			return true;
+		}
+		if ((Pawn.Weapon == None) || (Pawn.Weapon.bMeleeWeapon == false))
+		{
+			SwitchToBestWeapon(true);
+		}
+		return true;
+	}
+	return false;
 }
 
 final function int CountNearbyZedsCached(float Radius)
