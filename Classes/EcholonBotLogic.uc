@@ -1,8 +1,104 @@
 class EcholonBotLogic extends EcholonBotBase hidecategories(Navigation);
 
-// @STUB(M5c) @SYS-LOGIC-HEAL legacy:KF2BotLogic.CheckShouldHealMate
 final function bool CheckShouldHealMate()
 {
+    local KFWeap_HealerBase W;
+    local KFPawn_Human P, Best;
+    local float Pct, DHoriz, DVert;
+    local float EffectivePct, BestEffectivePct;
+
+    if (mut == None)
+    {
+        return false;
+    }
+    if (KPawn == None || !KPawn.IsAliveAndWell())
+    {
+        return false;
+    }
+
+    if (WorldInfo.TimeSeconds < HealRetryAfter)
+    {
+        return false;
+    }
+
+    if (KFGRI == None || !KFGRI.bTraderIsOpen)
+    {
+        return false;
+    }
+
+    MedicGun = None;
+    foreach KFInvManager.InventoryActors(Class'KFWeap_HealerBase', W)
+    {
+        if (W.HasAmmo(0))
+        {
+            MedicGun = W;
+            break;
+        }
+    }
+    if (MedicGun == None)
+    {
+        return false;
+    }
+
+    Best = None;
+    BestEffectivePct = 0.0;
+    foreach WorldInfo.AllPawns(Class'KFPawn_Human', P, Pawn.Location, mut.HealCylinderRadius)
+    {
+        if (P == Pawn)
+        {
+            continue;
+        }
+        if (!P.IsAliveAndWell())
+        {
+            continue;
+        }
+        if (P.GetTeamNum() != GetTeamNum())
+        {
+            continue;
+        }
+        Pct = (float(P.Health) / float(P.HealthMax)) * 100.0;
+        if (Pct > HEAL_MAX_NEED_PCT)
+        {
+            continue;
+        }
+        if (!TargetLowHealth(P))
+        {
+            continue;
+        }
+        DHoriz = VSize(P.Location - Pawn.Location);
+        DVert = Abs(P.Location.Z - Pawn.Location.Z);
+        if (DHoriz > mut.HealCylinderRadius)
+        {
+            continue;
+        }
+        if (DVert > mut.HealCylinderHeight)
+        {
+            continue;
+        }
+        if (!ActorReachable(P))
+        {
+            continue;
+        }
+        if (mut.bEnableFastTraceHealing && !FastTrace(Pawn.Location, P.Location))
+        {
+            continue;
+        }
+
+        EffectivePct = Pct;
+        if ((mut.VIPController != None) && (P == mut.VIPController.Pawn) && (Pct < VIP_TRIAGE_GATE_PCT))
+        {
+            EffectivePct = FMax(Pct - VIP_TRIAGE_BONUS_PCT, 0.0);
+        }
+
+        if ((Best == None) || (EffectivePct < BestEffectivePct))
+        {
+            Best = P;
+            BestEffectivePct = EffectivePct;
+        }
+    }
+
+    PendingHeal = Best;
+    return Best != None;
 }
 
 // @STUB(M5c) @SYS-LOGIC-HEAL legacy:KF2BotLogic.CheckMedicGunHeal
