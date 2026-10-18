@@ -3414,9 +3414,15 @@ function ApplyPanicVariance()
     }
 }
 
-// @STUB(M5a) @SYS-BASE-RELOAD legacy:KF2BotBase.IsReloading
 final function bool IsReloading()
 {
+    local KFWeapon W;
+
+    if (Pawn == None)
+        return false;
+
+    W = KFWeapon(Pawn.Weapon);
+    return (W != None && W.IsInState('Reloading'));
 }
 
 // @STUB(M5a) @SYS-BASE-RELOAD legacy:KF2BotBase.HandleReloadDrift
