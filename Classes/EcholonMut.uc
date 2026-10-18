@@ -797,9 +797,24 @@ function PromoteBot(EcholonBot Bot, EBotRank NewRank)
     Bot.BotRank = NewRank;
 }
 
-// @STUB(M4) @SYS-MUT-HEALCOOL legacy:KF2BotsMut.RegisterRangedHealTarget
 function RegisterRangedHealTarget(KFPawn_Human Target)
 {
+    local int I;
+
+    if (Target == None)
+        return;
+
+    for (I = 0; I < RangedHealTargets.Length; I++)
+    {
+        if (RangedHealTargets[I] == Target)
+        {
+            RangedHealCooldownEnds[I] = WorldInfo.TimeSeconds + 25.0;
+            return;
+        }
+    }
+
+    RangedHealTargets.AddItem(Target);
+    RangedHealCooldownEnds.AddItem(WorldInfo.TimeSeconds + 25.0);
 }
 
 // @STUB(M4) @SYS-MUT-HEALCOOL legacy:KF2BotsMut.IsRangedHealTargetOnCooldown
