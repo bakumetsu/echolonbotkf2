@@ -565,9 +565,25 @@ state FightEnemy
         }
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.NotifyBump
     event bool NotifyBump(Actor Other, Vector HitNormal)
     {
+        global.NotifyBump(Other, HitNormal);
+
+        if (Other == Enemy && MoveTarget == Enemy)
+        {
+            if ((Vector(Enemy.Rotation) Dot (Enemy.Location - Pawn.Location)) < 0.0)
+            {
+                FinishedMove();
+            }
+            else
+            {
+                MoveTarget = None;
+                AbortMove();
+                SetTimer(0.2 + (FRand() * 0.75), false, 'FinishedMove');
+            }
+        }
+
+        return false;
     }
 
 Begin:
