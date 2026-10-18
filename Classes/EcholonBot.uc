@@ -1151,9 +1151,14 @@ state GetItem
         }
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.GetItem.Timer
     function Timer()
     {
+        if(Enemy != None)
+        {
+            EnemyEncounterTime = WorldInfo.TimeSeconds;
+            Focus = Enemy;
+            FireWeaponAt(Enemy);
+        }
     }
 
     // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.GetItem.FinishedMove
