@@ -174,9 +174,9 @@ state Roaming
     	PickCombatStyle();
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming.EnemyChanged
     function EnemyChanged()
     {
+        PickCombatStyle();
     }
 
     // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming.DonateMoney
