@@ -61,9 +61,112 @@ state Roaming
         }
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming.PickStyle
     function PickStyle()
     {
+        local EcholonBot GroupLeader;
+
+        if (PlayStyle == 0 && KPawn != None)
+        {
+            if (mut != None)
+            {
+                GroupLeader = mut.GetGroupLeader(GroupID);
+            }
+            else
+            {
+                GroupLeader = None;
+            }
+
+            if (!bIsGroupLeader && GroupLeader != None && GroupLeader.Pawn != None)
+            {
+                if (VSizeSq(GroupLeader.Pawn.Location - Pawn.Location) > 360000.0)
+                {
+                    if (ActorReachable(GroupLeader.Pawn))
+                    {
+                        MoveToX(GetPointNear(GroupLeader.Pawn, 600.0));
+                        return;
+                    }
+                    if (BuildPathToward(GroupLeader.Pawn))
+                    {
+                        MoveTowardX(MoveTarget);
+                        return;
+                    }
+                }
+                else
+                {
+                    if (Rand(3) == 0)
+                    {
+                        MoveToX(GetPointNear(GroupLeader.Pawn, 600.0));
+                    }
+                    else
+                    {
+                        Focus = None;
+                        SetFocalPoint(Pawn.Location + (VRand() * 1000.0));
+                    }
+                    return;
+                }
+            }
+        }
+        else
+        {
+            if (FollowingHuman != None)
+            {
+                if (!FollowingHuman.IsAliveAndWell())
+                {
+                    FollowingHuman = None;
+                }
+                else
+                {
+                    if (VSizeSq(FollowingHuman.Location - Pawn.Location) > 360000.0)
+                    {
+                        if (ActorReachable(FollowingHuman))
+                        {
+                            MoveToX(GetPointNear(FollowingHuman, 600.0));
+                            return;
+                        }
+                        if (BuildPathToward(FollowingHuman))
+                        {
+                            MoveTowardX(MoveTarget);
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        if (Rand(3) == 0)
+                        {
+                            MoveToX(GetPointNear(FollowingHuman, 600.0));
+                        }
+                        else
+                        {
+                            Focus = None;
+                            SetFocalPoint(Pawn.Location + (VRand() * 1000.0));
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+
+        if (RandGoal == None && !BuildRandomPath())
+        {
+            MoveToX(Pawn.Location + (VRand() * 300.0));
+            return;
+        }
+
+        if (ActorReachable(RandGoal))
+        {
+            MoveTowardX(RandGoal);
+            RandGoal = None;
+            return;
+        }
+
+        if (!BuildPathToward(RandGoal))
+        {
+            RandGoal = None;
+            MoveToX(Pawn.Location + (VRand() * 300.0));
+            return;
+        }
+
+        MoveTowardX(MoveTarget);
     }
 
     // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming.FinishedMove
