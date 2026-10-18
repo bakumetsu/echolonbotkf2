@@ -255,9 +255,20 @@ function UnregisterBot(EcholonBot LeavingBot)
     HandleFireteamCasualty(LeavingBot);
 }
 
-// @STUB(M4) @SYS-MUT-WAVE legacy:KF2BotsMut.PollWaveStart
 function PollWaveStart()
 {
+    local KFGameReplicationInfo KFGRI;
+
+    KFGRI = KFGameReplicationInfo(WorldInfo.GRI);
+    if (KFGRI == None || !KFGRI.bMatchHasBegun)
+        return;
+
+    if (KFGRI.WaveNum != LastPolledWaveNum)
+    {
+        LastPolledWaveNum = KFGRI.WaveNum;
+        InitializePlatoon();
+        RelocateBotsToAmmoCrates();
+    }
 }
 
 // @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.InitializePlatoon
