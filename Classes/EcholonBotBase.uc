@@ -848,7 +848,6 @@ final function SimulateBashHit(KFPawn TargetZed, KFWeapon W)
     TargetZed.TakeDamage(BashDamage, self, TargetZed.Location, vect(0.0, 0.0, 0.0), Class'Engine.DamageType');
 }
 
-// @STUB(M5b) @SYS-BASE-HEALQ legacy:KF2BotBase.EnemyChanged
 function EnemyChanged()
 {
 }
@@ -1988,24 +1987,24 @@ final function ForceBreakGrapple()
     KPawn.InteractionPawn = None;
 }
 
-// @STUB(M5b) @SYS-BASE-HEALQ legacy:KF2BotBase.IsBotAlive
 function bool IsBotAlive()
 {
+    return (Pawn != None) && (Pawn.Health > 0);
 }
 
-// @STUB(M5b) @SYS-BASE-HEALQ legacy:KF2BotBase.CanHealOthers
 function bool CanHealOthers()
 {
+    return MedicGun != None;
 }
 
-// @STUB(M5b) @SYS-BASE-HEALQ legacy:KF2BotBase.IsHealLockedOut
 function bool IsHealLockedOut()
 {
+    return false;
 }
 
-// @STUB(M5b) @SYS-BASE-HEALQ legacy:KF2BotBase.ShouldAbortRetreat
 function bool ShouldAbortRetreat()
 {
+    return false;
 }
 
 function vector GetObjectiveLocation()
@@ -2052,31 +2051,130 @@ function EchelonLog(string Msg)
 	`log("[EcholonAudit] " $ Name $ " " $ Msg);
 }
 
-// @STUB(M5b) @SYS-BASE-AUDIT legacy:KF2BotBase.AuditRateLimit
 function bool AuditRateLimit(string Msg)
 {
+	local float IterNow;
+
+	IterNow = WorldInfo.TimeSeconds;
+	if (Left(Msg, 10) ~= "STATE_EXIT")
+	{
+		if (IterNow - AuditLastLog_STATE_EXIT < 5.0)
+		{
+			return false;
+		}
+		AuditLastLog_STATE_EXIT = IterNow;
+		return true;
+	}
+	if (Left(Msg, 4) ~= "GOAL")
+	{
+		if (IterNow - AuditLastLog_GOAL < 5.0)
+		{
+			return false;
+		}
+		AuditLastLog_GOAL = IterNow;
+		return true;
+	}
+	if (Left(Msg, 15) ~= "FOLLOWGATE_EVAL")
+	{
+		if (IterNow - AuditLastLog_FOLLOWGATE < 5.0)
+		{
+			return false;
+		}
+		AuditLastLog_FOLLOWGATE = IterNow;
+		return true;
+	}
+	if (IterNow - AuditLastLog_GEN < 5.0)
+	{
+		return false;
+	}
+	AuditLastLog_GEN = IterNow;
+	return true;
 }
 
-// @STUB(M5b) @SYS-BASE-AUDIT legacy:KF2BotBase.FollowGetOrderAnchor
 function bool FollowGetOrderAnchor(out vector OutLoc)
 {
-    // PASS-THROUGH: overrides EcholonFollowNavBase; keep the engine behaviour until the real port lands.
-    return super.FollowGetOrderAnchor(OutLoc);
+    local vector Loc;
+
+    OutLoc = vect(0, 0, 0);
+    if (mut == None)
+    {
+        return false;
+    }
+    if (!mut.IsSquadInObjectivePhase(EcholonBot(self)))
+    {
+        return false;
+    }
+    Loc = mut.GetSlotLocation(EcholonBot(self));
+    if (Loc == vect(0, 0, 0))
+    {
+        return false;
+    }
+    OutLoc = Loc;
+    return true;
 }
 
-// @STUB(M5b) @SYS-BASE-AUDIT legacy:KF2BotBase.AuditStateEntry
 function AuditStateEntry()
 {
+	if (WorldInfo != None)
+	{
+		AuditStateEntryTime = WorldInfo.TimeSeconds;
+		AuditStateEntryName = GetStateName();
+		WdLastMoveIntentTime = WorldInfo.TimeSeconds;
+	}
 }
 
-// @STUB(M5b) @SYS-BASE-AUDIT legacy:KF2BotBase.AuditStateExit
 function AuditStateExit(name NextStateName)
 {
+	local float IterDwell;
+
+	if (WorldInfo != None)
+	{
+		IterDwell = WorldInfo.TimeSeconds - AuditStateEntryTime;
+		AuditDwellTotal += IterDwell;
+		if (IterDwell >= 3.0)
+		{
+			EchelonLog("STATE_EXIT bot=" $ Name $ " state=" $ AuditStateEntryName $ " next=" $ NextStateName $ " reason=unspecified" $ " duration=" $ string(IterDwell));
+		}
+		if (WorldInfo.TimeSeconds - AuditLastLog_DWELLTOT >= 60.0)
+		{
+			EchelonLog("DWELL_TOTAL bot=" $ Name $ " sinceLast=" $ string(AuditDwellTotal));
+			AuditDwellTotal = 0.0;
+			AuditLastLog_DWELLTOT = WorldInfo.TimeSeconds;
+		}
+	}
 }
 
-// @STUB(M5b) @SYS-BASE-AUDIT legacy:KF2BotBase.AuditGoalLog
 function AuditGoalLog(string Op, string Src)
 {
+	local string IterLoc;
+	local int IterAmmo;
+	local KFWeapon W;
+
+	if (ObjectiveGoal == None || WorldInfo == None)
+	{
+		return;
+	}
+
+	IterAmmo = 0;
+	if (Pawn != None && Pawn.Weapon != None)
+	{
+		W = KFWeapon(Pawn.Weapon);
+		if (W != None && W.GetTotalAmmoAmount(0) > 0)
+		{
+			IterAmmo = 1;
+		}
+	}
+
+	IterLoc = string(FFloor(ObjectiveGoal.Location.X / 100.0)) $ "," $ string(FFloor(ObjectiveGoal.Location.Y / 100.0)) $ "," $ string(FFloor(ObjectiveGoal.Location.Z / 100.0));
+
+	if (Op == "GOAL_SET")
+	{
+		EchelonLog("GOAL_SET bot=" $ Name $ " goal=(" $ IterLoc $ ") ammo=" $ string(IterAmmo) $ " src=" $ Src);
+	}
+	else
+	{
+		EchelonLog("GOAL_CLEAR bot=" $ Name $ " src=" $ Src);
+	}
 }
 
 function IssueCommand(name Cmd, Vector Anchor)
@@ -2722,59 +2820,307 @@ final function NotifyBlockedShooter(EcholonBot Shooter)
 	}
 }
 
-// @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.ShouldReload
 final function bool ShouldReload(KFWeapon W)
 {
+	if (W == None)
+	{
+		return false;
+	}
+	if (W.HasAmmo(BOTFM_PRIMARY, 1))
+	{
+		return false;
+	}
+	return W.HasAnyAmmo();
 }
 
-// @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.GetWeaponEffectiveRangeUU
 final function float GetWeaponEffectiveRangeUU(KFWeapon W)
 {
+	if (W == None)
+	{
+		return DefaultWeaponEffectiveRangeUU;
+	}
+	if (W.IsA('KFWeap_ShotgunBase'))
+	{
+		return ShotgunEffectiveRangeUU;
+	}
+	if (W.IsA('KFWeap_Flame_Flamethrower'))
+	{
+		return FlamethrowerEffectiveRangeUU;
+	}
+	if (W.IsA('KFWeap_FlameBase'))
+	{
+		return FlamethrowerEffectiveRangeUU;
+	}
+	return DefaultWeaponEffectiveRangeUU;
 }
 
-// @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.IsInEffectiveRange
 final function bool IsInEffectiveRange(Actor T)
 {
+	local KFWeapon W;
+	local float MaxRange;
+
+	W = KFWeapon(Pawn.Weapon);
+	if (W == None || T == None)
+	{
+		return false;
+	}
+	if (W != RangeCacheWeapon)
+	{
+		RangeCacheWeapon = W;
+		MaxRange = GetWeaponEffectiveRangeUU(W);
+		RangeCacheSq = MaxRange * MaxRange;
+	}
+	if (RangeCacheSq <= 0.0)
+	{
+		return true;
+	}
+	return VSizeSq(T.Location - Pawn.Location) <= RangeCacheSq;
 }
 
-// @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.CloseToEffectiveRange
 final function CloseToEffectiveRange()
 {
+    if (BotRank == GRUNT)
+    {
+        MoveToX(Pawn.Location + (Normal2D(Enemy.Location - Pawn.Location) * 250.0), Enemy);
+    }
+    else if (ActorReachable(Enemy))
+    {
+        MoveTowardX(Enemy, Enemy);
+    }
+    else if (BuildPathToward(Enemy))
+    {
+        MoveTowardX(MoveTarget, Enemy);
+    }
+    else
+    {
+        MoveToX(Pawn.Location + (Normal2D(Enemy.Location - Pawn.Location) * 300.0), Enemy);
+    }
 }
 
-// @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.CheckWeaponReequip
 final function CheckWeaponReequip()
 {
+	local bool bReady;
+
+	if (!bFallbackWeapon || (Pawn == None))
+	{
+		return;
+	}
+	if ((FallbackPrimary == None) || (Pawn.Weapon == FallbackPrimary))
+	{
+		bFallbackWeapon = false;
+		return;
+	}
+	if (bFallbackHadSpare)
+	{
+		bReady = ((WorldInfo.TimeSeconds - FallbackSince) > 1.5) && ((Enemy == None) || (CountNearbyZedsCached(500.0) < 3));
+	}
+	else
+	{
+		bReady = FallbackPrimary.HasAnyAmmo();
+	}
+	if (bReady)
+	{
+		bFallbackWeapon = false;
+		Pawn.InvManager.SetCurrentWeapon(FallbackPrimary);
+		return;
+	}
+	if ((Pawn.Weapon != None) && Pawn.Weapon.bMeleeWeapon && (NextFallbackPoll < WorldInfo.TimeSeconds))
+	{
+		NextFallbackPoll = WorldInfo.TimeSeconds + 1.0;
+		SwitchToBestWeapon(true);
+	}
 }
 
-// @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.ShouldThrowGrenade
 final function bool ShouldThrowGrenade(out Actor Aim, bool bFromSignal, Actor CurEnemy)
 {
+	local EcholonBot SL;
+
+	Aim = None;
+	bFromSignal = false;
+
+	if ((KFInvManager == None) || (KFInvManager.GrenadeCount <= 0) || (NextGrenadeTimer > WorldInfo.TimeSeconds))
+	{
+		return false;
+	}
+
+	if (BotRank == SQUAD_LEADER)
+	{
+		SL = EcholonBot(self);
+	}
+	else
+	{
+		SL = SquadLeader;
+	}
+
+	// (1) SL broadcast
+	if ((SL != None) && SL.GrenadeSignal && (SL.GrenadeThrowsLeft > 0) && (SL.GrenadeTargetPawn != None)
+		&& SL.GrenadeTargetPawn.IsAliveAndWell()
+		&& (VSizeSq(SL.GrenadeTargetPawn.Location - Pawn.Location) < 90000.0))
+	{
+		Aim = SL.GrenadeTargetPawn;
+		bFromSignal = true;
+		return true;
+	}
+
+	// (2) HearNoise
+	if ((CurEnemy != None) && (HearNoiseZedCount >= 2) && (WorldInfo.TimeSeconds < HearNoiseExpireTime)
+		&& (VSizeSq(LastNoiseLoc - Pawn.Location) < 160000.0))
+	{
+		Aim = CurEnemy;
+		return true;
+	}
+
+	// (3) self-preservation
+	if ((CurEnemy != None) && (Pawn.Health < (Pawn.HealthMax * 0.3)) && (CountNearbyZedsCached(200.0) >= 2))
+	{
+		Aim = CurEnemy;
+		return true;
+	}
+
+	return false;
 }
 
-// @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.TryThrowGrenade
 final function bool TryThrowGrenade(KFWeapon W, Actor CurEnemy)
 {
+	local Actor Aim;
+	local bool bFromSignal;
+
+	bFromSignal = false;
+
+	if (!ShouldThrowGrenade(Aim, bFromSignal, CurEnemy))
+	{
+		GrenadeAimTicks = 0;
+		return false;
+	}
+
+	if (NeedToTurn(Aim.Location))
+	{
+		if (++GrenadeAimTicks > 3)
+		{
+			GrenadeAimTicks = 0;
+			NextGrenadeTimer = WorldInfo.TimeSeconds + 2.0;
+			return false;
+		}
+		Focus = Aim;
+		return true;
+	}
+
+	GrenadeAimTicks = 0;
+	NextGrenadeTimer = WorldInfo.TimeSeconds + 4.0 + (FRand() * 3.0);
+
+	if (bFromSignal && (SquadLeader != None) && (SquadLeader.GrenadeThrowsLeft > 0))
+	{
+		--SquadLeader.GrenadeThrowsLeft;
+	}
+
+	Target = Aim;
+	Focus = Aim;
+	W.StartFire(BOTFM_GRENADE);
+	return true;
 }
 
-// @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.SLGrenadeCheck
 function SLGrenadeCheck()
 {
+	local int I, Near;
+
+	if( (BotRank != SQUAD_LEADER) || (Pawn == None) || GrenadeSignal || (NextGrenadeSignalTime > WorldInfo.TimeSeconds) )
+	{
+		return;
+	}
+	for( I = 0; I < SquadZedCount; I++ )
+	{
+		if( (SquadZedCache[I] != None) && (SquadZedCache[I].Health > 0)
+			&& (VSizeSq(SquadZedCache[I].Location - Pawn.Location) < 90000.0) )
+		{
+			Near++;
+		}
+	}
+	if( Near >= 3 )
+	{
+		SetTimer(0.07, false, 'SLGrenadeLOSPhase');
+	}
 }
 
-// @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.SLGrenadeLOSPhase
 function SLGrenadeLOSPhase()
 {
+	local int I, Traces, NoLOS, Near;
+	local Pawn Z, Pick;
+
+	if (BotRank != SQUAD_LEADER || Pawn == None)
+	{
+		return;
+	}
+	for (I = 0; I < SquadZedCount; I++)
+	{
+		Z = SquadZedCache[I];
+		if (Z == None || Z.Health <= 0 || VSizeSq(Z.Location - Pawn.Location) >= 90000.0)
+		{
+			continue;
+		}
+		Near++;
+		if (Traces < 3)
+		{
+			Traces++;
+			if (!FastTrace(Z.Location, Pawn.Location))
+			{
+				NoLOS++;
+				if (Pick == None)
+				{
+					Pick = Z;
+				}
+			}
+		}
+	}
+	if (Near >= 3 && NoLOS >= 2)
+	{
+		GrenadeSignal = true;
+		GrenadeThrowsLeft = 2;
+		GrenadeTargetPawn = Pick;
+		NextGrenadeSignalTime = WorldInfo.TimeSeconds + 6.0;
+		SetTimer(2.0, false, 'ClearGrenadeSignal');
+	}
 }
 
-// @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.ClearGrenadeSignal
 function ClearGrenadeSignal()
 {
+	GrenadeSignal = false;
+	GrenadeThrowsLeft = 0;
+	GrenadeTargetPawn = None;
 }
 
-// @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.HandleWeaponManagement
 final function bool HandleWeaponManagement(KFWeapon W)
 {
+	local KFWeapon Best;
+
+	if (ShouldReload(W))
+	{
+		if (NextReloadAttempt < WorldInfo.TimeSeconds)
+		{
+			NextReloadAttempt = WorldInfo.TimeSeconds + 1.0;
+			W.StartFire(BOTFM_RELOAD);
+		}
+		return true;
+	}
+
+	if (!W.HasAnyAmmo())
+	{
+		SwitchToBestWeapon(true);
+		Best = KFWeapon(Pawn.Weapon);
+		if (Best != W)
+		{
+			bFallbackWeapon = true;
+			bFallbackHadSpare = W.HasAnyAmmo();
+			FallbackPrimary = W;
+			FallbackSince = WorldInfo.TimeSeconds;
+			return true;
+		}
+		if ((Pawn.Weapon == None) || (Pawn.Weapon.bMeleeWeapon == false))
+		{
+			SwitchToBestWeapon(true);
+		}
+		return true;
+	}
+	return false;
 }
 
 final function int CountNearbyZedsCached(float Radius)
@@ -3530,69 +3876,302 @@ function TrackReloadState()
     bWasReloading = bNow;
 }
 
-// @STUB(M5b) @SYS-BASE-LTBOUND legacy:KF2BotBase.StartLtHumanBounding
 function StartLtHumanBounding()
 {
+    SetTimer(FRand() * HUMAN_BOUND_INTERVAL, false, 'BeginLtHumanBounding');
 }
 
-// @STUB(M5b) @SYS-BASE-LTBOUND legacy:KF2BotBase.BeginLtHumanBounding
 function BeginLtHumanBounding()
 {
+    if (BotRank == LIEUTENANT)
+    {
+        SetTimer(HUMAN_BOUND_INTERVAL, true, 'LtHumanBoundLoop');
+    }
 }
 
-// @STUB(M5b) @SYS-BASE-LTBOUND legacy:KF2BotBase.LtHumanBoundLoop
 function LtHumanBoundLoop()
 {
+    local int hIdx, s;
+    local float now, pushDot, d, d1, d2;
+    local vector objLoc, objDir, hVel, hLoc, ltAnchor, wedgeCenter;
+    local KFPawn_Human Human;
+    local EcholonBot SL, N1, N2;
+
+    if (BotRank != LIEUTENANT || Pawn == None || mut == None)
+    {
+        ClearTimer('LtHumanBoundLoop');
+        return;
+    }
+    if (mut.CachedHumans.Length == 0 || SquadLeaders.Length == 0)
+    {
+        return;
+    }
+
+    now = WorldInfo.TimeSeconds;
+
+    ltAnchor = OrderAnchor;
+    if (ltAnchor == vect(0,0,0))
+    {
+        ltAnchor = Pawn.Location;
+    }
+
+    if (mut.bObjectiveActive)
+    {
+        objLoc = mut.GetObjectiveLocation();
+    }
+    else
+    {
+        objLoc = ltAnchor;
+    }
+
+    for (hIdx = 0; hIdx < mut.CachedHumans.Length; hIdx++)
+    {
+        Human = mut.CachedHumans[hIdx].HumanPawn;
+        if (Human == None || !Human.IsAliveAndWell())
+        {
+            continue;
+        }
+
+        hVel = mut.CachedHumans[hIdx].Vel;
+        hVel.Z = 0.0;
+        if (VSizeSq(hVel) < HUMAN_MIN_SPEED_SQ)
+        {
+            continue;
+        }
+
+        hLoc = mut.CachedHumans[hIdx].Loc;
+        if (VSizeSq(hLoc - ltAnchor) >= HUMAN_LT_RANGE_SQ)
+        {
+            continue;
+        }
+
+        objDir = objLoc - hLoc;
+        objDir.Z = 0.0;
+        if (VSizeSq(objDir) < 1.0)
+        {
+            continue;
+        }
+        objDir = Normal(objDir);
+
+        pushDot = objDir dot Normal(hVel);
+        if (pushDot <= HUMAN_PUSH_DOT)
+        {
+            continue;
+        }
+
+        d1 = 99999999.0;
+        d2 = 99999999.0;
+        N1 = None;
+        N2 = None;
+        for (s = 0; s < SquadLeaders.Length; s++)
+        {
+            SL = SquadLeaders[s];
+            if (SL == None || SL.Pawn == None || !SL.Pawn.IsAliveAndWell())
+            {
+                continue;
+            }
+            if (SL.CurrentOrder == 'CMD_TacticalRetreat')
+            {
+                continue;
+            }
+            if (SL.WedgeExpireTime > now + HUMAN_BOUND_INTERVAL)
+            {
+                continue;
+            }
+
+            d = VSizeSq(SL.Pawn.Location - hLoc);
+            if (d < d1)
+            {
+                d2 = d1;
+                N2 = N1;
+                d1 = d;
+                N1 = SL;
+            }
+            else if (d < d2)
+            {
+                d2 = d;
+                N2 = SL;
+            }
+        }
+
+        wedgeCenter = hLoc - (objDir * WEDGE_REAR_OFFSET);
+        wedgeCenter.Z = hLoc.Z;
+
+        if (N1 != None)
+        {
+            N1.ReceiveWedgeOrder(Human, wedgeCenter, now + WEDGE_LEASE);
+        }
+        if (N2 != None)
+        {
+            N2.ReceiveWedgeOrder(Human, wedgeCenter, now + WEDGE_LEASE);
+        }
+    }
 }
 
-// @STUB(M5b) @SYS-BASE-WEDGE legacy:KF2BotBase.ReceiveWedgeOrder
 function ReceiveWedgeOrder(KFPawn_Human Human, vector WedgeCenter, float ExpireTime)
 {
+    local int i;
+
+    bWedgeActive = true;
+    WedgeHuman = Human;
+    WedgeExpireTime = ExpireTime;
+    CurrentFormation = 'WedgeBehindHuman';
+
+    for (i = 0; i < 4; i++)
+    {
+        if (SquadMembers[i] != None)
+        {
+            SquadMembers[i].CurrentFormation = 'WedgeBehindHuman';
+        }
+    }
+
+    IssueCommand('CMD_PushAnchor', WedgeCenter);
 }
 
-// @STUB(M5b) @SYS-BASE-WEDGE legacy:KF2BotBase.UpdateWedgeMode
 function UpdateWedgeMode()
 {
+    if (!bWedgeActive)
+        return;
+    if (WorldInfo.TimeSeconds > WedgeExpireTime || WedgeHuman == None || !WedgeHuman.IsAliveAndWell())
+    {
+        ClearWedge();
+    }
 }
 
-// @STUB(M5b) @SYS-BASE-WEDGE legacy:KF2BotBase.ClearWedge
 function ClearWedge()
 {
+    local int i;
+
+    bWedgeActive = false;
+    WedgeHuman = None;
+    WedgeExpireTime = 0.0;
+    CurrentFormation = 'StaggeredColumn';
+    for (i = 0; i < 4; i++)
+    {
+        if (SquadMembers[i] != None)
+        {
+            SquadMembers[i].CurrentFormation = 'StaggeredColumn';
+        }
+    }
 }
 
-// @STUB(M5b) @SYS-BASE-WEDGE legacy:KF2BotBase.ComputeWedgeOffset
 function vector ComputeWedgeOffset(int Slot, KFPawn_Human PlayerRef)
 {
+    local rotator R;
+    local vector AxX, AxY, AxZ, dir;
+    local float ang, dist;
+    local int sl;
+
+    sl = Clamp(Slot, 0, 3);
+    switch (sl)
+    {
+        case 0:
+            ang = -60.0;
+            break;
+        case 1:
+            ang = -30.0;
+            break;
+        case 2:
+            ang = 30.0;
+            break;
+        default:
+            ang = 60.0;
+            break;
+    }
+    ang = ang * DEG_TO_RAD;
+    dist = 150.0 + (50.0 * float(sl));
+
+    R = rot(0, 0, 0);
+    R.Yaw = PlayerRef.Rotation.Yaw;
+    GetAxes(R, AxX, AxY, AxZ);
+
+    dir = ((-AxX) * Cos(ang)) + (AxY * Sin(ang));
+    return dir * dist;
 }
 
-// @STUB(M5b) @SYS-BASE-WEDGE legacy:KF2BotBase.ApplyWedgeTarget
 function ApplyWedgeTarget(out vector OutTarget)
 {
+    local KFPawn_Human Human;
+
+    if (SquadLeader == None || !SquadLeader.bWedgeActive)
+        return;
+    Human = SquadLeader.WedgeHuman;
+    if (Human == None || !Human.IsAliveAndWell())
+        return;
+
+    OutTarget = Human.Location + ComputeWedgeOffset(OverwatchSlot, Human);
 }
 
-// @STUB(M5b) @SYS-BASE-EMOTE legacy:KF2BotBase.StartEmoteEchoTimer
 function StartEmoteEchoTimer()
 {
+    SetTimer(FRand(), false, 'BeginEmoteEcho');
 }
 
-// @STUB(M5b) @SYS-BASE-EMOTE legacy:KF2BotBase.BeginEmoteEcho
 function BeginEmoteEcho()
 {
+    SetTimer(1.0, true, 'CheckEmoteEcho');
 }
 
-// @STUB(M5b) @SYS-BASE-EMOTE legacy:KF2BotBase.CheckEmoteEcho
 function CheckEmoteEcho()
 {
+    local int i;
+    local float now;
+    local KFPawn_Human H;
+    local KFGameReplicationInfo GRI;
+
+    if (Pawn == None || bPlayingEmote || mut == None)
+        return;
+
+    GRI = mut.KF.MyKFGRI;
+    if (GRI == None || !(GRI.bTraderIsOpen || GRI.WaveNum == 0))
+        return;
+
+    now = WorldInfo.TimeSeconds;
+    if (now < NextEmoteRollTime || Enemy != None)
+        return;
+    if (IsGruntCombatLocked() || IsInState('GoShopping') || IsInState('GetItem') || IsInState('DonatingMoney'))
+        return;
+
+    for (i = 0; i < mut.CachedHumans.Length; i++)
+    {
+        H = mut.CachedHumans[i].HumanPawn;
+        if (H == None || !H.IsAliveAndWell())
+            continue;
+        if (VSizeSq(H.Location - Pawn.Location) >= EMOTE_RADIUS_SQ)
+            continue;
+        if (!H.IsDoingSpecialMove(SM_Emote))
+            continue;
+
+        NextEmoteRollTime = now + EMOTE_ROLL_COOLDOWN;
+        if (FRand() < EMOTE_CHANCE)
+        {
+            Focus = None;
+            SetFocalPoint(H.Location);
+            PlayBotEmote();
+        }
+        break;
+    }
 }
 
-// @STUB(M5b) @SYS-BASE-EMOTE legacy:KF2BotBase.PlayBotEmote
 final function PlayBotEmote()
 {
+    local KFPawn KFP;
+
+    KFP = KFPawn(Pawn);
+    if (KFP == None || bPlayingEmote)
+        return;
+
+    if (!KFP.CanDoSpecialMove(SM_Emote))
+        return;
+
+    bPlayingEmote = true;
+    KFP.DoSpecialMove(SM_Emote, true, None, 0);
+    SetTimer(4.0, false, 'ClearEmoteFlag');
 }
 
-// @STUB(M5b) @SYS-BASE-EMOTE legacy:KF2BotBase.ClearEmoteFlag
 function ClearEmoteFlag()
 {
+    bPlayingEmote = false;
 }
 
 final function float GetWaveMomentum()
