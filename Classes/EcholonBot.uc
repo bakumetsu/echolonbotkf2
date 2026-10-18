@@ -435,9 +435,134 @@ state FightEnemy
         PickCombatStyle();
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.PickStyle
     function PickStyle()
     {
+        local bool bMelee;
+        local EcholonBot GroupLeader;
+        local float RetreatDistSq;
+
+        if (BotRank == GRUNT)
+        {
+            GruntPickCombatStyle();
+            return;
+        }
+
+        if (mut.bObjectiveActive)
+        {
+            if (ObjectiveGoal == None)
+            {
+                ObjectiveGoal = mut.GetBotObjective(self);
+                AuditGoalLog("GOAL_SET", "PickCombatStyle");
+            }
+            if (ObjectiveGoal != None && VSizeSq(ObjectiveGoal.Location - Pawn.Location) > 640000.0)
+            {
+                if (ActorReachable(ObjectiveGoal))
+                {
+                    MoveTowardX(ObjectiveGoal);
+                    return;
+                }
+                if (BuildPathToward(ObjectiveGoal))
+                {
+                    MoveTowardX(MoveTarget);
+                    return;
+                }
+            }
+        }
+
+        if (mut != None)
+        {
+            GroupLeader = mut.GetGroupLeader(GroupID);
+        }
+        else
+        {
+            GroupLeader = None;
+        }
+
+        if ((!bIsGroupLeader) && GroupLeader != None && GroupLeader.Pawn != None && VSizeSq(GroupLeader.Pawn.Location - Pawn.Location) > 2250000.0)
+        {
+            if (BuildPathToward(GroupLeader.Pawn))
+            {
+                MoveTowardX(MoveTarget, Enemy);
+                return;
+            }
+        }
+        else
+        {
+            if ((FollowingHuman != None) && VSizeSq(FollowingHuman.Location - Pawn.Location) > 2250000.0)
+            {
+                if (BuildPathToward(FollowingHuman))
+                {
+                    MoveTowardX(MoveTarget, Enemy);
+                    return;
+                }
+            }
+        }
+
+        bMelee = IsMeleeOnly();
+
+        if (bOutOfEffectiveRange && !bMelee)
+        {
+            CloseToEffectiveRange();
+            return;
+        }
+
+        if (bMelee && Enemy.Health > BOSS_HEALTH_THRESHOLD)
+        {
+            Enemy = None;
+            PickCombatStyle();
+            return;
+        }
+
+        if (Enemy.Health > 500)
+        {
+            RetreatDistSq = 250000.0;
+        }
+        else
+        {
+            RetreatDistSq = 14400.0;
+        }
+
+        if ((((KPawn != None) || !bMelee) && !bMelee || (Vector(Enemy.Rotation) Dot (Enemy.Location - Pawn.Location)) < 0.0) && VSizeSq(Enemy.Location - Pawn.Location) < RetreatDistSq)
+        {
+            PickRetreatMove();
+        }
+        else
+        {
+            if (bMelee)
+            {
+                if (Pawn.Weapon != None && VSizeSq(Enemy.Location - Pawn.Location) < 40000.0)
+                {
+                    Pawn.Weapon.StartFire(0);
+                }
+                if (ActorReachable(Enemy))
+                {
+                    MoveTowardX(Enemy);
+                }
+                else
+                {
+                    if (BuildPathToward(Enemy))
+                    {
+                        MoveTowardX(MoveTarget, Enemy);
+                    }
+                    else
+                    {
+                        MoveToX((Normal(Enemy.Location - Pawn.Location) * 150.0) + Pawn.Location + (VRand() * 200.0), Enemy);
+                    }
+                }
+            }
+            else
+            {
+                if (Rand(2) == 0)
+                {
+                    MoveToX(Pawn.Location + (VRand() * 300.0), Enemy);
+                }
+                else
+                {
+                    Pawn.ShouldCrouch(Rand(2) == 0);
+                    SetTimer(0.5 + (FRand() * 1.5), false, 'FinishedMove');
+                }
+            }
+        }
     }
 
     // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.NotifyBump
