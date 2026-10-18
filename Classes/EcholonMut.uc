@@ -1125,9 +1125,16 @@ function EcholonBot GetGroupLeader(int GroupID)
     return Fireteams[GroupIdx].Leader;
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.GetGroupSize
 function int GetGroupSize(int GroupID)
 {
+    local int GroupIdx;
+
+    GroupIdx = GroupID - 1;
+    if (GroupIdx < 0 || GroupIdx >= Fireteams.Length)
+    {
+        return 0;
+    }
+    return Fireteams[GroupIdx].Members.Length;
 }
 
 // @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.GetFollowerIndex
