@@ -557,9 +557,163 @@ function IdleWatchdogTimer()
     IdleWatchdog();
 }
 
-// @STUB(M5c) @SYS-LOGIC-WATCHDOG legacy:KF2BotLogic.IdleWatchdog
 function IdleWatchdog()
 {
+    local float IterNow;
+    local float IterSinceIntent;
+    local float IterSinceHub;
+    local float IterStuckDelta;
+    local float IterGoalD2;
+    local name IterState;
+    local bool bLegitState;
+    local bool bNotIdle;
+    local bool bStuck;
+    local bool bProgressing;
+    local bool bAttached;
+    local NavigationPoint IterGoalN;
+    local Controller IterAttachCtrl;
+    local EcholonBot IterAttachBot;
+
+    if (Pawn == None || KPawn == None || !KPawn.IsAliveAndWell())
+    {
+        return;
+    }
+
+    IterNow = WorldInfo.TimeSeconds;
+    IterSinceIntent = IterNow - WdLastMoveIntentTime;
+    IterSinceHub = IterNow - WdLastHubContactTime;
+    IterState = GetStateName();
+
+    bLegitState = (IterState == 'HealingSelf' || IterState == 'HealOther' ||
+        IterState == 'HealRanged' || IterState == 'BreakLose' ||
+        IterState == 'VictoryDance' || IterState == 'Camp' ||
+        IterState == 'GoShopping' || IterState == 'FollowingLeader' ||
+        IterState == 'FollowingLeaderBasic' || IterState == 'DoObjective' ||
+        IterState == 'Hunting');
+
+    if (!bLegitState && IterState == 'FightEnemy' && Enemy != None && Enemy.Health > 0)
+    {
+        bLegitState = true;
+    }
+
+    bNotIdle = !bLegitState && (IterSinceIntent > AUDIT_INTENT_TIMEOUT && IterSinceHub > AUDIT_HUB_TIMEOUT);
+
+    if (!bNotIdle)
+    {
+        bWdEscalating = false;
+        WdEscStep = 1;
+        WdLastStepTime = 0.0;
+        WdProgressGoalD2 = 0.0;
+        return;
+    }
+
+    if (!bWdEscalating)
+    {
+        bWdEscalating = true;
+        WdEscStep = 1;
+        WdLastStepTime = 0.0;
+        WdProgressGoalD2 = 0.0;
+        WdIdleStartLoc = Pawn.Location;
+        EchelonLog("WD_IDLE bot=" $ Name $ " state=" $ IterState $ " intentAge=" $ string(IterSinceIntent) $ " hubAge=" $ string(IterSinceHub));
+        return;
+    }
+
+    IterStuckDelta = VSize(Pawn.Location - WdIdleStartLoc);
+    bStuck = (IterStuckDelta < AUDIT_IDLE_STUCK_DELTA);
+
+    IterGoalN = None;
+    if (mut != None)
+    {
+        IterGoalN = mut.GetBotObjective(EcholonBot(self));
+    }
+
+    if (IterGoalN != None)
+    {
+        IterGoalD2 = VSizeSq(Pawn.Location - IterGoalN.Location);
+        if (WdProgressGoalD2 == 0.0 || IterGoalD2 < WdProgressGoalD2)
+        {
+            bProgressing = true;
+            WdProgressGoalD2 = IterGoalD2;
+        }
+        else
+        {
+            bProgressing = false;
+        }
+    }
+    else
+    {
+        bProgressing = !bStuck;
+    }
+
+    if (!bStuck && bProgressing)
+    {
+        bWdEscalating = false;
+        WdEscStep = 1;
+        WdLastStepTime = 0.0;
+        WdProgressGoalD2 = 0.0;
+        return;
+    }
+
+    if (IterNow - WdLastStepTime < AUDIT_WD_STEP_COOLDOWN)
+    {
+        return;
+    }
+
+    WdLastStepTime = IterNow;
+
+    if (WdEscStep == 1)
+    {
+        if (mut != None && mut.HasSquadGoal(EcholonBot(self)))
+        {
+            mut.ReissueSquadOrder(EcholonBot(self));
+            EchelonLog("WD_FIRE bot=" $ Name $ " step=1 reissue state=" $ IterState $ " delta=" $ string(IterStuckDelta));
+            WdEscStep++;
+        }
+        else
+        {
+            WdEscStep = 2;
+        }
+    }
+    else if (WdEscStep == 2)
+    {
+        bAttached = false;
+        if (SquadLeader == None || SquadLeader.Pawn == None || SquadLeader.Pawn.Health <= 0)
+        {
+            IterAttachCtrl = None;
+            if (mut != None)
+            {
+                IterAttachCtrl = mut.FindNearestActiveLeader(EcholonBot(self), AUDIT_ATTACH_RADIUS);
+            }
+            if (IterAttachCtrl != None)
+            {
+                IterAttachBot = EcholonBot(IterAttachCtrl);
+                if (IterAttachBot != None)
+                {
+                    mut.ReassignBotToGroup(EcholonBot(self), IterAttachBot.GroupID - 1);
+                }
+                EchelonLog("WD_FIRE bot=" $ Name $ " step=2 attach leader=" $ string(IterAttachCtrl.Name));
+                FollowStart(IterAttachCtrl);
+                bWdEscalating = false;
+                WdEscStep = 1;
+                WdLastStepTime = 0.0;
+                WdProgressGoalD2 = 0.0;
+                bAttached = true;
+            }
+        }
+        if (!bAttached)
+        {
+            WdEscStep = 3;
+        }
+    }
+    else
+    {
+        EchelonLog("WD_FIRE bot=" $ Name $ " step=3 fresh-pick state=" $ IterState $ " delta=" $ string(IterStuckDelta));
+        GotoState('PickNextMove');
+        bWdEscalating = false;
+        WdEscStep = 1;
+        WdLastStepTime = 0.0;
+        WdProgressGoalD2 = 0.0;
+    }
 }
 
 // @STUB(M5c) @SYS-LOGIC-WATCHDOG legacy:KF2BotLogic.ProcessOverwatchPhase
