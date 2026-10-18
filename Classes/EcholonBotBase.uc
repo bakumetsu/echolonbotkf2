@@ -3889,9 +3889,123 @@ function BeginLtHumanBounding()
     }
 }
 
-// @STUB(M5b) @SYS-BASE-LTBOUND legacy:KF2BotBase.LtHumanBoundLoop
 function LtHumanBoundLoop()
 {
+    local int hIdx, s;
+    local float now, pushDot, d, d1, d2;
+    local vector objLoc, objDir, hVel, hLoc, ltAnchor, wedgeCenter;
+    local KFPawn_Human Human;
+    local EcholonBot SL, N1, N2;
+
+    if (BotRank != LIEUTENANT || Pawn == None || mut == None)
+    {
+        ClearTimer('LtHumanBoundLoop');
+        return;
+    }
+    if (mut.CachedHumans.Length == 0 || SquadLeaders.Length == 0)
+    {
+        return;
+    }
+
+    now = WorldInfo.TimeSeconds;
+
+    ltAnchor = OrderAnchor;
+    if (ltAnchor == vect(0,0,0))
+    {
+        ltAnchor = Pawn.Location;
+    }
+
+    if (mut.bObjectiveActive)
+    {
+        objLoc = mut.GetObjectiveLocation();
+    }
+    else
+    {
+        objLoc = ltAnchor;
+    }
+
+    for (hIdx = 0; hIdx < mut.CachedHumans.Length; hIdx++)
+    {
+        Human = mut.CachedHumans[hIdx].HumanPawn;
+        if (Human == None || !Human.IsAliveAndWell())
+        {
+            continue;
+        }
+
+        hVel = mut.CachedHumans[hIdx].Vel;
+        hVel.Z = 0.0;
+        if (VSizeSq(hVel) < HUMAN_MIN_SPEED_SQ)
+        {
+            continue;
+        }
+
+        hLoc = mut.CachedHumans[hIdx].Loc;
+        if (VSizeSq(hLoc - ltAnchor) >= HUMAN_LT_RANGE_SQ)
+        {
+            continue;
+        }
+
+        objDir = objLoc - hLoc;
+        objDir.Z = 0.0;
+        if (VSizeSq(objDir) < 1.0)
+        {
+            continue;
+        }
+        objDir = Normal(objDir);
+
+        pushDot = objDir dot Normal(hVel);
+        if (pushDot <= HUMAN_PUSH_DOT)
+        {
+            continue;
+        }
+
+        d1 = 99999999.0;
+        d2 = 99999999.0;
+        N1 = None;
+        N2 = None;
+        for (s = 0; s < SquadLeaders.Length; s++)
+        {
+            SL = SquadLeaders[s];
+            if (SL == None || SL.Pawn == None || !SL.Pawn.IsAliveAndWell())
+            {
+                continue;
+            }
+            if (SL.CurrentOrder == 'CMD_TacticalRetreat')
+            {
+                continue;
+            }
+            if (SL.WedgeExpireTime > now + HUMAN_BOUND_INTERVAL)
+            {
+                continue;
+            }
+
+            d = VSizeSq(SL.Pawn.Location - hLoc);
+            if (d < d1)
+            {
+                d2 = d1;
+                N2 = N1;
+                d1 = d;
+                N1 = SL;
+            }
+            else if (d < d2)
+            {
+                d2 = d;
+                N2 = SL;
+            }
+        }
+
+        wedgeCenter = hLoc - (objDir * WEDGE_REAR_OFFSET);
+        wedgeCenter.Z = hLoc.Z;
+
+        if (N1 != None)
+        {
+            N1.ReceiveWedgeOrder(Human, wedgeCenter, now + WEDGE_LEASE);
+        }
+        if (N2 != None)
+        {
+            N2.ReceiveWedgeOrder(Human, wedgeCenter, now + WEDGE_LEASE);
+        }
+    }
 }
 
 // @STUB(M5b) @SYS-BASE-WEDGE legacy:KF2BotBase.ReceiveWedgeOrder
