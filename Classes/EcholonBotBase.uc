@@ -3173,9 +3173,52 @@ function HandleCQBProximity()
     }
 }
 
-// @STUB(M5a) @SYS-BASE-GRUNT legacy:KF2BotBase.OnGruntGrabbed
 function OnGruntGrabbed(EcholonBot GruntBot)
 {
+    local int i;
+    local EcholonBot M, N1, N2;
+    local float d, D1, D2;
+    local vector grabLoc;
+    local Pawn grabber;
+    local KFPawn KFP;
+
+    if (GruntBot == None || GruntBot.Pawn == None)
+        return;
+
+    grabLoc = GruntBot.Pawn.Location;
+    KFP = KFPawn(GruntBot.Pawn);
+    if (KFP != None)
+        grabber = KFP.InteractionPawn;
+
+    D1 = RESCUE_RANGE_SQ;
+    D2 = RESCUE_RANGE_SQ;
+    N1 = None;
+    N2 = None;
+
+    for (i = 0; i < 4; i++)
+    {
+        M = SquadMembers[i];
+        if (M == None || M == GruntBot || M.Pawn == None || M.GetStateName() == 'BreakLose' || !M.Pawn.IsAliveAndWell())
+            continue;
+        d = VSizeSq(M.Pawn.Location - grabLoc);
+        if (d < D1)
+        {
+            D2 = D1;
+            N2 = N1;
+            D1 = d;
+            N1 = M;
+        }
+        else if (d < D2)
+        {
+            D2 = d;
+            N2 = M;
+        }
+    }
+
+    if (N1 != None)
+        N1.BeginRescue(grabLoc, grabber);
+    if (N2 != None)
+        N2.BeginRescue(grabLoc, grabber);
 }
 
 // @STUB(M5a) @SYS-BASE-GRUNT legacy:KF2BotBase.BeginRescue
