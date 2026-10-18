@@ -810,54 +810,388 @@ final function Class<KFPerk> PickBotPerk()
     return Picked;
 }
 
-// @STUB(M1) @SYS-MUT-SPAWN legacy:KF2BotsMut.AddBot
 final function bool AddBot()
 {
+    local EcholonBot B;
+    local KFPlayerReplicationInfo PRI;
+    local NavigationPoint PS;
+
+    PS = KF.FindPlayerStart(None, 0);
+    if (PS == None)
+    {
+        return false;
+    }
+
+    B = Spawn(class'EcholonBot',,, PS.Location);
+    if (B == None)
+    {
+        return false;
+    }
+
+    B.Perk = PickBotPerk();
+
+    PRI = KFPlayerReplicationInfo(B.PlayerReplicationInfo);
+    if (PRI != None)
+    {
+        PRI.CurrentPerkClass = B.Perk;
+        PRI.PlayerID = KF.GetNextPlayerID();
+    }
+
+    KF.GenericPlayerInitialization(B);
+    RestartBot(B);
+
+    if (PRI != None)
+    {
+        PRI.Score = float(KF.DifficultyInfo.GetAdjustedStartingCash());
+    }
+
+    KF.bOnePlayerAtStart = false;
+    KF.ForceLivingPlayerCount(byte(KF.NumPlayers + KF.NumBots));
+    return true;
 }
 
-// @STUB(M1) @SYS-MUT-SPAWN legacy:KF2BotsMut.RemoveBot
 final function RemoveBot()
 {
+    local EcholonBot B, Best;
+    local float Score, BestScore;
+
+    BestScore = 0.0;
+    Best = None;
+    foreach WorldInfo.AllControllers(class'EcholonBot', B)
+    {
+        Score = (100.0 * FRand()) + (B.PlayerReplicationInfo.Score * 0.25);
+        if (B.Pawn == None || !B.Pawn.IsAliveAndWell())
+        {
+            Score -= 500.0;
+        }
+        else
+        {
+            Score += float(B.Pawn.Health);
+        }
+        if (Best == None || Score < BestScore)
+        {
+            BestScore = Score;
+            Best = B;
+        }
+    }
+    if (Best != None)
+    {
+        Best.Destroy();
+    }
 }
 
-// @STUB(M1) @SYS-MUT-SPAWN legacy:KF2BotsMut.RestartBot
 final function RestartBot(EcholonBot NewPlayer, optional NavigationPoint StartSpot)
 {
+    local int TeamNum, Idx;
+    local array<SequenceObject> Events;
+    local SeqEvent_PlayerSpawned SpawnedEvent;
+
+    TeamNum = 0;
+
+    if((KF.bRestartLevel && WorldInfo.NetMode != NM_DedicatedServer) && WorldInfo.NetMode != NM_ListenServer)
+    {
+        WarnInternal("bRestartLevel && !server, abort from RestartPlayer" @ string(WorldInfo.NetMode));
+        return;
+    }
+
+    if(StartSpot == None)
+    {
+        StartSpot = KF.FindPlayerStart(NewPlayer, byte(TeamNum));
+    }
+
+    if(StartSpot == None)
+    {
+        if(NewPlayer.StartSpot != None)
+        {
+            StartSpot = NewPlayer.StartSpot;
+            WarnInternal("Player start not found, using last start spot");
+        }
+        else
+        {
+            WarnInternal("Player start not found, failed to restart player");
+            return;
+        }
+    }
+
+    if(NewPlayer.Pawn == None)
+    {
+        NewPlayer.Pawn = KF.SpawnDefaultPawnFor(NewPlayer, StartSpot);
+    }
+
+    if(NewPlayer.Pawn == None)
+    {
+        EchelonLog("failed to spawn player at " $ string(StartSpot));
+        NewPlayer.GotoState('Dead');
+    }
+    else
+    {
+        NewPlayer.Pawn.SetAnchor(StartSpot);
+        NewPlayer.Pawn.LastStartSpot = PlayerStart(StartSpot);
+        NewPlayer.Pawn.LastStartTime = WorldInfo.TimeSeconds;
+        NewPlayer.Possess(NewPlayer.Pawn, false);
+        NewPlayer.Pawn.PlayTeleportEffect(true, true);
+        NewPlayer.ClientSetRotation(NewPlayer.Pawn.Rotation, true);
+
+        if(!WorldInfo.bNoDefaultInventoryForPlayer)
+        {
+            KF.AddDefaultInventory(NewPlayer.Pawn);
+        }
+        KF.SetPlayerDefaults(NewPlayer.Pawn);
+
+        if(KFPawn(NewPlayer.Pawn) != None)
+        {
+            KFPawn(NewPlayer.Pawn).bIgnoreTeamCollision = KF.bDisableTeamCollision;
+        }
+
+        if(WorldInfo.GetGameSequence() != None)
+        {
+            WorldInfo.GetGameSequence().FindSeqObjectsByClass(Class'Engine.SeqEvent_PlayerSpawned', true, Events);
+            Idx = 0;
+            while(Idx < Events.Length)
+            {
+                SpawnedEvent = SeqEvent_PlayerSpawned(Events[Idx]);
+                if((SpawnedEvent != None) && SpawnedEvent.CheckActivate(NewPlayer, NewPlayer))
+                {
+                    SpawnedEvent.SpawnPoint = StartSpot;
+                    SpawnedEvent.PopulateLinkedVariableValues();
+                }
+                Idx++;
+            }
+        }
+
+        KF.SetTeam(NewPlayer, KF.Teams[0]);
+
+        // SetCharacterArch MUST follow SetTeam: SetTeam fires NotifyTeamChanged
+        // which internally calls SetCharacterArch(GetCharacterInfo()) and would
+        // snap the bot back to the default arch (Mr. Foster, index 0).
+        if((KFPawn(NewPlayer.Pawn) != None) && (NewPlayer.CharacterArch != None))
+        {
+            KFPawn(NewPlayer.Pawn).SetCharacterArch(NewPlayer.CharacterArch, true);
+        }
+
+        if(KFPlayerReplicationInfo(NewPlayer.PlayerReplicationInfo) != None)
+        {
+            KFPlayerReplicationInfo(NewPlayer.PlayerReplicationInfo).PlayerHealthPercent = FloatToByte(float(NewPlayer.Pawn.Health) / float(NewPlayer.Pawn.HealthMax));
+            KFPlayerReplicationInfo(NewPlayer.PlayerReplicationInfo).PlayerHealth = NewPlayer.Pawn.Health;
+            NewPlayer.PlayerReplicationInfo.Score = float(Max(int(NewPlayer.PlayerReplicationInfo.Score), KF.DifficultyInfo.GetAdjustedRespawnCash()));
+        }
+    }
 }
 
-// @STUB(M1) @SYS-MUT-UTIL legacy:KF2BotsMut.DebugMessage
 static final function DebugMessage(string msg)
 {
+    local PlayerController P;
+
+    msg = "[BOT]" @ msg;
+    foreach Class'Engine.WorldInfo'.static.GetWorldInfo().AllControllers(Class'Engine.PlayerController', P)
+    {
+        P.ClientMessage(msg);
+    }
 }
 
-// @STUB(M1) @SYS-MUT-UTIL legacy:KF2BotsMut.PMsg
 final function PMsg(PlayerController Other, string msg)
 {
+    Other.TeamMessage(Other.PlayerReplicationInfo, msg, 'Event');
+
+    if (LocalPlayer(Other.Player) != None)
+    {
+        LocalPlayer(Other.Player).ViewportClient.ViewportConsole.OutputText(msg);
+    }
 }
 
-// @STUB(M1) @SYS-MUT-UTIL legacy:KF2BotsMut.DebugAI
 final function DebugAI(PlayerController Sender)
 {
+    local EcholonBot B, Best;
+    local float Score, BestScore;
+    local Vector V;
+
+    V = Sender.ViewTarget.Location;
+
+    foreach WorldInfo.AllControllers(class'EcholonBot', B)
+    {
+        if (B.Pawn == None)
+        {
+            continue;
+        }
+        Score = VSizeSq(B.Pawn.Location - V);
+        if (Best == None || Score < BestScore)
+        {
+            Best = B;
+            BestScore = Score;
+        }
+    }
+
+    if (Best != None)
+    {
+        Sender.ClientMessage(Best.GetHumanReadableName() $ ": " $ Best.GetAIInfo());
+    }
 }
 
-// @STUB(M1) @SYS-MUT-SPAWN legacy:KF2BotsMut.Mutate
 function Mutate(string MutateString, PlayerController Sender)
 {
+    if (MutateString ~= "AI")
+    {
+        DebugAI(Sender);
+    }
+    else if ((WorldInfo.NetMode == NM_Standalone) || Sender.PlayerReplicationInfo.bAdmin)
+    {
+        if (MutateString ~= "Help")
+        {
+            PMsg(Sender, "EcholonBot commands:");
+            PMsg(Sender, ("-SetNumBots <" $ string(NumBots)) $ "> = Set bot count (subtracted by playercount)");
+            PMsg(Sender, ("-SetMinBots <" $ string(MinimumBots)) $ "> = Change the minimum bot count");
+            PMsg(Sender, ("-SetBotMinLv <" $ string(BotMinPerkLv)) $ "> = Set bots min perk level");
+            PMsg(Sender, ("-SetBotMaxLv <" $ string(BotMaxPerkLv)) $ "> = Set bots max perk level");
+            PMsg(Sender, ("-SetBotChat <" $ string(Class'EcholonBot.EcholonChat'.default.bBotsChat)) $ "> = Enable bot chatting");
+            PMsg(Sender, "-BotTalk = Make bots say one preset line if enabled");
+            PMsg(Sender, ("-SetScaleZedCount <" $ string(ZedCountScaling)) $ "> = Set by how much should bots scale zed count");
+            PMsg(Sender, ("-SetNoZerker <" $ string(bNoZerkerBots)) $ "> = New bots should never spawn as berserker");
+            PMsg(Sender, ("-SetBotsInfAmmo <" $ string(bBotsUnlimitedAmmo)) $ "> = Bots have unlimited ammo");
+            PMsg(Sender, ("-SetBotDamageScale <" $ string(BotsDamageScale)) $ "> = Damage scaling bots should take");
+            PMsg(Sender, ("-SetBotInfDosh <" $ string(bBotsUnlimitedCash)) $ "> = Bots have unlimited spending cash");
+            PMsg(Sender, ("-SetUseCustomNames <" $ string(bUseCustomBotNames)) $ "> = Use CustomBotNames instead of look-based names");
+            PMsg(Sender, ("-SetBotsLevel <" $ string(bShowBotLevel)) $ "> = Show [Lv X] prefix on bot names");
+            PMsg(Sender, ("-SetBotRole <" $ string(bShowBotRole)) $ "> = Show [Role] prefix on bot names");
+        }
+        else if (Left(MutateString, 11) ~= "SetNumBots ")
+        {
+            NumBots = byte(int(Mid(MutateString, 11)));
+            SaveConfig();
+            PMsg(Sender, "Number of bots count changed to: " $ string(NumBots));
+        }
+        else if (Left(MutateString, 11) ~= "SetMinBots ")
+        {
+            MinimumBots = byte(int(Mid(MutateString, 11)));
+            SaveConfig();
+            PMsg(Sender, "Minimum amount of bots set to: " $ string(MinimumBots));
+        }
+        else if (Left(MutateString, 12) ~= "SetBotMinLv ")
+        {
+            BotMinPerkLv = int(Mid(MutateString, 12));
+            SaveConfig();
+            PMsg(Sender, "Set bots minimum perk level to: " $ string(BotMinPerkLv));
+        }
+        else if (Left(MutateString, 12) ~= "SetBotMaxLv ")
+        {
+            BotMaxPerkLv = int(Mid(MutateString, 12));
+            SaveConfig();
+            PMsg(Sender, "Set bots maximum perk level to: " $ string(BotMaxPerkLv));
+        }
+        else if (Left(MutateString, 17) ~= "SetScaleZedCount ")
+        {
+            ZedCountScaling = float(Mid(MutateString, 17));
+            SaveConfig();
+            PMsg(Sender, "Bots scale the number of zeds: X " $ string(ZedCountScaling));
+        }
+        else if (Left(MutateString, 12) ~= "SetNoZerker ")
+        {
+            bNoZerkerBots = bool(Mid(MutateString, 12));
+            SaveConfig();
+            PMsg(Sender, "Bots should never spawn as berserker: " $ string(bNoZerkerBots));
+        }
+        else if (Left(MutateString, 15) ~= "SetBotsInfAmmo ")
+        {
+            bBotsUnlimitedAmmo = bool(Mid(MutateString, 15));
+            SaveConfig();
+            PMsg(Sender, "Bots have infinite ammo: " $ string(bBotsUnlimitedAmmo));
+        }
+        else if (Left(MutateString, 14) ~= "SetBotInfDosh ")
+        {
+            bBotsUnlimitedCash = bool(Mid(MutateString, 14));
+            SaveConfig();
+            PMsg(Sender, "Bots have infinite dosh: " $ string(bBotsUnlimitedCash));
+        }
+        else if (Left(MutateString, 18) ~= "SetUseCustomNames ")
+        {
+            bUseCustomBotNames = bool(Mid(MutateString, 18));
+            SaveConfig();
+            PMsg(Sender, "Bots use custom name pool: " $ string(bUseCustomBotNames));
+        }
+        else if (Left(MutateString, 13) ~= "SetBotsLevel ")
+        {
+            bShowBotLevel = bool(Mid(MutateString, 13));
+            SaveConfig();
+            PMsg(Sender, "Bots show [Lv X] name prefix: " $ string(bShowBotLevel));
+        }
+        else if (Left(MutateString, 11) ~= "SetBotRole ")
+        {
+            bShowBotRole = bool(Mid(MutateString, 11));
+            SaveConfig();
+            PMsg(Sender, "Bots show [Role] name prefix: " $ string(bShowBotRole));
+        }
+        else if (Left(MutateString, 18) ~= "SetBotDamageScale ")
+        {
+            BotsDamageScale = float(Mid(MutateString, 18));
+            SaveConfig();
+            PMsg(Sender, "Bots new damage scaling: " $ string(BotsDamageScale));
+        }
+        else if (Left(MutateString, 11) ~= "SetBotChat ")
+        {
+            if (ActiveChat != None)
+            {
+                ActiveChat.bBotsChat = bool(Mid(MutateString, 11));
+                ActiveChat.SaveConfig();
+            }
+            else
+            {
+                Class'EcholonBot.EcholonChat'.default.bBotsChat = bool(Mid(MutateString, 11));
+                Class'EcholonBot.EcholonChat'.static.StaticSaveConfig();
+            }
+            PMsg(Sender, "Set bots chatting: " $ string(Class'EcholonBot.EcholonChat'.default.bBotsChat));
+        }
+        else if (MutateString ~= "BotTalk")
+        {
+            if (ActiveChat != None)
+            {
+                ActiveChat.BotChatterTimer();
+            }
+            else
+            {
+                PMsg(Sender, "Bot chat disabled.");
+            }
+        }
+    }
+    if (NextMutator != None)
+    {
+        NextMutator.Mutate(MutateString, Sender);
+    }
 }
 
-// @STUB(M1) @SYS-MUT-SPAWN legacy:KF2BotsMut.NetDamage
 function NetDamage(int OriginalDamage, out int Damage, Pawn injured, Controller InstigatedBy, Vector HitLocation, out Vector Momentum, Class<DamageType> DamageType, Actor DamageCauser)
 {
+    if ((Damage > 0) && (EcholonBot(injured.Controller) != None))
+    {
+        if (((InstigatedBy != None) && (InstigatedBy != injured.Controller)) && (injured.GetTeamNum() == InstigatedBy.GetTeamNum()))
+        {
+            Damage = 0;
+            Momentum *= 0.25;
+        }
+        else
+        {
+            Damage *= BotsDamageScale;
+        }
+    }
+    if (NextMutator != None)
+    {
+        NextMutator.NetDamage(OriginalDamage, Damage, injured, InstigatedBy, HitLocation, Momentum, DamageType, DamageCauser);
+    }
 }
 
-// @STUB(M1) @SYS-MUT-BOOT legacy:KF2BotsMut.InitEmotes
 final function InitEmotes()
 {
+    local array<Emote> EA;
+
+    EA = Class'KFGame.KFEmoteList'.static.GetEmoteArray();
+    MaxEmoteCount = EA.Length;
 }
 
-// @STUB(M1) @SYS-MUT-BOOT legacy:KF2BotsMut.PickRandEmote
 final function byte PickRandEmote()
 {
+	if (MaxEmoteCount == -1)
+	{
+		InitEmotes();
+	}
+	return byte(Rand(MaxEmoteCount));
 }
 
 // @STUB(M1) @SYS-MUT-BOOT legacy:KF2BotsMut.ShouldDoVictoryDance
