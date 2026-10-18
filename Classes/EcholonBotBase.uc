@@ -4112,9 +4112,45 @@ function BeginEmoteEcho()
     SetTimer(1.0, true, 'CheckEmoteEcho');
 }
 
-// @STUB(M5b) @SYS-BASE-EMOTE legacy:KF2BotBase.CheckEmoteEcho
 function CheckEmoteEcho()
 {
+    local int i;
+    local float now;
+    local KFPawn_Human H;
+    local KFGameReplicationInfo GRI;
+
+    if (Pawn == None || bPlayingEmote || mut == None)
+        return;
+
+    GRI = mut.KF.MyKFGRI;
+    if (GRI == None || !(GRI.bTraderIsOpen || GRI.WaveNum == 0))
+        return;
+
+    now = WorldInfo.TimeSeconds;
+    if (now < NextEmoteRollTime || Enemy != None)
+        return;
+    if (IsGruntCombatLocked() || IsInState('GoShopping') || IsInState('GetItem') || IsInState('DonatingMoney'))
+        return;
+
+    for (i = 0; i < mut.CachedHumans.Length; i++)
+    {
+        H = mut.CachedHumans[i].HumanPawn;
+        if (H == None || !H.IsAliveAndWell())
+            continue;
+        if (VSizeSq(H.Location - Pawn.Location) >= EMOTE_RADIUS_SQ)
+            continue;
+        if (!H.IsDoingSpecialMove(SM_Emote))
+            continue;
+
+        NextEmoteRollTime = now + EMOTE_ROLL_COOLDOWN;
+        if (FRand() < EMOTE_CHANCE)
+        {
+            Focus = None;
+            SetFocalPoint(H.Location);
+            PlayBotEmote();
+        }
+        break;
+    }
 }
 
 // @STUB(M5b) @SYS-BASE-EMOTE legacy:KF2BotBase.PlayBotEmote
