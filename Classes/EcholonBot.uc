@@ -1173,9 +1173,13 @@ Begin:
 // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.DonatingMoney
 state DonatingMoney
 {
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.DonatingMoney.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        if (Pawn != None)
+        {
+            Pawn.StopFiring();
+        }
     }
 
     // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.DonatingMoney.EndState
