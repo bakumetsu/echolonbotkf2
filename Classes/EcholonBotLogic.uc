@@ -182,10 +182,61 @@ final function bool CheckMedicGunHeal()
     return Best != None;
 }
 
-// @STUB(M5c) @SYS-LOGIC-HEAL legacy:KF2BotLogic.CheckShouldSelfHeal
 final function bool CheckShouldSelfHeal()
 {
+    local KFWeap_HealerBase W;
+
+    if (mut == None)
+    {
+        return false;
+    }
+    if (KPawn == None || !KPawn.IsAliveAndWell())
+    {
+        return false;
+    }
+
+    // Failure backoff: a failed heal stamps HealRetryAfter, so a failing heal can't livelock.
+    if (WorldInfo.TimeSeconds < HealRetryAfter)
+    {
+        return false;
+    }
+
+    // Primary threshold: self-heal at HEAL_MAX_NEED_PCT health or below.
+    if (KPawn.Health >= (HEAL_MAX_NEED_PCT / 100.0) * KPawn.HealthMax)
+    {
+        return false;
+    }
+
+    // Mechanical recharge: no heal at all until the syringe has recharged.
+    if (WorldInfo.TimeSeconds < SyringeRechargeEnd)
+    {
+        return false;
+    }
+
+    // Behavioural pacing: skip chip-damage heals, except below 50% health or while the trader is open.
+    if (WorldInfo.TimeSeconds < HealPacingEnd && !(KFGRI != None && KFGRI.bTraderIsOpen))
+    {
+        if (KPawn.Health >= 0.50 * KPawn.HealthMax)
+        {
+            return false;
+        }
+    }
+
+    MedicGun = None;
+    if (KFInvManager != None)
+    {
+        foreach KFInvManager.InventoryActors(class'KFWeap_HealerBase', W)
+        {
+            if (W.HasAmmo(0))
+            {
+                MedicGun = W;
+                break;
+            }
+        }
+    }
+    return MedicGun != None;
 }
+
 
 final function bool ShouldNadeEnemies()
 {
