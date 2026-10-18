@@ -1346,9 +1346,21 @@ function string CoordStr(vector L)
     return string(FFloor(L.X / 100.0)) $ "," $ string(FFloor(L.Y / 100.0)) $ "," $ string(FFloor(L.Z / 100.0));
 }
 
-// @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.EnsureSquadOrderTable
 function EnsureSquadOrderTable()
 {
+    local int i;
+
+    if (SquadOrders.Length == Fireteams.Length)
+        return;
+    for (i = SquadOrders.Length; i < Fireteams.Length; i++)
+    {
+        SquadOrders[i].SquadID = i + 1;
+        SquadOrders[i].Leader = None;
+        SquadOrders[i].Zone = None;
+        SquadOrders[i].GoalNav = None;
+        SquadOrders[i].GoalPoint = vect(0, 0, 0);
+        SquadOrders[i].Phase = PHASE_IDLE;
+    }
 }
 
 // @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.InheritSquadOrder
