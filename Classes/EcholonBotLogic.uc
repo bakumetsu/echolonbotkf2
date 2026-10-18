@@ -1169,9 +1169,59 @@ function UpdateCQBFormation()
     bSingleFileFormation = (!bLeftClear || !bRightClear);
 }
 
-// @STUB(M5c) @SYS-LOGIC-MOVEVAL legacy:KF2BotLogic.UpdatePillarOfSaltTracking
 function UpdatePillarOfSaltTracking()
 {
+    local KFDoorMarker Marker;
+    local bool bFoundDoor;
+
+    if (Pawn == None)
+        return;
+
+    if (!bHasStuckBaseline)
+    {
+        LeaderLocation3SecAgo = Pawn.Location;
+        LastStuckSampleTime = WorldInfo.TimeSeconds;
+        bHasStuckBaseline = true;
+        return;
+    }
+
+    if (WorldInfo.TimeSeconds - LastStuckSampleTime < STUCK_SAMPLE_INTERVAL)
+        return;
+
+    bIsStuck = (VSizeSq(Pawn.Location - LeaderLocation3SecAgo) < STUCK_DIST_SQ);
+
+    if (bIsStuck)
+    {
+        bFoundDoor = false;
+        foreach Pawn.OverlappingActors(class'KFDoorMarker', Marker, DOOR_CHECK_RADIUS)
+        {
+            if (Marker.MyKFDoor == None || Marker.MyKFDoor.bIsDestroyed)
+                continue;
+            if (Marker.MyKFDoor.bIsDoorOpen || Marker.MyKFDoor.WeldIntegrity <= 0)
+                continue;
+
+            bFoundDoor = true;
+            break;
+        }
+
+        if (bFoundDoor)
+        {
+            bAttemptingUnweld = true;
+            bIsStuck = false;
+        }
+        else
+        {
+            bAttemptingUnweld = false;
+            mut.RequestLeaderDemotion(EcholonBot(self));
+        }
+    }
+    else
+    {
+        bAttemptingUnweld = false;
+    }
+
+    LeaderLocation3SecAgo = Pawn.Location;
+    LastStuckSampleTime = WorldInfo.TimeSeconds;
 }
 
 // @STUB(M5c) @SYS-LOGIC-MOVEVAL legacy:KF2BotLogic.ExecuteCampState
