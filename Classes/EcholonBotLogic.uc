@@ -103,6 +103,8 @@ function bool FollowCheckExit()
 // @STUB(M5c) @SYS-LOGIC-DEATH legacy:KF2BotLogic.PawnDied
 function PawnDied(Pawn inPawn)
 {
+    // BRIDGE(M1): minimal engine pass-through so bots spawn; replaced by the full port in M5c.
+    super.PawnDied(inPawn);
 }
 
 // @STUB(M5c) @SYS-LOGIC-DEATH legacy:KF2BotLogic.ActivatePlayerDiedSequenceEvents

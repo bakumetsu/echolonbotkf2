@@ -293,36 +293,142 @@ var vector WdIdleStartLoc;
 // @STUB(M3) @SYS-BASE-BOOT legacy:KF2BotBase.PreBeginPlay
 simulated function PreBeginPlay()
 {
+    // BRIDGE(M1): minimal engine pass-through so bots spawn; replaced by the full port in M3.
+    local Mutator M;
+
+    for (M = WorldInfo.Game.BaseMutator; M != None; M = M.NextMutator)
+    {
+        mut = EcholonMut(M);
+        if (mut != None)
+        {
+            break;
+        }
+    }
+    super.PreBeginPlay();
+    WorldInfo.Game.NumBots++;
+    KFGRI = KFGameReplicationInfo(WorldInfo.GRI);
+    if (mut != None)
+    {
+        mut.RegisterBot(EcholonBot(self));
+    }
+    bJustSpawned = true;
 }
 
 // @STUB(M3) @SYS-BASE-BOOT legacy:KF2BotBase.Destroyed
 simulated function Destroyed()
 {
+    // BRIDGE(M1): minimal engine pass-through so bots spawn; replaced by the full port in M3.
+    super(Controller).Destroyed();
+    WorldInfo.Game.NumBots--;
+    if (mut != None)
+    {
+        mut.UnregisterBot(EcholonBot(self));
+    }
 }
 
 // @STUB(M3) @SYS-BASE-BOOT legacy:KF2BotBase.InitPlayerReplicationInfo
 function InitPlayerReplicationInfo()
 {
+    // BRIDGE(M1): minimal engine pass-through so bots spawn; replaced by the full port in M3.
+    local KFGameInfo KFGI;
+    local KFPlayerReplicationInfo KFPRI;
+
+    super(Controller).InitPlayerReplicationInfo();
+    if (PlayerReplicationInfo != None)
+    {
+        PlayerReplicationInfo.bBot = false;
+        PlayerReplicationInfo.bOnlySpectator = false;
+        if (PlayerReplicationInfo.PlayerName == "")
+        {
+            PlayerReplicationInfo.PlayerName = "Bot_" $ Rand(9999);
+        }
+        KFPRI = KFPlayerReplicationInfo(PlayerReplicationInfo);
+        if (KFPRI != None)
+        {
+            KFPRI.bHasSpawnedIn = true;
+        }
+        KFGI = KFGameInfo(WorldInfo.Game);
+        if (KFGI != None && KFGI.Teams[0] != None)
+        {
+            KFGI.SetTeam(self, KFGI.Teams[0]);
+        }
+        if (WorldInfo.GRI != None)
+        {
+            WorldInfo.GRI.AddPRI(PlayerReplicationInfo);
+        }
+    }
+    if (mut != None)
+    {
+        mut.InitBotCharacter(EcholonBot(self));
+    }
 }
 
 // @STUB(M3) @SYS-BASE-BOOT legacy:KF2BotBase.GiveWeaponDef
 final function GiveWeaponDef(Class<KFWeaponDefinition> W)
 {
+    // BRIDGE(M1): minimal engine pass-through so bots spawn; replaced by the full port in M3.
+    local Class<Weapon> WC;
+
+    if (W == None)
+    {
+        return;
+    }
+    WC = Class<Weapon>(DynamicLoadObject(W.default.WeaponClassPath, Class'Core.Class'));
+    if (WC != None)
+    {
+        Pawn.InvManager.CreateInventory(WC);
+    }
 }
 
 // @STUB(M3) @SYS-BASE-BOOT legacy:KF2BotBase.Restart
 function Restart(bool bVehicleTransition)
 {
+    // BRIDGE(M1): minimal engine pass-through so bots spawn; replaced by the full port in M3.
+    NextShoppingTime = WorldInfo.TimeSeconds - 1.0;
+    if (KFInventoryManager(Pawn.InvManager) != None && Pawn.InvManager.Class != Class'EcholonBot.EcholonInventoryManager')
+    {
+        Pawn.InvManager.Destroy();
+        Pawn.InvManager = Spawn(Class'EcholonBot.EcholonInventoryManager', Pawn);
+        Pawn.InvManager.SetupFor(Pawn);
+    }
+    super(Controller).Restart(bVehicleTransition);
+    BotRank = GRUNT;
+    bIsGroupLeader = false;
+    KPawn = KFPawn_Human(Pawn);
+    if (Pawn.Physics == PHYS_None)
+    {
+        Pawn.SetPhysics(PHYS_Falling);
+    }
+    KFInvManager = KFInventoryManager(Pawn.InvManager);
+    if (KFInvManager != None)
+    {
+        if (Perk != None)
+        {
+            GiveWeaponDef(Perk.default.PrimaryWeaponDef);
+            GiveWeaponDef(Perk.default.SecondaryWeaponPaths[Rand(Perk.default.SecondaryWeaponPaths.Length)]);
+            GiveWeaponDef(Perk.default.KnifeWeaponDef);
+            GiveWeaponDef(Perk.default.GrenadeWeaponDef);
+        }
+        KFInvManager.GrenadeCount = 2;
+    }
+    if (KFPlayerReplicationInfo(PlayerReplicationInfo) != None)
+    {
+        KFPlayerReplicationInfo(PlayerReplicationInfo).bHasSpawnedIn = true;
+    }
 }
 
 // @STUB(M3) @SYS-BASE-PERCEPT legacy:KF2BotBase.NotifyTakeHit
 function NotifyTakeHit(Controller InstigatedBy, Vector HitLocation, int Damage, Class<DamageType> DamageType, Vector Momentum)
 {
+    // BRIDGE(M1): minimal engine pass-through so bots spawn; replaced by the full port in M3.
+    super.NotifyTakeHit(InstigatedBy, HitLocation, Damage, DamageType, Momentum);
 }
 
 // @STUB(M3) @SYS-BASE-PERCEPT legacy:KF2BotBase.SeePlayer
 function SeePlayer(Pawn Seen)
 {
+    // BRIDGE(M1): minimal engine pass-through so bots spawn; replaced by the full port in M3.
+    super.SeePlayer(Seen);
 }
 
 // @STUB(M3) @SYS-BASE-PERCEPT legacy:KF2BotBase.SeeMonster
@@ -948,6 +1054,8 @@ function GruntPickCombatStyle()
 // @STUB(M3) @SYS-BASE-PERCEPT legacy:KF2BotBase.HearNoise
 event HearNoise(float Loudness, Actor NoiseMaker, optional Name NoiseType)
 {
+    // BRIDGE(M1): minimal engine pass-through so bots spawn; replaced by the full port in M3.
+    super.HearNoise(Loudness, NoiseMaker, NoiseType);
 }
 
 // @STUB(M3) @SYS-BASE-ZEDS legacy:KF2BotBase.IsHeavyZedPawn
