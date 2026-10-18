@@ -737,11 +737,38 @@ function ProcessOverwatchPhase()
     }
 }
 
-// @STUB(M5c) @SYS-LOGIC-MOVEVAL legacy:KF2BotLogic.FollowCheckExit
 function bool FollowCheckExit()
 {
-    // PASS-THROUGH: overrides EcholonFollowNavBase; keep the engine behaviour until the real port lands.
-    return super.FollowCheckExit();
+    local int IterDistSq;
+
+    if (KFGRI != None
+        && KFGRI.bTraderIsOpen
+        && KFGRI.OpenedTrader != None
+        && NextShoppingTime < WorldInfo.TimeSeconds)
+    {
+        FollowExitState = 'GoShopping';
+        bFollowExitPending = true;
+        EchelonLog("FOLLOWGATE_EVAL bot=" $ Name $ " slot=" $ string(FollowSlotIndex) $ " result=GoShopping");
+        WdLastHubContactTime = WorldInfo.TimeSeconds;
+        return true;
+    }
+
+    if (mut != None
+        && mut.bObjectiveActive
+        && ObjectiveGoal != None)
+    {
+        IterDistSq = VSizeSq(ObjectiveGoal.Location - Pawn.Location);
+        if (IterDistSq > SYG_DISTANCE_SQ
+            && WorldInfo.TimeSeconds >= ObjectiveBailUntil)
+        {
+            FollowExitState = 'DoObjective';
+            bFollowExitPending = true;
+            EchelonLog("FOLLOWGATE_EVAL bot=" $ Name $ " slot=" $ string(FollowSlotIndex) $ " result=DoObjective distSq=" $ string(IterDistSq));
+            WdLastHubContactTime = WorldInfo.TimeSeconds;
+            return true;
+        }
+    }
+    return false;
 }
 
 // @STUB(M5c) @SYS-LOGIC-DEATH legacy:KF2BotLogic.PawnDied
