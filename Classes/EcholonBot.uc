@@ -1357,9 +1357,16 @@ state VictoryDance
         bBossKillVictory = false;
     }
 
-    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.VictoryDance.PlayDance
     final function PlayDance()
     {
+        local KFPawn B;
+
+        NextVictoryDance = WorldInfo.TimeSeconds + 20.0;
+        B = KFPawn(Pawn);
+        if (B != None)
+        {
+            B.DoSpecialMove(35, true, , mut.PickRandEmote());
+        }
     }
 
     // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.VictoryDance.FinishedMove
