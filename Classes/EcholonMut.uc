@@ -705,9 +705,21 @@ function EcholonBot FindBestCandidate(array<EcholonBot> Candidates)
     return Best;
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.FindExpendableMember
 function EcholonBot FindExpendableMember(array<EcholonBot> Candidates)
 {
+    local int i;
+    local EcholonBot Worst;
+    Worst = None;
+    for (i = 0; i < Candidates.Length; i++)
+    {
+        if (Candidates[i] == None || Candidates[i].bIsGroupLeader)
+            continue;
+        if (Candidates[i].Pawn == None || Candidates[i].Pawn.Health <= 0)
+            continue;
+        if (Worst == None || ComputeCommandScore(Candidates[i]) < ComputeCommandScore(Worst))
+            Worst = Candidates[i];
+    }
+    return Worst;
 }
 
 // @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.ProcessPromotionQueue
