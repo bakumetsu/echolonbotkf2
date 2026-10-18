@@ -1136,9 +1136,18 @@ state GetItem
         }
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.GetItem.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
+        ClearTimer('Timer');
+        if (KPawn != None)
+        {
+            KPawn.SetSprinting(false);
+        }
+        if (Pawn != None)
+        {
+            Pawn.StopFiring();
+        }
     }
 
     // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.GetItem.Timer
