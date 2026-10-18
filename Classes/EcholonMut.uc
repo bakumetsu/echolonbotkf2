@@ -574,20 +574,27 @@ function PropagateAnchorToFollowers(int GroupIdx)
 
 function NavigationPoint FindNearestNavPoint(vector ProjectedLoc, float SearchRadius)
 {
-    local NavigationPoint FoundNav;
+    local NavigationPoint FoundNav, BestNav;
+    local float Dist, BestDist;
 
+    // C4 fix, BEHAVIOR-CHANGE: legacy returned the first hit of the radius iterator, which is not
+    // ordered by distance. Return the closest navigation point instead.
     foreach WorldInfo.RadiusNavigationPoints(class'NavigationPoint', FoundNav, ProjectedLoc, SearchRadius)
     {
-        return FoundNav;
+        Dist = VSizeSq(FoundNav.Location - ProjectedLoc);
+        if (BestNav == None || Dist < BestDist)
+        {
+            BestNav = FoundNav;
+            BestDist = Dist;
+        }
     }
-
-    return None;
+    return BestNav;
 }
+
 
 function NavigationPoint FindNearestChokepoint(Controller VIP)
 {
     local vector ProjectedLoc, LateralVec;
-    local NavigationPoint FoundNav;
 
     if (VIP == None || VIP.Pawn == None)
         return None;
@@ -595,12 +602,10 @@ function NavigationPoint FindNearestChokepoint(Controller VIP)
     LateralVec = Normal(vector(VIP.Pawn.Rotation) cross vect(0,0,1));
     ProjectedLoc = VIP.Pawn.Location + (LateralVec * CHOKEPOINT_LATERAL_OFFSET);
 
-    foreach WorldInfo.RadiusNavigationPoints(class'NavigationPoint', FoundNav, ProjectedLoc, NAV_SEARCH_RADIUS)
-    {
-        return FoundNav;
-    }
-    return None;
+    // C4 fix, BEHAVIOR-CHANGE: closest point to the flank position, not the iterator's first hit.
+    return FindNearestNavPoint(ProjectedLoc, NAV_SEARCH_RADIUS);
 }
+
 
 // @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.GetVIPController
 function Controller GetVIPController()
