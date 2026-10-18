@@ -1992,9 +1992,9 @@ function bool IsBotAlive()
     return (Pawn != None) && (Pawn.Health > 0);
 }
 
-// @STUB(M5b) @SYS-BASE-HEALQ legacy:KF2BotBase.CanHealOthers
 function bool CanHealOthers()
 {
+    return MedicGun != None;
 }
 
 // @STUB(M5b) @SYS-BASE-HEALQ legacy:KF2BotBase.IsHealLockedOut
