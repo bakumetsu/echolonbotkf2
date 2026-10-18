@@ -2865,9 +2865,17 @@ function BroadcastOverwatchState()
     }
 }
 
-// @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.AssignSquadSlots
 function AssignSquadSlots()
 {
+    local int i;
+
+    for (i = 0; i < 4; i++)
+    {
+        if (SquadMembers[i] != None)
+        {
+            SquadMembers[i].OverwatchSlot = byte(i);
+        }
+    }
 }
 
 // @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.UpdateOverwatchTimer
