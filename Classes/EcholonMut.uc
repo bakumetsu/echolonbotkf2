@@ -1045,9 +1045,43 @@ function DissolveGroup(int GroupIdx)
     ReassignBotToGroup(Remaining, NearestGroupIdx);
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.FindNearestEligibleGroup
 function int FindNearestEligibleGroup(int ExcludeGroupIdx, EcholonBot Bot)
 {
+    local int GroupIdx, BestIdx;
+    local float BestDistSq, DistSq;
+
+    BestIdx = INDEX_NONE;
+    BestDistSq = 0.0;
+
+    if (Bot == None || Bot.Pawn == None)
+    {
+        return INDEX_NONE;
+    }
+
+    for (GroupIdx = 0; GroupIdx < Fireteams.Length; GroupIdx++)
+    {
+        if (GroupIdx == ExcludeGroupIdx)
+        {
+            continue;
+        }
+        if (Fireteams[GroupIdx].Members.Length < 2)
+        {
+            continue;
+        }
+        if (Fireteams[GroupIdx].Leader == None || Fireteams[GroupIdx].Leader.Pawn == None)
+        {
+            continue;
+        }
+
+        DistSq = VSizeSq(Fireteams[GroupIdx].Leader.Pawn.Location - Bot.Pawn.Location);
+        if (BestIdx == INDEX_NONE || DistSq < BestDistSq)
+        {
+            BestIdx = GroupIdx;
+            BestDistSq = DistSq;
+        }
+    }
+
+    return BestIdx;
 }
 
 // @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.ReassignBotToGroup
