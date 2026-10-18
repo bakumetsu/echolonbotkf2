@@ -771,11 +771,38 @@ function bool FollowCheckExit()
     return false;
 }
 
-// @STUB(M5c) @SYS-LOGIC-DEATH legacy:KF2BotLogic.PawnDied
 function PawnDied(Pawn inPawn)
 {
-    // BRIDGE(M1): minimal engine pass-through so bots spawn; replaced by the full port in M5c.
-    super.PawnDied(inPawn);
+    local int Idx;
+
+    if (inPawn != Pawn)
+    {
+        return;
+    }
+
+    ActivatePlayerDiedSequenceEvents();
+    TriggerEventClass(Class'Engine.SeqEvent_Death', self);
+
+    Idx = 0;
+    while (Idx < LatentActions.Length)
+    {
+        if (LatentActions[Idx] != None)
+        {
+            LatentActions[Idx].AbortFor(self);
+        }
+        Idx++;
+    }
+    LatentActions.Length = 0;
+
+    if (Pawn != None)
+    {
+        SetLocation(Pawn.Location);
+        Pawn.UnPossessed();
+    }
+    Pawn = None;
+
+    ClearRankTimers();
+    GotoState('Dead');
 }
 
 // @STUB(M5c) @SYS-LOGIC-DEATH legacy:KF2BotLogic.ActivatePlayerDiedSequenceEvents
