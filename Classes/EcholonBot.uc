@@ -1380,9 +1380,25 @@ state VictoryDance
         GotoState('VictoryDance', 'Begin');
     }
 
-    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.VictoryDance.GetRandMove
     final function Vector GetRandMove()
     {
+        local Vector V;
+        local int I;
+
+        I = 0;
+        while (I < 5)
+        {
+            V.X = FRand() - 0.5;
+            V.Y = FRand() - 0.5;
+            V = Pawn.Location + (Normal2D(V) * ((FRand() * 200.0) + 250.0));
+            if (FastTrace(V, Pawn.Location))
+            {
+                break;
+            }
+            I++;
+        }
+
+        return V;
     }
 
     // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.VictoryDance.EnemyChanged
