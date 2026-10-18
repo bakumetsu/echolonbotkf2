@@ -2521,9 +2521,10 @@ function ClearSquadCrouchHold()
 	bSquadCrouchHold = false;
 }
 
-// @STUB(M5a) @SYS-BASE-CQB legacy:KF2BotBase.HoldAndCrouch
 final function HoldAndCrouch()
 {
+	IssueCommand('CMD_HoldArea', Pawn.Location);
+	SetSquadCrouchHold();
 }
 
 // @STUB(M5a) @SYS-BASE-CQB legacy:KF2BotBase.TryIssueSafeAnchor
