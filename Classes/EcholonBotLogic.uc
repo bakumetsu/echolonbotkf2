@@ -389,9 +389,14 @@ function RequestReroute()
     LastValidSquadLeaderPos = SquadLeader.Pawn.Location;
 }
 
-// @STUB(M5c) @SYS-LOGIC-WATCHDOG legacy:KF2BotLogic.PromotionGapTimer
 function PromotionGapTimer()
 {
+    bPromotionGapTimerActive = false;
+    if (BotRank == GRUNT && (SquadLeader == None || SquadLeader.Pawn == None || SquadLeader.Pawn.Health <= 0))
+    {
+        SetBotRank(SQUAD_LEADER);
+        PickCombatStyle();
+    }
 }
 
 // @STUB(M5c) @SYS-LOGIC-HEAL legacy:KF2BotLogic.CanAffordHeal
