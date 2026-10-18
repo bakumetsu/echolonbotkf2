@@ -2969,9 +2969,9 @@ function ReceiveOverwatchState(bool bPhase, byte InSlot, bool bAllMove)
     OverwatchOffset = ComputeSlotOffset(InSlot);
 }
 
-// @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.IsOverwatchStuck
 final function bool IsOverwatchStuck()
 {
+    return (bOverwatchMoving && OverwatchStuckTime >= OW_STUCK_TIME);
 }
 
 // @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.UpdateOverwatchMovement
