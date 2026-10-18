@@ -1598,9 +1598,76 @@ function vector GetSlotLocation(EcholonBot B)
     return SquadOrders[GroupIdx].SlotLocs[SlotIdx];
 }
 
-// @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.EvaluateSquadPhase
 function EvaluateSquadPhase()
 {
+    local SquadOrder O;
+    local EcholonBot M;
+    local vector GoalLoc;
+    local float GoalRadiusSq;
+    local float DistSq;
+    local bool LeaderInside;
+    local bool MemberInside;
+    local int i;
+    local int MemberIdx;
+
+    if (WorldInfo == None || !bObjectiveActive)
+        return;
+
+    GoalRadiusSq = 9216.0;
+
+    for (i = 0; i < SquadOrders.Length; i++)
+    {
+        if (i >= Fireteams.Length)
+            break;
+
+        O = SquadOrders[i];
+        if (O.Leader == None || O.Leader.Pawn == None)
+            continue;
+        if (O.Phase != PHASE_ENROUTE && O.Phase != PHASE_HOLDING)
+            continue;
+
+        if (O.Zone != None)
+        {
+            LeaderInside = O.Zone.Encompasses(O.Leader.Pawn);
+        }
+        else
+        {
+            GoalLoc = O.GoalPoint;
+            DistSq = VSizeSq(O.Leader.Pawn.Location - GoalLoc);
+            LeaderInside = DistSq < GoalRadiusSq;
+        }
+
+        MemberInside = false;
+        for (MemberIdx = 0; MemberIdx < Fireteams[i].Members.Length; MemberIdx++)
+        {
+            M = Fireteams[i].Members[MemberIdx];
+            if (M == None || M == O.Leader)
+                continue;
+            if (M.Pawn == None || M.Pawn.Health <= 0)
+                continue;
+            if (O.Zone != None)
+            {
+                if (O.Zone.Encompasses(M.Pawn))
+                    MemberInside = true;
+            }
+            else
+            {
+                if (VSizeSq(M.Pawn.Location - O.GoalPoint) < GoalRadiusSq)
+                    MemberInside = true;
+            }
+        }
+
+        if (O.Phase == PHASE_ENROUTE && LeaderInside && MemberInside)
+        {
+            O.Phase = PHASE_HOLDING;
+            SquadOrders[i] = O;
+        }
+        else if (O.Phase == PHASE_HOLDING && !LeaderInside)
+        {
+            O.Phase = PHASE_ENROUTE;
+            SquadOrders[i] = O;
+        }
+    }
 }
 
 // @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.HasSquadGoal
