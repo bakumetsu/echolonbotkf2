@@ -535,7 +535,7 @@ Legacy: `AIWeaponInfo`. 9 var statements, 0 consts, 0 structs, 0 enums.
 ### EcholonChat<a id="EcholonChat"></a>
 
 ```unrealscript
-class EcholonChat extends BroadcastHandler config(BotChat) hidecategories(Navigation, Movement, Collision);
+class EcholonChat extends BroadcastHandler config(EcholonChat) hidecategories(Navigation, Movement, Collision);
 ```
 Legacy: `KF2BotChat`. 11 var statements, 1 consts, 0 structs, 0 enums.
 

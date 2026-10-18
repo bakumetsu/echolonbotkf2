@@ -1,4 +1,4 @@
-class EcholonChat extends BroadcastHandler config(BotChat) hidecategories(Navigation, Movement, Collision);
+class EcholonChat extends BroadcastHandler config(EcholonChat) hidecategories(Navigation, Movement, Collision);
 
 // Constants: generated from contracts/constants.json (D2). Edit there, not here.
 const CUR_CHAT_CONFIGVER = 2;
