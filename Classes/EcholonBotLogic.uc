@@ -805,9 +805,35 @@ function PawnDied(Pawn inPawn)
     GotoState('Dead');
 }
 
-// @STUB(M5c) @SYS-LOGIC-DEATH legacy:KF2BotLogic.ActivatePlayerDiedSequenceEvents
 final function ActivatePlayerDiedSequenceEvents()
 {
+    local Sequence GameSeq;
+    local array<SequenceObject> AllSeqEvents;
+    local array<int> ActivateIndices;
+    local int I;
+    local KFGameInfo KFGI;
+
+    KFGI = KFGameInfo(WorldInfo.Game);
+    GameSeq = WorldInfo.GetGameSequence();
+
+    if ((GameSeq != None) && (KFGI != None))
+    {
+        GameSeq.FindSeqObjectsByClass(Class'KFGame.KFSeqEvent_PlayerDied', true, AllSeqEvents);
+
+        if (KFGI.GetLivingPlayerCount() > 0)
+        {
+            ActivateIndices[0] = 0;
+        }
+        else
+        {
+            ActivateIndices[0] = 1;
+        }
+
+        for (I = 0; I < AllSeqEvents.Length; I++)
+        {
+            KFSeqEvent_PlayerDied(AllSeqEvents[I]).CheckActivate(WorldInfo, None, false, ActivateIndices);
+        }
+    }
 }
 
 // @STUB(M5c) @SYS-LOGIC-UTIL legacy:KF2BotLogic.PickRetreatMove
