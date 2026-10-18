@@ -2664,9 +2664,17 @@ function CacheHumanPositions()
     }
 }
 
-// @STUB(M4) @SYS-MUT-WAVE legacy:KF2BotsMut.GetObjectiveLocation
 function vector GetObjectiveLocation()
 {
+    if (bObjectiveActive && PrevObjective != None)
+    {
+        return PrevObjective.Location;
+    }
+    if (HoldVolume != None)
+    {
+        return HoldVolume.Location;
+    }
+    return vect(0,0,0);
 }
 
 function SetupSquadSpawns(int NumSquads)
