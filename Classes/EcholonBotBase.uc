@@ -3293,9 +3293,35 @@ function GruntEnterCombat(Pawn NewEnemy)
     GotoState('FightEnemy');
 }
 
-// @STUB(M5a) @SYS-BASE-GRUNT legacy:KF2BotBase.GruntPickCombatStyle
 function GruntPickCombatStyle()
 {
+    local vector toEnemy, strafeDir;
+
+    if (Pawn == None || Enemy == None)
+        return;
+
+    if (bGruntMeleeStyle)
+    {
+        ApplyCrouch(false);
+        MoveTowardX(Enemy);
+        return;
+    }
+
+    if (FRand() < 0.5)
+    {
+        ApplyCrouch(false);
+        toEnemy = Enemy.Location - Pawn.Location;
+        toEnemy.Z = 0.0;
+        strafeDir = Normal(toEnemy Cross vect(0,0,1));
+        if (FRand() < 0.5)
+            strafeDir = -strafeDir;
+        MoveToX(Pawn.Location + (strafeDir * 150.0));
+    }
+    else
+    {
+        StyleCrouchUntil = WorldInfo.TimeSeconds + 1.0 + FRand();
+        ApplyCrouch(true);
+    }
 }
 
 event HearNoise(float Loudness, Actor NoiseMaker, optional Name NoiseType)
