@@ -212,9 +212,9 @@ state Camp
         AuditStateExit(NextStateName);
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Camp.EnemyChanged
     function EnemyChanged()
     {
+        PickCombatStyle();
     }
 
 Begin:
