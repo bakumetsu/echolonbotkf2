@@ -408,9 +408,18 @@ function SyncSquadLeaders()
     }
 }
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.ShuffleActiveBots
 function ShuffleActiveBots()
 {
+    local int i, SwapIdx;
+    local EcholonBot Temp;
+
+    for (i = ActiveBots.Length - 1; i > 0; i--)
+    {
+        SwapIdx = Rand(i + 1);
+        Temp = ActiveBots[i];
+        ActiveBots[i] = ActiveBots[SwapIdx];
+        ActiveBots[SwapIdx] = Temp;
+    }
 }
 
 // @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.PruneInvalidBots
