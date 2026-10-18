@@ -509,9 +509,46 @@ function bool ConsumePathToken()
     return true;
 }
 
-// @STUB(M5c) @SYS-LOGIC-WATCHDOG legacy:KF2BotLogic.GruntDecisionTimer
 function GruntDecisionTimer()
 {
+    local KFPawn_Monster M;
+    local float BestDist;
+    local float D;
+
+    if (BotRank != GRUNT)
+    {
+        return;
+    }
+    if (Pawn == None || KPawn == None || !KPawn.IsAliveAndWell())
+    {
+        return;
+    }
+
+    BestDist = 800.0;
+    foreach VisibleCollidingActors(class'KFPawn_Monster', M, 800.0, Pawn.Location)
+    {
+        if (M.IsAliveAndWell())
+        {
+            D = VSize(M.Location - Pawn.Location);
+            if (D < BestDist)
+            {
+                BestDist = D;
+            }
+        }
+    }
+
+    if (BestDist < 800.0)
+    {
+        if (!bEngageActive)
+        {
+            bEngageActive = true;
+            EchelonLog("GruntDecisionTimer: bEngageActive=true (enemy at " $ string(int(BestDist)) $ "u)");
+        }
+    }
+    else
+    {
+        bEngageActive = false;
+    }
 }
 
 // @STUB(M5c) @SYS-LOGIC-WATCHDOG legacy:KF2BotLogic.IdleWatchdogTimer
