@@ -1518,8 +1518,27 @@ state DonatingMoney
     }
 
 Begin:
+    if (Pawn.Physics == 2)
+    {
+        WaitForLanding(2.0);
+    }
+    MoveTowardX(DonateHuman, DonateHuman, false);
     Stop;
+
 MoneyToss:
+    NextDoshShareTime = WorldInfo.TimeSeconds + 5.0;
+    Sleep(0.45);
+    DoshDropCounter = byte(Rand(4));
+    while (DoshDropCounter < 8)
+    {
+        Sleep(0.35);
+        if (!DropMoney())
+        {
+            break;
+        }
+        ++DoshDropCounter;
+    }
+    PickCombatStyle();
     Stop;
 }
 
@@ -1660,8 +1679,22 @@ state VictoryDance
     }
 
 MoveTaunt:
+    MoveToX(GetRandMove(), , false);
     Stop;
+
 Begin:
+    if (Pawn.Physics == 2)
+    {
+        WaitForLanding(2.0);
+    }
+    Sleep(0.1 + FRand());
+    PlayDance();
+    DoshDropCounter = 0;
+    while (KPawn.IsDoingSpecialMove(35) && ++DoshDropCounter < 250)
+    {
+        Sleep(0.1);
+    }
+    PickCombatStyle();
     Stop;
 }
 
