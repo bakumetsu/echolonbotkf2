@@ -1,8 +1,14 @@
 # Topic: SDK facts the mod relies on
 
 Verified in the doc's Part 1.1 (cite as SDK path:line):
-- Latent: `MoveTo` Controller.uc:1193, `MoveToward` Controller.uc:1220, `WaitForLanding`
-  Controller.uc:1344. Only in state code of Controller subclasses.
+- Latent (signatures read from the SDK index, 2026-10-18): `MoveToward(Actor NewTarget, optional Actor
+  ViewFocus, optional float DestinationOffset, optional bool bUseStrafing, optional bool bShouldWalk)`;
+  `WaitForLanding(optional float waitDuration)`; `MoveTo` Controller.uc:1193. Only in state code.
+- `SetTimer(float InRate, optional bool inbLoop, optional Name inTimerFunc='Timer', optional Object inObj)`.
+- `VisibleCollidingActors(class<actor> BaseClass, out actor Actor, float Radius, optional vector Loc, ...)`;
+  `AllPawns(class<Pawn>, out Pawn P, optional vector TestLocation, optional float TestRadius)`;
+  `RadiusNavigationPoints(class<NavigationPoint>, out NavigationPoint N, vector Point, float Radius)`.
+- `INDEX_NONE = -1` (Object.uc).
 - `SetTimer` Actor.uc:2036; `VisibleCollidingActors` Actor.uc:2365; `RadiusNavigationPoints`
   WorldInfo.uc:1636; `AllPawns` WorldInfo.uc:1663; `SetCharacterArch` KFPawn.uc:1260.
 - `NotifyTeamChanged` Pawn.uc:1436 is declared only (native); its archetype reset is UNVERIFIED (D5).

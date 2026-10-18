@@ -1,0 +1,216 @@
+{
+ "_comment": "Doc Part 6.2 as data: guarded variable -> functions allowed to write it. Enforcement is by WRITING FUNCTION (Nav/Base/Logic/Bot are one object). Roles map legacy and Echolon class names. 'clear' writers may only assign a reset value (false, '', None, 0). Calls to Mut-owned mutators (RegisterBot, UnregisterBot, MoveSquadMembers...) are calls, not writes, and are never flagged.",
+ "roles": {
+  "Mut": [
+   "KF2BotsMut",
+   "EcholonMut"
+  ],
+  "Nav": [
+   "KF2BotsFollowNavBase",
+   "EcholonFollowNavBase"
+  ],
+  "Base": [
+   "KF2BotBase",
+   "EcholonBotBase"
+  ],
+  "Logic": [
+   "KF2BotLogic",
+   "EcholonBotLogic"
+  ],
+  "Bot": [
+   "KF2Bot",
+   "EcholonBot"
+  ]
+ },
+ "hub_roles": [
+  "Base",
+  "Logic",
+  "Bot"
+ ],
+ "guarded": {
+  "FollowStatus": {
+   "rule": "Hub reads this; only Locomotion writes it (Nav:190).",
+   "writers": [
+    {
+     "role": "Nav",
+     "function": "FollowSetStatus"
+    }
+   ],
+   "clear": [
+    {
+     "role": "Nav",
+     "function": "FollowResetEpisode"
+    }
+   ]
+  },
+  "FollowLeaderCtrl": {
+   "rule": "Set only by FollowStart, commanded by the hub (Nav:198).",
+   "writers": [
+    {
+     "role": "Nav",
+     "function": "FollowStart"
+    },
+    {
+     "role": "Nav",
+     "function": "FollowSetLeader",
+     "note": "FollowStart's only helper (Nav:200, Nav:214); found by the auditor, doc 6.2 omits it"
+    }
+   ],
+   "clear": [
+    {
+     "role": "Nav",
+     "function": "FollowResetEpisode"
+    },
+    {
+     "role": "Nav",
+     "function": "FollowStop"
+    }
+   ]
+  },
+  "FollowSlotIndex": {
+   "rule": "Slot assigned by the Mut roster hook through FollowSetSlot only (Nav:223, Mut:511).",
+   "writers": [
+    {
+     "role": "Nav",
+     "function": "FollowSetSlot"
+    }
+   ]
+  },
+  "FollowSlotCount": {
+   "rule": "Slot assigned by the Mut roster hook through FollowSetSlot only (Nav:223, Mut:511).",
+   "writers": [
+    {
+     "role": "Nav",
+     "function": "FollowSetSlot"
+    }
+   ]
+  },
+  "FollowExitState": {
+   "rule": "Hub intent mailbox: written by the hub-side overrides FollowNotifyHub / FollowCheckExit only; locomotion never sets its own exit.",
+   "writers": [
+    {
+     "role": "hub",
+     "function": "FollowNotifyHub"
+    },
+    {
+     "role": "hub",
+     "function": "FollowCheckExit"
+    }
+   ],
+   "clear": [
+    {
+     "role": "Nav",
+     "function": "FollowResetEpisode"
+    }
+   ]
+  },
+  "bFollowExitPending": {
+   "rule": "Hub sets it (FollowNotifyHub Base:1309, FollowCheckExit Logic:849/865). Locomotion only clears it when consuming or resetting (resolved from source: Nav:254 FollowResetEpisode, Nav:1308 FollowingLeader.EndState, Nav:1440 FollowingLeaderBasic label code).",
+   "writers": [
+    {
+     "role": "hub",
+     "function": "FollowNotifyHub"
+    },
+    {
+     "role": "hub",
+     "function": "FollowCheckExit"
+    }
+   ],
+   "clear": [
+    {
+     "role": "Nav",
+     "function": "FollowResetEpisode"
+    },
+    {
+     "role": "Nav",
+     "function": "FollowingLeader.EndState"
+    },
+    {
+     "role": "Nav",
+     "function": "FollowingLeaderBasic:label"
+    },
+    {
+     "role": "Nav",
+     "function": "FollowingLeader:label"
+    }
+   ]
+  },
+  "SquadOrders": {
+   "rule": "Mut functions only; bots read through Mut getters.",
+   "writers": [
+    {
+     "role": "Mut",
+     "function": "*"
+    }
+   ]
+  },
+  "Fireteams": {
+   "rule": "Mut functions only; bots read through Mut getters.",
+   "writers": [
+    {
+     "role": "Mut",
+     "function": "*"
+    }
+   ]
+  },
+  "ActiveBots": {
+   "rule": "Mut functions only; bots read through Mut getters.",
+   "writers": [
+    {
+     "role": "Mut",
+     "function": "*"
+    }
+   ]
+  },
+  "WdLastMoveIntentTime": {
+   "rule": "Hub stamp written by PickCombatStyle (Base:2131); readers only.",
+   "writers": [
+    {
+     "role": "hub",
+     "function": "PickCombatStyle"
+    },
+    {
+     "role": "hub",
+     "function": "AuditStateEntry",
+     "note": "state entry is a fresh move intent (Base:2563-2564); found by the auditor, doc 6.2 omits it"
+    }
+   ],
+   "clear": [
+    {
+     "role": "hub",
+     "function": "*"
+    }
+   ],
+   "status": "[UNVERIFIED] clear writers: the doc lists only PickCombatStyle; resets elsewhere are allowed as clears"
+  },
+  "NextShoppingTime": {
+   "rule": "Hub-owned timer (Base:150): GoShopping state (Bot:1641, Bot:1683) and the resets (Base:541, Mut:2114).",
+   "writers": [
+    {
+     "role": "Bot",
+     "function": "GoShopping.*"
+    },
+    {
+     "role": "Bot",
+     "function": "GoShopping:label"
+    },
+    {
+     "role": "Base",
+     "function": "*"
+    },
+    {
+     "role": "Mut",
+     "function": "*"
+    }
+   ],
+   "status": "[UNVERIFIED] Base/Mut writers are whole-class: the doc names only the reset sites"
+  },
+  "bEnableAdvancedLocomotion": {
+   "rule": "Config only (Nav:58, default Nav:1496); never assigned in code.",
+   "writers": []
+  }
+ },
+ "unguarded": {
+  "WdLastHubContactTime": "Multi-writer stamp by design (Mut:340, Mut:1939, Logic:852, Logic:868); last write wins. Not enforced."
+ }
+}

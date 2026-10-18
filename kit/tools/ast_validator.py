@@ -14,7 +14,7 @@ import json
 import sys
 from pathlib import Path
 
-from common import (CORE_FILES, GENERATED_DIR, KIT_DIR, REPORTS_DIR, load_json, load_workspace,
+from common import (CORE_FILES, expand_globs, GENERATED_DIR, KIT_DIR, REPORTS_DIR, load_json, load_workspace,
                     read_text, run_main)
 from uc_lexer import IDENT, NAME, NUMBER, PUNCT, STRING, LexError, match_brace
 from uc_parser import ParsedFile, parse_file
@@ -289,6 +289,37 @@ def rule_u013(c: Ctx, dropped: dict):
                   "do not port or reference it; see kit/decisions.md D5")
 
 
+UC_KEYWORDS = {"if", "for", "while", "foreach", "switch", "return", "until", "do", "new", "assert", "goto",
+               "super", "global", "self", "class", "default", "static", "const", "vect", "rot", "arraycount",
+               "sizeof", "enumcount", "nameof", "local", "case", "stop", "break", "continue", "else", "function",
+               "event", "delegate", "state", "native", "var", "config", "globalconfig", "hidecategories",
+               "dependson", "within", "implements", "classgroup", "showcategories", "autoexpandcategories",
+               # dynamic-array intrinsics
+               "additem", "removeitem", "remove", "insert", "insertitem", "add", "find", "empty", "sort"}
+
+
+def rule_u010(c: Ctx, sdk_names: set[str] | None):
+    """Unknown function call: not in this file, the mod's symbols/contracts, or the SDK index (WARN).
+    Calls only; member-variable access is not checked yet. No-op until sdk_symbols.json exists."""
+    if not sdk_names:
+        return
+    t = c.t
+    own = {d.name.lower() for d in c.pf.decls} | c.known["functions"] | c.known["classes"] | c.known["states"]
+    header_end = next((d.tok_end for d in c.pf.decls if d.kind == "class"), -1)
+    for i, x in enumerate(t):
+        if i <= header_end:
+            continue
+        if x.kind != IDENT or i + 1 >= len(t) or t[i + 1].text != "(":
+            continue
+        low = x.low
+        if low in UC_KEYWORDS or low in own or low in sdk_names or low in BUILTIN_TYPES:
+            continue
+        if i > 0 and t[i - 1].kind == IDENT and t[i - 1].low in ("function", "event", "delegate", "state"):
+            continue
+        c.add("U010", x.line, WARN, f"`{x.text}(` is not a known SDK or mod function",
+              "check the name with `context_slicer.py sdk Class.Member`; do not invent SDK calls")
+
+
 def rule_u014(c: Ctx):
     """Extension (not in the M0 spec): decompiler artifacts copied from the legacy corpus."""
     import re
@@ -335,6 +366,23 @@ def known_names(pf: ParsedFile) -> dict:
     return {"states": states, "functions": funcs, "classes": classes, "labels": labels}
 
 
+_SDK_CACHE: dict = {}
+
+
+def _sdk_names() -> set[str] | None:
+    p = GENERATED_DIR / "sdk_symbols.json"
+    if not p.is_file():
+        return None
+    key = (str(p), p.stat().st_mtime)
+    if key not in _SDK_CACHE:
+        from sdk_index import all_member_names
+        data = load_json(p)
+        names = all_member_names(data) | {k.lower() for k in data["classes"]}
+        _SDK_CACHE.clear()
+        _SDK_CACHE[key] = names
+    return _SDK_CACHE[key]
+
+
 def validate(path: Path, chain: dict | None = None, dropped: dict | None = None) -> list[dict]:
     try:
         pf = parse_file(read_text(path))
@@ -344,6 +392,7 @@ def validate(path: Path, chain: dict | None = None, dropped: dict | None = None)
     c = Ctx(path, pf, known_names(pf))
     for rule in (rule_u001_u002, rule_u003_u004_u005, rule_u006, rule_u007, rule_u008, rule_u009, rule_u011, rule_u014):
         rule(c)
+    rule_u010(c, _sdk_names())
     contracts = load_json(KIT_DIR / "contracts" / "class_chain.json", default={})
     rule_u012(c, chain if chain is not None else contracts.get("parents", {}))
     rule_u013(c, dropped if dropped is not None else load_json(KIT_DIR / "contracts" / "dropped_symbols.json", default={}))
@@ -380,7 +429,7 @@ def main() -> int:
     if a.corpus_selftest:
         return corpus_selftest(load_workspace())
     worst = 0
-    for f in a.files:
+    for f in expand_globs(a.files):
         for x in validate(Path(f)):
             worst = max(worst, x["severity"] == ERROR)
             if a.format == "text":

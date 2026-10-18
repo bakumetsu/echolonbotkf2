@@ -41,7 +41,8 @@ W1 Follow-nav base extends AIController, never KFAIController. [DESIGN DECISION;
 W2 DirectMove steers with `Pawn.Acceleration`, not MoveToward. [SUSPECTED native crash when combat
    GotoState interrupts a latent move] doc C7, @SYS-NAV-STATE. Nav header rules Nav:19-27 are STALE.
 W3 Call SetCharacterArch AFTER SetTeam. [Code comment Mut:2515-2518; SDK-unverified] doc C8/D5.
-W4 WaitForLanding/MoveTo get an external deadline (bounded ~2s timer). [WaitForLanding: no SDK
-   timeout, @SYS-BOT-HEAL; MoveTo: precaution].
+W4 Latent waits get a deadline: `WaitForLanding(2.0);` (SDK: `latent WaitForLanding(optional float
+   waitDuration)`, legacy calls it bare) plus an external ~2s timer for MoveTo/MoveToward. [SDK-verified
+   signature; native timeout behaviour UNVERIFIED] @SYS-BOT-HEAL, Bot:440.
 W5 Hub funnel: PickCombatStyle returns early while a follower state is active; follower states never
    GotoState('PickNextMove') themselves. [Doc 6.4, @SYS-P6-BOUNDARY]

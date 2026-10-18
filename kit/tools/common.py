@@ -108,6 +108,16 @@ def write_json(path: Path, data) -> None:
     Path(path).write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def expand_globs(args: list[str]) -> list[Path]:
+    """Windows shells don't expand `Classes\\*.uc`; do it here (a pattern with no match is kept)."""
+    import glob
+    out = []
+    for a in args:
+        hits = sorted(glob.glob(a)) if any(c in a for c in "*?[") else []
+        out += [Path(h) for h in hits] or [Path(a)]
+    return out
+
+
 def run_main(fn) -> None:
     """Run a CLI entry point; KitError becomes a one-line message and exit code 1."""
     try:

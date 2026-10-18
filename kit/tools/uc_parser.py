@@ -240,12 +240,19 @@ class _Parser:
 
     def struct_enum(self, i, kind, state):
         t = self.t
-        o = i
-        while t[o].text not in ("{", ";"):
-            o += 1
+        o, skip = i, set()
+        while True:
+            while t[o].text not in ("{", ";"):
+                o += 1
+            # native C++ type tag: struct {QWORD} qword {...}
+            if t[o].text == "{" and o + 3 < len(t) and t[o + 2].text == "}" and t[o + 3].kind == IDENT:
+                skip.add(o + 1)
+                o += 3
+                continue
+            break
         if t[o].text == ";":  # forward decl
             return o + 1
-        hdr = [x for x in t[i + 1:o] if x.kind == IDENT]
+        hdr = [x for n, x in enumerate(t[i + 1:o], start=i + 1) if x.kind == IDENT and n not in skip]
         parent = ""
         names = [x.text for x in hdr]
         if "extends" in [n.lower() for n in names]:
@@ -278,9 +285,20 @@ class _Parser:
         t = self.t
         word = t[j].low
         p = j + 1
-        while p < len(t) and t[p].text != "(":
-            p += 1
-        head = t[j + 1:p]
+        if word in ("operator", "preoperator", "postoperator"):
+            if t[p].text == "(":  # operator(16): precedence
+                p = match_brace(t, p, "(", ")") + 1
+            q = p
+            while q + 1 < len(t) and not (t[q + 1].text == "(" and q > p):
+                q += 1
+            head = t[p:q + 1]
+            p = q + 1
+        else:
+            while p < len(t) and t[p].text != "(":
+                p += 1
+            head = t[j + 1:p]
+        if not head:
+            raise LexError(f"line {t[j].line}: cannot read the function name")
         name = head[-1].text
         rtype = join_tokens(head[:-1]) if len(head) > 1 else ""
         pc = match_brace(t, p, "(", ")")

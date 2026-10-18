@@ -200,10 +200,18 @@ def slice_contract(ws, cls: str, max_tokens: int) -> str:
     cpath = KIT_DIR / "contracts" / "contracts.json"
     if cpath.is_file():
         c = load_json(cpath)
-        entry = next((v for k, v in c.get("classes", {}).items() if k.lower() == cls.lower()), None)
+        entry = next((v for k, v in c.get("classes", {}).items()
+                      if cls.lower() in (k.lower(), v.get("legacy", "").lower())), None)
         if entry is None:
             raise NotFound(f"no class {cls} in contracts.json")
-        lines = [f"// contract {cls} (contracts.json)"] + entry.get("vars", []) + entry.get("functions", [])
+        lines = [f"// contract (contracts.json)", entry["header"]]
+        lines += [f"const {k};" for k in entry["consts"]]
+        lines += [e["text"] for e in entry["enums"]] + [st["text"] for st in entry["structs"]]
+        lines += [v["text"] for v in entry["vars"] if v["names"]]
+        lines += [f["signature"] + ";" for f in entry["functions"] if not f["state"]]
+        for st in entry["states"]:
+            inner = [f["signature"] + ";" for f in entry["functions"] if f["state"] == st["name"]]
+            lines.append(st["signature"] + " { " + " ".join(inner + [l + ":" for l in st["labels"]]) + " }")
     else:
         syms = [s for s in load_json(GENERATED_DIR / "symbols.json")["symbols"] if s["class"].lower() == cls.lower()]
         if not syms:

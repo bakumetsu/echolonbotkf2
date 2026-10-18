@@ -105,11 +105,12 @@ def reconcile(symbols: list[dict], index: list[dict]) -> tuple[list[str], dict]:
         if id(r) not in seen:
             why = EXPLAINED_MEMBER if r["kind"] == "var" and (r["file"], r["name"].lower(), r["line"]) in members else ""
             diffs.append((why, f"| doc only | {r['kind']} | {r['name']} | {FILE_TO_ALIAS.get(r['file'], r['file'])}:{r['line']} | {why} |"))
-    # functions/labels inside a state inherit the state's tag when they have none
+    # functions/labels inside a state take the state's tag: the A-Z index lists in-state
+    # events (BeginState, EndState...) once per name, so its tag for them is ambiguous
     state_tag = {(s["file"], s["name"]): s.get("tag") for s in symbols if s["kind"] == "state"}
     for s in symbols:
-        if not s.get("tag") and s.get("state"):
-            s["tag"] = state_tag.get((s["file"], s["state"]))
+        if s.get("state") and state_tag.get((s["file"], s["state"])):
+            s["tag"] = state_tag[(s["file"], s["state"])]
     counts = {f: Counter(s["kind"] for s in symbols if s["file"] == f and s["kind"] in GATE_KINDS) for f in CORE_FILES}
     return diffs, counts
 

@@ -18,3 +18,12 @@ Final decisions from the Milestone 0 spec (D1-D6) plus answers given in the proj
 - **D11 No LLM orchestrator.** Routing is deterministic Python. Local models write or fix one symbol at a time; planning and review stay with Opus/humans.
 - **D12 Milestone 0 is split.** M0a = hashes, indexer, slicer, validator, Bible (done). M0b = boundary auditor, compile loop, sdk_index, log checker, runner, splice, skeleton/constants generators, contracts.json, docgen.
 - **D13 Ternary is house-style banned (WARN), not a compile error.** Corpus evidence shows it compiles.
+
+## Milestone 0b decisions (2026-10-18, defaults picked by the kit; change any of them)
+- **D14 Config file is `config(EcholonBot)`.** The legacy `config(BotsMut)` is renamed so the rewrite's settings land in `KFEcholonBot.ini` and never mix with the old mod's.
+- **D15 M5 split.** M5a = FORM, OVERWATCH, CQB, GRUNT, PANIC, RELOAD; M5b = LTBOUND, WEDGE, EMOTE, WEAPON, AUDIT, HEALQ (+ `EcholonWeaponInfo`); M5c = all LOGIC-*. Edit `MILESTONES` in `contracts_gen.py`, then re-run it with `--force`.
+- **D16 Aux classes land in M1** (chat, broadcast handler, inventory manager are used by Mut boot and spawn), except `EcholonWeaponInfo`, which goes with BASE-WEAPON in M5b.
+- **D17 `WaitForLanding` has a timeout parameter.** The SDK declares `WaitForLanding(optional float waitDuration)`, which corrects the doc's "no timeout". The Bible's W4 says to pass `WaitForLanding(2.0)` and keep an external timer, because the native behaviour is still [UNVERIFIED].
+- **D18 Two writers missing from doc 6.2 are legitimate:** `FollowSetLeader` (Nav:214) and `AuditStateEntry` (Base:2564). They are listed in `single_writer.json` with notes.
+- **D19 A failed task leaves no trace in the mod source.** agent_runner restores the class file byte for byte when a task fails or escalates; the attempt lives only in `kit/runs/`.
+- **D20 Models answer with code or a control JSON, never both.** `{"control": "need_info" | "cannot" | "contract_conflict"}` stops the task and escalates it without touching the file.

@@ -4,3 +4,5 @@ __pycache__/
 kit/workspace.local.json
 kit/runs/
 *.u
+kit/generated/sdk_symbols.json
+kit/tasks/

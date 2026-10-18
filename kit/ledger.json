@@ -1,9 +1,49 @@
 {
  "milestones": {
-  "M0a": {"status": "done", "gates": {"G0": "pass", "G1": "pass", "G2": "pass", "G3": "pass", "G4": "pass", "G7-bible": "pass"}},
-  "M0b": {"status": "todo", "gates": {"G5": "todo", "G6": "todo", "G7-docgen": "todo"}},
-  "M1": {"status": "todo"}, "M2": {"status": "todo"}, "M3": {"status": "todo"}, "M4": {"status": "todo"},
-  "M5a": {"status": "todo"}, "M5b": {"status": "todo"}, "M5c": {"status": "todo"}, "M6": {"status": "todo"}
+  "M0a": {
+   "status": "done",
+   "gates": {
+    "G0": "pass",
+    "G1": "pass",
+    "G2": "pass",
+    "G3": "pass",
+    "G4": "pass",
+    "G7-bible": "pass"
+   }
+  },
+  "M0b": {
+   "status": "done",
+   "gates": {
+    "G5": "pass",
+    "G6": "pass",
+    "G7-docgen": "pass"
+   }
+  },
+  "M1": {
+   "status": "todo",
+   "note": "next: skeleton_gen into KFGame\\Src\\EcholonBot\\Classes, first real compile, then agent_runner plan/run M1 (70 tasks)"
+  },
+  "M2": {
+   "status": "todo"
+  },
+  "M3": {
+   "status": "todo"
+  },
+  "M4": {
+   "status": "todo"
+  },
+  "M5a": {
+   "status": "todo"
+  },
+  "M5b": {
+   "status": "todo"
+  },
+  "M5c": {
+   "status": "todo"
+  },
+  "M6": {
+   "status": "todo"
+  }
  },
  "tasks": []
 }

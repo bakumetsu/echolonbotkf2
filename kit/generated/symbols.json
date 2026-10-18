@@ -12396,7 +12396,7 @@
      "mods": []
     }
    ],
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-HUB"
   },
   {
    "name": "EndState",
@@ -12415,7 +12415,7 @@
      "mods": []
     }
    ],
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-HUB"
   },
   {
    "name": "PickMove",
@@ -12469,7 +12469,7 @@
      "mods": []
     }
    ],
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-MOVE"
   },
   {
    "name": "EndState",
@@ -12488,7 +12488,7 @@
      "mods": []
     }
    ],
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-MOVE"
   },
   {
    "name": "PickStyle",
@@ -12597,7 +12597,7 @@
      "mods": []
     }
    ],
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-MOVE"
   },
   {
    "name": "EndState",
@@ -12616,7 +12616,7 @@
      "mods": []
     }
    ],
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-MOVE"
   },
   {
    "name": "EnemyChanged",
@@ -12820,7 +12820,7 @@
      "mods": []
     }
    ],
-   "tag": "@SYS-BOT-SHOP"
+   "tag": "@SYS-BOT-COMBAT"
   },
   {
    "name": "Begin",
@@ -12917,7 +12917,7 @@
    "start": 940,
    "end": 944,
    "signature": "function EnemyChanged()",
-   "tag": "@SYS-BOT-MOVE"
+   "tag": "@SYS-BOT-COMBAT"
   },
   {
    "name": "Begin",
@@ -13078,7 +13078,7 @@
    "start": 1133,
    "end": 1137,
    "signature": "function EnemyChanged()",
-   "tag": "@SYS-BOT-MOVE"
+   "tag": "@SYS-BOT-COMBAT"
   },
   {
    "name": "Timer",
@@ -13135,7 +13135,7 @@
      "mods": []
     }
    ],
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-HEAL"
   },
   {
    "name": "EndState",
@@ -13154,7 +13154,7 @@
      "mods": []
     }
    ],
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-HEAL"
   },
   {
    "name": "TimeOut",
@@ -13223,7 +13223,7 @@
      "mods": []
     }
    ],
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-HEAL"
   },
   {
    "name": "EndState",
@@ -13242,7 +13242,7 @@
      "mods": []
     }
    ],
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-HEAL"
   },
   {
    "name": "TimeOut",
@@ -13311,7 +13311,7 @@
      "mods": []
     }
    ],
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-HEAL"
   },
   {
    "name": "EndState",
@@ -13330,7 +13330,7 @@
      "mods": []
     }
    ],
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-HEAL"
   },
   {
    "name": "TimeOut",
@@ -13469,7 +13469,7 @@
      "mods": []
     }
    ],
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-SHOP"
   },
   {
    "name": "EndState",
@@ -13488,7 +13488,7 @@
      "mods": []
     }
    ],
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-SHOP"
   },
   {
    "name": "EnemyChanged",
@@ -13500,7 +13500,7 @@
    "start": 1605,
    "end": 1609,
    "signature": "function EnemyChanged()",
-   "tag": "@SYS-BOT-MOVE"
+   "tag": "@SYS-BOT-SHOP"
   },
   {
    "name": "PickStyle",
@@ -13524,7 +13524,7 @@
    "start": 1650,
    "end": 1668,
    "signature": "function Timer()",
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-SHOP"
   },
   {
    "name": "FinishedMove",
@@ -13615,7 +13615,7 @@
      "mods": []
     }
    ],
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-MOVE"
   },
   {
    "name": "EndState",
@@ -13634,7 +13634,7 @@
      "mods": []
     }
    ],
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-MOVE"
   },
   {
    "name": "Timer",
@@ -13646,7 +13646,7 @@
    "start": 1750,
    "end": 1760,
    "signature": "function Timer()",
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-MOVE"
   },
   {
    "name": "FinishedMove",
@@ -13700,7 +13700,7 @@
      "mods": []
     }
    ],
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-MOVE"
   },
   {
    "name": "EndState",
@@ -13719,7 +13719,7 @@
      "mods": []
     }
    ],
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-MOVE"
   },
   {
    "name": "Tick",
@@ -13831,7 +13831,7 @@
      "mods": []
     }
    ],
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-TERM"
   },
   {
    "name": "EndState",
@@ -13850,7 +13850,7 @@
      "mods": []
     }
    ],
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-TERM"
   },
   {
    "name": "ReassertScoreboardFlags",
@@ -13914,7 +13914,7 @@
      "mods": []
     }
    ],
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-TERM"
   },
   {
    "name": "EndState",
@@ -13933,7 +13933,7 @@
      "mods": []
     }
    ],
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-TERM"
   },
   {
    "name": "VictoryDance",
@@ -13968,7 +13968,7 @@
      "mods": []
     }
    ],
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-TERM"
   },
   {
    "name": "EndState",
@@ -13987,7 +13987,7 @@
      "mods": []
     }
    ],
-   "tag": "@SYS-BOT-COMBAT"
+   "tag": "@SYS-BOT-TERM"
   },
   {
    "name": "PlayDance",
@@ -14042,7 +14042,7 @@
    "start": 2045,
    "end": 2053,
    "signature": "function EnemyChanged()",
-   "tag": "@SYS-BOT-MOVE"
+   "tag": "@SYS-BOT-TERM"
   },
   {
    "name": "MoveTaunt",

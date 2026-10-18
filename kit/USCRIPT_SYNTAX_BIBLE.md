@@ -36,7 +36,7 @@ Token counts use the D4 estimator (chars / 3.5); `kit/tests/test_bible.py` enfor
 | W1 | The follow-nav base extends AIController, never KFAIController | DESIGN DECISION; rationale unverified; never re-parent (validator U012 = ERROR) | doc A4, D3; SDK KFAIController.uc:984, 1016 |
 | W2 | DirectMove uses `Pawn.Acceleration`, not MoveToward | SUSPECTED native crash when a combat GotoState interrupts a latent move | doc C7, @SYS-NAV-STATE; Nav:1264-1269; header rules Nav:19-27 are STALE |
 | W3 | SetCharacterArch after SetTeam | Documented in a code comment; SDK-unverified | doc C8, D5; Mut:2512, 2515-2518, 2522; SDK Pawn.uc:1436 |
-| W4 | WaitForLanding / MoveTo get an external ~2 s deadline timer | WaitForLanding has no SDK timeout; MoveTo = precaution | @SYS-BOT-HEAL; Bot:440, 476, 882; SDK Controller.uc:1344 |
+| W4 | Pass `WaitForLanding(2.0)` and keep an external ~2 s deadline timer for MoveTo/MoveToward | **Updated from the SDK:** `WaitForLanding(optional float waitDuration)` does take a timeout (the doc said it had none), but the legacy code calls it bare. What the native does with the duration is UNVERIFIED. MoveTo deadline = precaution | @SYS-BOT-HEAL; Bot:440, 476, 882; SDK Controller.uc:1344 |
 | W5 | Hub funnel: PickCombatStyle returns early while a follower state is active; follower states never GotoState('PickNextMove') | Doc rule | doc 6.4 @SYS-P6-BOUNDARY |
 
 ## Legacy-bug policy (D5)
