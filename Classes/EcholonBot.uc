@@ -398,9 +398,35 @@ state FightEnemy
         FireWeaponAt(Enemy);
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.NotifyKilled
     function NotifyKilled(Controller Killer, Controller Killed, Pawn KilledPawn, Class<DamageType> damageTyp)
     {
+        if (KFPawn_MonsterBoss(KilledPawn) != None)
+        {
+            Enemy = None;
+            bBossKillVictory = true;
+            GotoState('VictoryDance');
+            return;
+        }
+
+        if (Enemy == KilledPawn)
+        {
+            if (!PickNextEnemy())
+            {
+                Enemy = None;
+                AbortMove();
+                if ((Killer == self) && (NextVictoryDance < WorldInfo.TimeSeconds) && (Rand(3) == 0) && mut.ShouldDoVictoryDance())
+                {
+                    GotoState('VictoryDance');
+                    return;
+                }
+                FinishedMove();
+            }
+            else
+            {
+                Focus = Enemy;
+                Target = Enemy;
+            }
+        }
     }
 
     // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.FinishedMove
