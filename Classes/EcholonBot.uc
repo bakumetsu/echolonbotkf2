@@ -1351,9 +1351,10 @@ state VictoryDance
         }
     }
 
-    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.VictoryDance.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
+        bBossKillVictory = false;
     }
 
     // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.VictoryDance.PlayDance
