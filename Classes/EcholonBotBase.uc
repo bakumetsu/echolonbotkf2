@@ -4107,9 +4107,9 @@ function StartEmoteEchoTimer()
     SetTimer(FRand(), false, 'BeginEmoteEcho');
 }
 
-// @STUB(M5b) @SYS-BASE-EMOTE legacy:KF2BotBase.BeginEmoteEcho
 function BeginEmoteEcho()
 {
+    SetTimer(1.0, true, 'CheckEmoteEcho');
 }
 
 // @STUB(M5b) @SYS-BASE-EMOTE legacy:KF2BotBase.CheckEmoteEcho
