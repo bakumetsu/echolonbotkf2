@@ -65,54 +65,181 @@ final function InitConfigDefaults()
     SaveConfig();
 }
 
-// @STUB(M1) - legacy:KF2BotChat.GetNextChatDelay
 final function float GetNextChatDelay()
 {
+    local float Lo, Hi;
+
+    Lo = FMax(ChatIntervalMin, 1.0);
+    Hi = FMax(ChatIntervalMax, Lo);
+    return Lo + (FRand() * (Hi - Lo));
 }
 
-// @STUB(M1) - legacy:KF2BotChat.UpdateSentText
 function UpdateSentText()
 {
+    if(NextHandle != None)
+    {
+        NextHandle.UpdateSentText();
+    }
+    else
+    {
+        super.UpdateSentText();
+    }
 }
 
-// @STUB(M1) - legacy:KF2BotChat.PickPresetSentence
 final function string PickPresetSentence()
 {
+    if (PresetSentences.Length == 0)
+    {
+        return "";
+    }
+    return PresetSentences[Rand(PresetSentences.Length)];
 }
 
-// @STUB(M1) - legacy:KF2BotChat.DoBotChat
 final function bool DoBotChat()
 {
+    local EcholonBot B, PickedBot;
+    local int NumFound, PickIndex;
+    local string S;
+    local PlayerController PC;
+
+    if (WorldInfo.Game.NumBots <= 0)
+    {
+        return false;
+    }
+
+    NumFound = 0;
+    foreach WorldInfo.AllControllers(class'EcholonBot', B)
+    {
+        NumFound++;
+    }
+    if (NumFound == 0)
+    {
+        return false;
+    }
+
+    PickIndex = Rand(NumFound);
+    foreach WorldInfo.AllControllers(class'EcholonBot', B)
+    {
+        if (PickIndex == 0)
+        {
+            PickedBot = B;
+            break;
+        }
+        PickIndex--;
+    }
+    if (PickedBot == None)
+    {
+        return false;
+    }
+
+    S = PickPresetSentence();
+    if (S == "")
+    {
+        return false;
+    }
+
+    foreach WorldInfo.AllControllers(class'PlayerController', PC)
+    {
+        PC.TeamMessage(PickedBot.PlayerReplicationInfo, S, 'Say');
+    }
+    return true;
 }
 
-// @STUB(M1) - legacy:KF2BotChat.BotChatterTimer
 function BotChatterTimer()
 {
+    SetTimer(GetNextChatDelay(), false, 'BotChatterTimer');
+    DoBotChat();
 }
 
-// @STUB(M1) - legacy:KF2BotChat.AllowsBroadcast
 function bool AllowsBroadcast(Actor broadcaster, int InLen)
 {
+    if(NextHandle != None)
+    {
+        return NextHandle.AllowsBroadcast(broadcaster, InLen);
+    }
+    return super.AllowsBroadcast(broadcaster, InLen);
 }
 
-// @STUB(M1) - legacy:KF2BotChat.BroadcastText
 function BroadcastText(PlayerReplicationInfo SenderPRI, PlayerController Receiver, coerce string msg, optional name Type)
 {
+    if (NextHandle != None)
+    {
+        NextHandle.BroadcastText(SenderPRI, Receiver, msg, Type);
+    }
+    else
+    {
+        super.BroadcastText(SenderPRI, Receiver, msg, Type);
+    }
 }
 
-// @STUB(M1) - legacy:KF2BotChat.BroadcastLocalized
 function BroadcastLocalized(Actor Sender, PlayerController Receiver, Class<LocalMessage> Message, optional int Switch, optional PlayerReplicationInfo RelatedPRI_1, optional PlayerReplicationInfo RelatedPRI_2, optional Object OptionalObject)
 {
+    if (NextHandle != None)
+    {
+        NextHandle.BroadcastLocalized(Sender, Receiver, Message, Switch, RelatedPRI_1, RelatedPRI_2, OptionalObject);
+    }
+    else
+    {
+        super.BroadcastLocalized(Sender, Receiver, Message, Switch, RelatedPRI_1, RelatedPRI_2, OptionalObject);
+    }
 }
 
-// @STUB(M1) - legacy:KF2BotChat.ResolveSenderPC
 final function PlayerController ResolveSenderPC(Actor Sender)
 {
+    local Pawn P;
+    local PlayerController PC;
+
+    PC = PlayerController(Sender);
+    if (PC != None)
+    {
+        return PC;
+    }
+    P = Pawn(Sender);
+    if (P != None)
+    {
+        PC = PlayerController(P.Controller);
+        if (PC != None)
+        {
+            return PC;
+        }
+    }
+    return None;
 }
 
-// @STUB(M1) - legacy:KF2BotChat.CheckDebugTrigger
 final function CheckDebugTrigger(Actor Sender, coerce string msg, name Type)
 {
+    local PlayerController SenderPC;
+
+    if (!bBotsChat || DebugTriggerWord == "")
+    {
+        return;
+    }
+    if ((Type != 'Say') && (Type != 'TeamSay'))
+    {
+        return;
+    }
+    if (Left(msg, Len(DebugTriggerWord)) ~= DebugTriggerWord)
+    {
+        SenderPC = ResolveSenderPC(Sender);
+        if (DoBotChat())
+        {
+            if (SenderPC != None)
+            {
+                SenderPC.ClientMessage("[BotChat] Trigger received - a bot just chatted.");
+            }
+        }
+        else if (SenderPC != None)
+        {
+            if (WorldInfo.Game.NumBots <= 0)
+            {
+                SenderPC.ClientMessage("[BotChat] Trigger received, but there are no active bots.");
+            }
+            else
+            {
+                SenderPC.ClientMessage("[BotChat] Trigger received, but no PresetSentences are configured.");
+            }
+        }
+    }
 }
 
 // @STUB(M1) - legacy:KF2BotChat.Broadcast
