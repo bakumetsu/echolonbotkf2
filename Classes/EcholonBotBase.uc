@@ -3263,9 +3263,18 @@ final function bool IsGruntCombatLocked()
         || GetStateName() == 'Dead' || GetStateName() == 'VictoryDance');
 }
 
-// @STUB(M5a) @SYS-BASE-GRUNT legacy:KF2BotBase.GruntOnSight
 function GruntOnSight(Pawn Seen)
 {
+    if (Pawn == None || !IsHostileZed(Seen))
+        return;
+
+    if (GetStateName() == 'FightEnemy')
+    {
+        if (Enemy == None || !Enemy.IsAliveAndWell())
+            SetEnemy(Seen);
+        return;
+    }
+    GruntEnterCombat(Seen);
 }
 
 // @STUB(M5a) @SYS-BASE-GRUNT legacy:KF2BotBase.GruntEnterCombat
