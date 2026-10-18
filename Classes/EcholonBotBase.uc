@@ -4008,9 +4008,24 @@ function LtHumanBoundLoop()
     }
 }
 
-// @STUB(M5b) @SYS-BASE-WEDGE legacy:KF2BotBase.ReceiveWedgeOrder
 function ReceiveWedgeOrder(KFPawn_Human Human, vector WedgeCenter, float ExpireTime)
 {
+    local int i;
+
+    bWedgeActive = true;
+    WedgeHuman = Human;
+    WedgeExpireTime = ExpireTime;
+    CurrentFormation = 'WedgeBehindHuman';
+
+    for (i = 0; i < 4; i++)
+    {
+        if (SquadMembers[i] != None)
+        {
+            SquadMembers[i].CurrentFormation = 'WedgeBehindHuman';
+        }
+    }
+
+    IssueCommand('CMD_PushAnchor', WedgeCenter);
 }
 
 // @STUB(M5b) @SYS-BASE-WEDGE legacy:KF2BotBase.UpdateWedgeMode
