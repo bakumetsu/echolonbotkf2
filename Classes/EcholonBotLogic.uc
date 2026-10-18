@@ -886,9 +886,37 @@ final function PickRetreatMove()
     }
 }
 
-// @STUB(M5c) @SYS-LOGIC-UTIL legacy:KF2BotLogic.FindCollectable
 final function bool FindCollectable()
 {
+    local KFPickupFactory P;
+    local KFPickupFactory_Item I;
+
+    foreach VisibleCollidingActors(class'KFPickupFactory', P, 800.0, Pawn.Location, true)
+    {
+        if ((P != LastFactory) && !P.bPickupHidden)
+        {
+            I = KFPickupFactory_Item(P);
+            if (I == None)
+            {
+                if (ActorReachable(P))
+                {
+                    break;
+                }
+                continue;
+            }
+            if ((I.CurrentPickupIsArmor() && (KPawn != None)) && (KPawn.Armor < KPawn.MaxArmor) && ActorReachable(P))
+            {
+                break;
+            }
+        }
+    }
+
+    if (P != None)
+    {
+        LastFactory = P;
+        return true;
+    }
+    return false;
 }
 
 // @STUB(M5c) @SYS-LOGIC-UTIL legacy:KF2BotLogic.NotifyJumpApex
