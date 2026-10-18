@@ -940,11 +940,26 @@ function string GetAIInfo()
     return S;
 }
 
-// @STUB(M5c) @SYS-LOGIC-DEATH legacy:KF2BotLogic.ReplicatedEvent
 simulated event ReplicatedEvent(name VarName)
 {
-    // PASS-THROUGH: overrides Controller; keep the engine behaviour until the real port lands.
-    super.ReplicatedEvent(VarName);
+    switch(VarName)
+    {
+        case 'RagdollMove':
+            GotoState('IsRagdolled');
+            break;
+        case 'EndRagdollMove':
+            if (bInTerminalState)
+            {
+                GotoState('VictoryDance');
+            }
+            else
+            {
+                GotoState('PickNextMove');
+            }
+            break;
+        default:
+            break;
+    }
 }
 
 // @STUB(M5c) @SYS-LOGIC-DEATH legacy:KF2BotLogic.FinishObjective
