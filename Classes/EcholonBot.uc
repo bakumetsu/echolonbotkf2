@@ -799,9 +799,48 @@ state Hunting
         PickCombatStyle();
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting.Timer
     function Timer()
     {
+        local KFPawn_Monster BestZed;
+        local float BestDist;
+
+        BestZed = None;
+        BestDist = 999999.0;
+
+        foreach WorldInfo.AllPawns(class'KFPawn_Monster', BestZed, Pawn.Location, HUNT_SCAN_RADIUS)
+        {
+            if (!BestZed.IsAliveAndWell())
+            {
+                continue;
+            }
+            if (BestZed.GetTeamNum() == GetTeamNum())
+            {
+                continue;
+            }
+            if (!FastTrace(BestZed.Location, Pawn.Location))
+            {
+                continue;
+            }
+            if (VSizeSq(BestZed.Location - Pawn.Location) < BestDist)
+            {
+                BestDist = VSizeSq(BestZed.Location - Pawn.Location);
+            }
+        }
+
+        if (BestZed != None)
+        {
+            SetEnemy(BestZed);
+            BuildPathToward(Enemy);
+            MoveTowardX(MoveTarget, Enemy);
+        }
+        else if ((Enemy == None) || !Enemy.IsAliveAndWell())
+        {
+            PickCombatStyle();
+        }
+        else if (LineOfSightTo(Enemy))
+        {
+            PickCombatStyle();
+        }
     }
 
 Begin:
