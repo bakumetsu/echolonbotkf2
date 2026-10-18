@@ -2098,9 +2098,9 @@ function SLDecisionLoop()
     }
 }
 
-// @STUB(M3) @SYS-BASE-RANK legacy:KF2BotBase.LTDispatchLoop
 function LTDispatchLoop()
 {
+    EchelonLog("LTDispatchLoop");
 }
 
 // @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.ScanRoomForFormation
@@ -2148,9 +2148,24 @@ final function bool IsDirClearCached(Vector Dest)
 {
 }
 
-// @STUB(M3) @SYS-BASE-ZEDS legacy:KF2BotBase.IsRetreatSafe
 final function bool IsRetreatSafe(Vector RetreatDest)
 {
+	local KFPawn_Monster M;
+	local byte Zeds;
+
+	Zeds = 0;
+	if (!IsDirClearCached(RetreatDest))
+	{
+		return false;
+	}
+	foreach VisibleCollidingActors(class'KFPawn_Monster', M, 500.0, RetreatDest)
+	{
+		if (M.IsAliveAndWell() && (++Zeds >= 20))
+		{
+			return false;
+		}
+	}
+	return true;
 }
 
 // @STUB(M5a) @SYS-BASE-CQB legacy:KF2BotBase.SetSquadCrouchHold
@@ -2178,44 +2193,139 @@ final function ApplySquadCrouchHold()
 {
 }
 
-// @STUB(M3) @SYS-BASE-RANK legacy:KF2BotBase.ClearRankTimers
 final function ClearRankTimers()
 {
+    ClearTimer('StartSLLoop');
+    ClearTimer('SLDecisionLoop');
+    ClearTimer('StartLTLoop');
+    ClearTimer('LTDispatchLoop');
+    ClearTimer('StartCaptainLoop');
+    ClearTimer('DeferredFormationScan');
+    ClearTimer('ClearSquadCrouchHold');
+    ClearTimer('SLGrenadeLOSPhase');
+    ClearTimer('ClearGrenadeSignal');
+    GrenadeSignal = false;
+    GrenadeThrowsLeft = 0;
+    GrenadeTargetPawn = None;
+    bFormationScanDeferred = false;
 }
 
-// @STUB(M3) @SYS-BASE-RANK legacy:KF2BotBase.GetRankName
 final function name GetRankName()
 {
+    switch (BotRank)
+    {
+        case CAPTAIN:
+            return 'Captain';
+        case LIEUTENANT:
+            return 'Lieutenant';
+        case SQUAD_LEADER:
+            return 'SquadLeader';
+        default:
+            return 'Grunt';
+    }
 }
 
-// @STUB(M3) @SYS-BASE-RANK legacy:KF2BotBase.UpdateRoleNameTag
 final function UpdateRoleNameTag()
 {
+    local string IDStr;
+    local int StartIdx;
+
+    if (PlayerReplicationInfo != None)
+    {
+        if (BasePlayerName == "")
+        {
+            BasePlayerName = PlayerReplicationInfo.PlayerName;
+        }
+
+        StartIdx = 0;
+        if (Left(BasePlayerName, 4) == "Bot_")
+        {
+            StartIdx = 4;
+        }
+
+        IDStr = Mid(BasePlayerName, StartIdx, Len(BasePlayerName) - StartIdx);
+        PlayerReplicationInfo.PlayerName = "[" $ GetRankName() $ "] " $ IDStr;
+    }
 }
 
-// @STUB(M3) @SYS-BASE-RANK legacy:KF2BotBase.RefreshRoleNameTag
 final function RefreshRoleNameTag()
 {
+    local string BaseName;
+    local int BracketsEnd;
+    local int StartIdx;
+
+    if (PlayerReplicationInfo == None)
+    {
+        return;
+    }
+
+    if (BasePlayerName != "")
+    {
+        BaseName = BasePlayerName;
+    }
+    else
+    {
+        BaseName = PlayerReplicationInfo.PlayerName;
+        if (Left(BaseName, 1) == "[")
+        {
+            BracketsEnd = InStr(BaseName, "]");
+            if (BracketsEnd >= 0)
+            {
+                BaseName = Mid(BaseName, BracketsEnd + 1, Len(BaseName) - BracketsEnd - 1);
+                if (Left(BaseName, 1) == " ")
+                {
+                    BaseName = Mid(BaseName, 1, Len(BaseName) - 1);
+                }
+            }
+        }
+        BasePlayerName = BaseName;
+    }
+
+    StartIdx = 0;
+    if (Left(BaseName, 4) == "Bot_")
+    {
+        StartIdx = 4;
+    }
+    PlayerReplicationInfo.PlayerName = "[" $ GetRankName() $ "] " $ Mid(BaseName, StartIdx, Len(BaseName) - StartIdx);
 }
 
-// @STUB(M3) @SYS-BASE-RANK legacy:KF2BotBase.SeedGruntGates
 final function SeedGruntGates()
 {
+	LastOffsetUpdate = WorldInfo.TimeSeconds - (FRand() * 0.2);
+	LastHealthCheck = WorldInfo.TimeSeconds - (FRand() * 2.0);
+	NextFireLineCheck = WorldInfo.TimeSeconds + (FRand() * 0.5);
 }
 
-// @STUB(M3) @SYS-BASE-RANK legacy:KF2BotBase.ArmRankTimers
 final function ArmRankTimers()
 {
+    ClearRankTimers();
+    switch (BotRank)
+    {
+        case SQUAD_LEADER:
+            SetTimer(0.01 + (FRand() * 0.49), false, 'StartSLLoop');
+            break;
+        case LIEUTENANT:
+            SetTimer(0.01 + (FRand() * 0.99), false, 'StartLTLoop');
+            break;
+        case CAPTAIN:
+            SetTimer(0.01 + (FRand() * 2.99), false, 'StartCaptainLoop');
+            break;
+        default:
+            SeedGruntGates();
+            break;
+    }
 }
 
-// @STUB(M3) @SYS-BASE-RANK legacy:KF2BotBase.StartSLLoop
 function StartSLLoop()
 {
+	SetTimer(0.5, true, 'SLDecisionLoop');
+	SLDecisionLoop();
 }
 
-// @STUB(M3) @SYS-BASE-RANK legacy:KF2BotBase.StartLTLoop
 function StartLTLoop()
 {
+	SetTimer(1.0, true, 'LTDispatchLoop');
+	LTDispatchLoop();
 }
 
 // @STUB(M3) @SYS-BASE-RANK legacy:KF2BotBase.StartCaptainLoop
