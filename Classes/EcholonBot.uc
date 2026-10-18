@@ -51,9 +51,14 @@ state Roaming
         }
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
+
+        if (KPawn != None)
+        {
+            KPawn.SetSprinting(false);
+        }
     }
 
     // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming.PickStyle
