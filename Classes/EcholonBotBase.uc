@@ -3397,9 +3397,21 @@ function ReceivePanic(bool bPanic)
 	ApplyPanicVariance();
 }
 
-// @STUB(M5a) @SYS-BASE-PANIC legacy:KF2BotBase.ApplyPanicVariance
 function ApplyPanicVariance()
 {
+    local float wantMult;
+
+    if (PanicActive)
+        wantMult = 2.0;
+    else
+        wantMult = 1.0;
+
+    PanicScanSpeedMultiplier = wantMult;
+
+    if (PanicVarianceMultiplier != wantMult)
+    {
+        PanicVarianceMultiplier = wantMult;
+    }
 }
 
 // @STUB(M5a) @SYS-BASE-RELOAD legacy:KF2BotBase.IsReloading
