@@ -1701,9 +1701,49 @@ function ReissueSquadOrder(EcholonBot B)
     EchelonLog("ORDER_REISSUE group=" $ string(G + 1) $ " leader=" $ string(B.Name));
 }
 
-// @STUB(M4) @SYS-MUT-REGROUP legacy:KF2BotsMut.FindNearestActiveLeader
 function Controller FindNearestActiveLeader(EcholonBot B, float MaxDist)
 {
+    local int i;
+    local EcholonBot Cand;
+    local EcholonMut.CachedHumanInfo CH;
+    local KFPawn_Human CandH;
+    local float BestD2, D2;
+    local Controller BestCtrl;
+
+    if (B == None || B.Pawn == None)
+    {
+        return None;
+    }
+    BestD2 = MaxDist * MaxDist;
+    BestCtrl = None;
+    for (i = 0; i < Fireteams.Length; i++)
+    {
+        Cand = Fireteams[i].Leader;
+        if (Cand != None && Cand != B && Cand.Pawn != None && Cand.Pawn.Health > 0)
+        {
+            D2 = VSizeSq(Cand.Pawn.Location - B.Pawn.Location);
+            if (D2 < BestD2)
+            {
+                BestD2 = D2;
+                BestCtrl = Cand;
+            }
+        }
+    }
+    for (i = 0; i < CachedHumans.Length; i++)
+    {
+        CH = CachedHumans[i];
+        CandH = CH.HumanPawn;
+        if (CandH != None && CandH.IsAliveAndWell() && PlayerController(CandH.Controller) != None)
+        {
+            D2 = VSizeSq(CH.Loc - B.Pawn.Location);
+            if (D2 < BestD2)
+            {
+                BestD2 = D2;
+                BestCtrl = CandH.Controller;
+            }
+        }
+    }
+    return BestCtrl;
 }
 
 // @STUB(M4) @SYS-MUT-REGROUP legacy:KF2BotsMut.CountZedsInRadius
