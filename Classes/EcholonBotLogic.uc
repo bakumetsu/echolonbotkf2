@@ -1144,9 +1144,29 @@ function bool MoveTowardGoal(Actor GoalActor, vector GoalPoint, bool bActorGoal)
     return true;
 }
 
-// @STUB(M5c) @SYS-LOGIC-MOVEVAL legacy:KF2BotLogic.UpdateCQBFormation
 function UpdateCQBFormation()
 {
+    local vector RightVec, ProbeStart, ProbeEndLeft, ProbeEndRight;
+    local bool bLeftClear, bRightClear;
+
+    if (Pawn == None || AssignedAnchor == None)
+        return;
+    if (WorldInfo.TimeSeconds - LastCQBCheckTime < CQB_TRACE_INTERVAL)
+        return;
+    if (VSizeSq(Pawn.Location - AssignedAnchor.Location) >= CQB_TRACE_RADIUS_SQ)
+        return;
+
+    LastCQBCheckTime = WorldInfo.TimeSeconds;
+
+    RightVec = Normal(vector(Pawn.Rotation) cross vect(0,0,1));
+    ProbeStart = Pawn.Location;
+    ProbeEndLeft = ProbeStart - (RightVec * CQB_PROBE_DIST);
+    ProbeEndRight = ProbeStart + (RightVec * CQB_PROBE_DIST);
+
+    bLeftClear = FastTrace(ProbeEndLeft, ProbeStart);
+    bRightClear = FastTrace(ProbeEndRight, ProbeStart);
+
+    bSingleFileFormation = (!bLeftClear || !bRightClear);
 }
 
 // @STUB(M5c) @SYS-LOGIC-MOVEVAL legacy:KF2BotLogic.UpdatePillarOfSaltTracking
