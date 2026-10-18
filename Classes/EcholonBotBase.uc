@@ -2128,9 +2128,125 @@ function LTDispatchLoop()
     EchelonLog("LTDispatchLoop");
 }
 
-// @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.ScanRoomForFormation
 final function ScanRoomForFormation()
 {
+    local Vector Src, X, Y, Z, EndPt, HitLoc, HitNorm;
+    local Rotator FlatRot;
+    local Actor HitActor;
+    local float FwdDistSq;
+    local int ClearCount;
+    local bool bFwd, bLeft, bRight, bBack;
+    local name Wanted;
+
+    if (BotRank != SQUAD_LEADER || Pawn == None || bFormationScanDeferred)
+    {
+        return;
+    }
+
+    FormationYaw = Pawn.Rotation.Yaw;
+
+    if (bRerouteRequested)
+    {
+        bRerouteRequested = false;
+        FormationEpoch++;
+        if (WorldInfo.TimeSeconds - LastRerouteTime < 4.0)
+        {
+            CurrentFormation = 'SingleFile';
+            PendingFormationCount = 0;
+            FormationHoldUntil = WorldInfo.TimeSeconds + 3.0;
+        }
+        LastRerouteTime = WorldInfo.TimeSeconds;
+    }
+
+    if (WorldInfo.TimeSeconds < FormationHoldUntil)
+    {
+        return;
+    }
+
+    if (Class'EcholonBotBase'.default.LastFormationScanTime == WorldInfo.TimeSeconds)
+    {
+        bFormationScanDeferred = true;
+        SetTimer(0.034, false, 'DeferredFormationScan');
+        return;
+    }
+    LastFormationScanTime = WorldInfo.TimeSeconds;
+
+    Src = Pawn.Location;
+    FlatRot.Yaw = Pawn.Rotation.Yaw;
+    GetAxes(FlatRot, X, Y, Z);
+
+    EndPt = Src + (X * FORM_LINE_DIST);
+    HitActor = Trace(HitLoc, HitNorm, EndPt, Src, false);
+    if (HitActor != None && KFPawn_Human(HitActor) == None)
+    {
+        FwdDistSq = VSizeSq(HitLoc - Src);
+    }
+    else
+    {
+        FwdDistSq = FORM_LINE_DIST * FORM_LINE_DIST;
+    }
+    bFwd = FwdDistSq >= FORM_SCAN_DIST * FORM_SCAN_DIST;
+
+    bLeft = FastTrace(Src - (Y * FORM_SCAN_DIST), Src);
+    bRight = FastTrace(Src + (Y * FORM_SCAN_DIST), Src);
+    bBack = FastTrace(Src - (X * FORM_SCAN_DIST), Src);
+
+    ScanMask = 0;
+    if (bFwd)
+    {
+        ScanMask = byte(ScanMask | 1);
+        ClearCount++;
+    }
+    if (bLeft)
+    {
+        ScanMask = byte(ScanMask | 2);
+        ClearCount++;
+    }
+    if (bRight)
+    {
+        ScanMask = byte(ScanMask | 4);
+        ClearCount++;
+    }
+    if (bBack)
+    {
+        ScanMask = byte(ScanMask | 8);
+        ClearCount++;
+    }
+
+    if (ClearCount >= 3)
+    {
+        Wanted = 'Arrowhead';
+    }
+    else if (ClearCount >= 2)
+    {
+        Wanted = 'StaggeredColumn';
+    }
+    else
+    {
+        Wanted = 'SingleFile';
+    }
+
+    if (FwdDistSq >= 360000.0 && bLeft && bRight && Enemy != None && Enemy.IsAliveAndWell()
+        && (X Dot Normal(Enemy.Location - Src)) > 0.5
+        && WorldInfo.TimeSeconds >= LineSuppressUntil)
+    {
+        Wanted = 'LineFormation';
+    }
+
+    if (Wanted == CurrentFormation)
+    {
+        PendingFormationCount = 0;
+        return;
+    }
+    if (Wanted != PendingFormation)
+    {
+        PendingFormation = Wanted;
+        PendingFormationCount = 1;
+        return;
+    }
+    CurrentFormation = Wanted;
+    PendingFormationCount = 0;
+    FormationEpoch++;
 }
 
 // @STUB(M5a) @SYS-BASE-FORM legacy:KF2BotBase.DeferredFormationScan
