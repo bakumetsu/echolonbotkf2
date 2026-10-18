@@ -2838,9 +2838,19 @@ final function bool IsHostileZed(Pawn P)
     return (M != None && M.IsAliveAndWell());
 }
 
-// @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.ToggleOverwatchPhase
 function ToggleOverwatchPhase()
 {
+    if (BotRank != SQUAD_LEADER || Pawn == None)
+    {
+        ClearTimer('ToggleOverwatchPhase');
+        return;
+    }
+    bOverwatchPhase = !bOverwatchPhase;
+    if (bOverwatchAllMove && WorldInfo.TimeSeconds >= OverwatchResetUntil)
+    {
+        bOverwatchAllMove = false;
+    }
+    BroadcastOverwatchState();
 }
 
 // @STUB(M5a) @SYS-BASE-OVERWATCH legacy:KF2BotBase.BroadcastOverwatchState
