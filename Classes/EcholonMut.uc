@@ -1513,9 +1513,27 @@ function SampleSquadSlots(int GroupIdx)
     }
 }
 
-// @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.ReleaseSquadSlots
 function ReleaseSquadSlots(int GroupIdx, string Reason)
 {
+    local SquadOrder O;
+    local EcholonBot M;
+    local int j;
+
+    if (GroupIdx < 0 || GroupIdx >= SquadOrders.Length)
+        return;
+
+    O = SquadOrders[GroupIdx];
+    for (j = 0; j < O.Slots.Length; j++)
+    {
+        M = GetFollowerBySlot(GroupIdx, O.Slots[j]);
+        if (M != None)
+        {
+            EchelonLog("SLOT_RELEASE bot=" $ string(M.Name) $ " squad=" $ string(GroupIdx + 1) $ " slot=" $ string(O.Slots[j]) $ " reason=" $ Reason);
+        }
+    }
+    O.Slots.Length = 0;
+    O.SlotLocs.Length = 0;
+    SquadOrders[GroupIdx] = O;
 }
 
 // @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.GetFollowerBySlot
