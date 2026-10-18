@@ -1070,9 +1070,13 @@ function bool IsAnchorValid(Actor Anchor)
     return true;
 }
 
-// @STUB(M5c) @SYS-LOGIC-MOVEVAL legacy:KF2BotLogic.EvaluateLeaderMove
 function bool EvaluateLeaderMove()
 {
+    UpdatePillarOfSaltTracking();
+    if (bAttemptingUnweld)
+        return false;
+    UpdateCQBFormation();
+    return MoveTowardGoal(AssignedAnchor, vect(0,0,0), true);
 }
 
 // @STUB(M5c) @SYS-LOGIC-MOVEVAL legacy:KF2BotLogic.EvaluateFollowerMove
