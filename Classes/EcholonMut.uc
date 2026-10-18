@@ -1841,9 +1841,40 @@ function float GetSquadStartTime(EcholonBot B)
     return SquadOrders[GroupIdx].StartTime;
 }
 
-// @STUB(M4) @SYS-MUT-REGROUP legacy:KF2BotsMut.MoveSquadMembers
 function int MoveSquadMembers(int FromIdx, int ToIdx)
 {
+    local int MemberIdx;
+    local SquadOrder O;
+    local EcholonBot M;
+
+    if (FromIdx == ToIdx)
+        return 0;
+    if (FromIdx < 0 || FromIdx >= Fireteams.Length || ToIdx < 0 || ToIdx >= Fireteams.Length)
+        return 0;
+
+    O = SquadOrders[FromIdx];
+    O.Phase = PHASE_IDLE;
+    SquadOrders[FromIdx] = O;
+
+    for (MemberIdx = 0; MemberIdx < Fireteams[FromIdx].Members.Length; MemberIdx++)
+    {
+        M = Fireteams[FromIdx].Members[MemberIdx];
+        if (M == None)
+            continue;
+        ReassignBotToGroup(M, ToIdx);
+        M.WdLastHubContactTime = WorldInfo.TimeSeconds;
+    }
+
+    Fireteams[FromIdx].Leader = None;
+    Fireteams[FromIdx].Anchor = None;
+
+    O = SquadOrders[ToIdx];
+    O.Leader = Fireteams[ToIdx].Leader;
+    O.StartTime = WorldInfo.TimeSeconds;
+    SquadOrders[ToIdx] = O;
+
+    ConsolidateFireteams();
+    return Fireteams[ToIdx].Members.Length;
 }
 
 // @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.GetBotObjective
