@@ -1224,9 +1224,10 @@ function UpdatePillarOfSaltTracking()
     LastStuckSampleTime = WorldInfo.TimeSeconds;
 }
 
-// @STUB(M5c) @SYS-LOGIC-MOVEVAL legacy:KF2BotLogic.ExecuteCampState
 function bool ExecuteCampState()
 {
+    GotoState('Camp');
+    return true;
 }
 
 // @STUB(M5c) @SYS-LOGIC-MOVEVAL legacy:KF2BotLogic.ResetStuckState
