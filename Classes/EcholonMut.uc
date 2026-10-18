@@ -1683,9 +1683,22 @@ function bool HasSquadGoal(EcholonBot B)
     return (SquadOrders[G].GoalNav != None && SquadOrders[G].GoalPoint != vect(0, 0, 0));
 }
 
-// @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.ReissueSquadOrder
 function ReissueSquadOrder(EcholonBot B)
 {
+    local int G;
+    local SquadOrder O;
+
+    if (B == None || B.GroupID - 1 < 0 || B.GroupID - 1 >= SquadOrders.Length)
+    {
+        return;
+    }
+
+    G = B.GroupID - 1;
+    O = SquadOrders[G];
+    O.ObjectiveBailUntil = 0.0;
+    SquadOrders[G] = O;
+    SampleSquadSlots(G);
+    EchelonLog("ORDER_REISSUE group=" $ string(G + 1) $ " leader=" $ string(B.Name));
 }
 
 // @STUB(M4) @SYS-MUT-REGROUP legacy:KF2BotsMut.FindNearestActiveLeader
