@@ -349,9 +349,53 @@ state FightEnemy
         }
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.Timer
     event Timer()
     {
+        if (Enemy == none)
+        {
+            return;
+        }
+        if (!Enemy.IsAliveAndWell() && !PickNextEnemy())
+        {
+            if (Pawn != none)
+            {
+                Pawn.StopFiring();
+            }
+            Enemy = none;
+            AbortMove();
+            CheckWeaponReequip();
+            FinishedMove();
+            return;
+        }
+        if (Enemy != none && KFPawn_Monster(Enemy) != none && KFPawn_Monster(Enemy).bIsHeadless)
+        {
+            if (Pawn != none)
+            {
+                Pawn.StopFiring();
+            }
+            Enemy = none;
+            AbortMove();
+            CheckWeaponReequip();
+            FinishedMove();
+            return;
+        }
+        if (SyncLineFocus())
+        {
+            return;
+        }
+        CheckWeaponReequip();
+        EnemyEncounterTime = WorldInfo.TimeSeconds;
+        Focus = Enemy;
+        if (!HasOwnFireLine(Enemy))
+        {
+            Pawn.StopFiring();
+            if (BotRank == GRUNT && SquadLeader != none && SquadLeader.CurrentFormation == 'LineFormation')
+            {
+                SquadLeader.NotifyBlockedShooter(self);
+            }
+            return;
+        }
+        FireWeaponAt(Enemy);
     }
 
     // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.NotifyKilled
