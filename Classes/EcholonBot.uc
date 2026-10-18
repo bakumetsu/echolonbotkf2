@@ -902,9 +902,21 @@ state HealOther
         AbortMove();
     }
 
-    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealOther.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
+        ClearTimer('HealFailsafe');
+        ClearTimer('VerifyWeapon');
+        PendingHeal = None;
+        if(Pawn != None)
+        {
+            Pawn.StopFiring();
+            if(KFWeap_HealerBase(Pawn.Weapon) != None)
+            {
+                Pawn.InvManager.SwitchToBestWeapon(true);
+            }
+            SetTimer(1.5, false, 'VerifyWeapon');
+        }
     }
 
     // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealOther.TimeOut
