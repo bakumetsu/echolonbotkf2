@@ -1220,9 +1220,9 @@ state DonatingMoney
         }
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.DonatingMoney.FinishedMove
     function FinishedMove()
     {
+        PickCombatStyle();
     }
 
     // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.DonatingMoney.DropMoney
