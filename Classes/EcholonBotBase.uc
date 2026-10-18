@@ -4089,9 +4089,17 @@ function vector ComputeWedgeOffset(int Slot, KFPawn_Human PlayerRef)
     return dir * dist;
 }
 
-// @STUB(M5b) @SYS-BASE-WEDGE legacy:KF2BotBase.ApplyWedgeTarget
 function ApplyWedgeTarget(out vector OutTarget)
 {
+    local KFPawn_Human Human;
+
+    if (SquadLeader == None || !SquadLeader.bWedgeActive)
+        return;
+    Human = SquadLeader.WedgeHuman;
+    if (Human == None || !Human.IsAliveAndWell())
+        return;
+
+    OutTarget = Human.Location + ComputeWedgeOffset(OverwatchSlot, Human);
 }
 
 // @STUB(M5b) @SYS-BASE-EMOTE legacy:KF2BotBase.StartEmoteEchoTimer
