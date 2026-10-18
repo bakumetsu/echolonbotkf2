@@ -2144,9 +2144,37 @@ function AuditStateExit(name NextStateName)
 	}
 }
 
-// @STUB(M5b) @SYS-BASE-AUDIT legacy:KF2BotBase.AuditGoalLog
 function AuditGoalLog(string Op, string Src)
 {
+	local string IterLoc;
+	local int IterAmmo;
+	local KFWeapon W;
+
+	if (ObjectiveGoal == None || WorldInfo == None)
+	{
+		return;
+	}
+
+	IterAmmo = 0;
+	if (Pawn != None && Pawn.Weapon != None)
+	{
+		W = KFWeapon(Pawn.Weapon);
+		if (W != None && W.GetTotalAmmoAmount(0) > 0)
+		{
+			IterAmmo = 1;
+		}
+	}
+
+	IterLoc = string(FFloor(ObjectiveGoal.Location.X / 100.0)) $ "," $ string(FFloor(ObjectiveGoal.Location.Y / 100.0)) $ "," $ string(FFloor(ObjectiveGoal.Location.Z / 100.0));
+
+	if (Op == "GOAL_SET")
+	{
+		EchelonLog("GOAL_SET bot=" $ Name $ " goal=(" $ IterLoc $ ") ammo=" $ string(IterAmmo) $ " src=" $ Src);
+	}
+	else
+	{
+		EchelonLog("GOAL_CLEAR bot=" $ Name $ " src=" $ Src);
+	}
 }
 
 function IssueCommand(name Cmd, Vector Anchor)
