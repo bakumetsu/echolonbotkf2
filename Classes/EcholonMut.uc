@@ -1363,9 +1363,46 @@ function EnsureSquadOrderTable()
     }
 }
 
-// @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.InheritSquadOrder
 function InheritSquadOrder(int GroupIdx, EcholonBot NewLeader)
 {
+    local SquadOrder O;
+    local NavigationPoint GP;
+    local int GoalKept;
+
+    if (NewLeader == None || NewLeader.Pawn == None)
+        return;
+    if (GroupIdx < 0 || GroupIdx >= SquadOrders.Length)
+        return;
+
+    O = SquadOrders[GroupIdx];
+    if (O.GoalNav == None)
+    {
+        O.Leader = NewLeader;
+        O.Phase = PHASE_IDLE;
+        O.ObjectiveBailUntil = 0.0;
+        SquadOrders[GroupIdx] = O;
+        return;
+    }
+
+    O.Leader = NewLeader;
+    O.ObjectiveBailUntil = 0.0;
+    GoalKept = 1;
+    if (O.Zone != None && !O.Zone.EncompassesPoint(O.GoalPoint)) // SDK-UNVERIFIED: EncompassesPoint
+    {
+        GP = NearestValidPoint(NewLeader.Pawn.Location);
+        if (GP != None)
+        {
+            O.GoalNav = GP;
+            O.GoalPoint = GP.Location;
+            GoalKept = 0;
+        }
+    }
+    SquadOrders[GroupIdx] = O;
+    if (O.GoalNav != None)
+    {
+        SampleSquadSlots(GroupIdx);
+    }
+    EchelonLog("ORDER_INHERIT squad=" $ string(GroupIdx + 1) $ " newLeader=" $ string(NewLeader.Name) $ " goalKept=" $ string(GoalKept));
 }
 
 // @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.SampleSquadSlots
