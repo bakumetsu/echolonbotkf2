@@ -2516,9 +2516,9 @@ final function SetSquadCrouchHold()
 	SetTimer(3.0, false, 'ClearSquadCrouchHold');
 }
 
-// @STUB(M5a) @SYS-BASE-CQB legacy:KF2BotBase.ClearSquadCrouchHold
 function ClearSquadCrouchHold()
 {
+	bSquadCrouchHold = false;
 }
 
 // @STUB(M5a) @SYS-BASE-CQB legacy:KF2BotBase.HoldAndCrouch
