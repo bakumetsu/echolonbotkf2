@@ -890,58 +890,203 @@ function Rotator GetAdjustedAimFor(Weapon W, Vector StartFireLoc)
     return Rotator(TargetPos - StartFireLoc);
 }
 
-// @STUB(M3) @SYS-BASE-FIRE legacy:KF2BotBase.GetPlayerViewPoint
 simulated function GetPlayerViewPoint(out Vector out_Location, out Rotator out_Rotation)
 {
-    // PASS-THROUGH: overrides AIController; keep the engine behaviour until the real port lands.
-    super.GetPlayerViewPoint(out_Location, out_Rotation);
+    if (Pawn != None)
+    {
+        Pawn.GetActorEyesViewPoint(out_Location, out_Rotation);
+        out_Rotation = GetAdjustedAimFor(Pawn.Weapon, out_Location);
+    }
+    else
+    {
+        out_Location = Location;
+        out_Rotation = Rotation;
+    }
 }
 
-// @STUB(M3) @SYS-BASE-MOVE legacy:KF2BotBase.MoveToX
 final function MoveToX(Vector Dest, optional Actor ViewFocus, optional bool bSerpent = true)
 {
+    bAdjusting = false;
+    MoveFlags = 1;
+    SetDestinationPosition(Dest);
+    SetFocalPoint(Dest);
+    Focus = ViewFocus;
+    EndMoveTime = (WorldInfo.TimeSeconds + (VSize(Dest - Pawn.Location) / Pawn.GroundSpeed)) + 0.6;
+    bSerpentineMove = bSerpent;
+    PrevMovePos = Pawn.Location;
+    MovePauseTime = WorldInfo.TimeSeconds;
+    if (bSerpent)
+    {
+        bSerpentLeft = Rand(2) == 0;
+    }
 }
 
-// @STUB(M3) @SYS-BASE-MOVE legacy:KF2BotBase.MoveTowardX
 final function MoveTowardX(Actor Dest, optional Actor ViewFocus, optional bool bSerpent = true)
 {
+    bAdjusting = false;
+    MoveFlags = 2;
+    MoveTarget = Dest;
+    bSerpentineMove = bSerpent;
+    PrevMovePos = Pawn.Location;
+    MovePauseTime = WorldInfo.TimeSeconds;
+
+    if (Dest != None)
+    {
+        SetDestinationPosition(Dest.Location);
+        SetFocalPoint(Dest.Location);
+        Focus = Dest;
+        EndMoveTime = (WorldInfo.TimeSeconds + (VSize(Dest.Location - Pawn.Location) / Pawn.GroundSpeed)) + 0.75;
+    }
+
+    if (ViewFocus != None)
+    {
+        Focus = ViewFocus;
+    }
+
+    if (bSerpent)
+    {
+        bSerpentLeft = (Rand(2) == 0);
+    }
 }
 
-// @STUB(M3) @SYS-BASE-MOVE legacy:KF2BotBase.StrafeTowardPoint
 final function StrafeTowardPoint(Vector Dest)
 {
+    local Vector X, Y;
+
+    X = Dest - Pawn.Location;
+    if (VSizeSq2D(X) > 22500.0)
+    {
+        Y.X = -X.Y;
+        Y.Y = X.X;
+        if (SerpentineTime < WorldInfo.TimeSeconds)
+        {
+            SerpentineTime = (WorldInfo.TimeSeconds + 0.3) + (FRand() * 0.05);
+            bSerpentLeft = !bSerpentLeft;
+        }
+        if (bSerpentLeft)
+        {
+            X = Normal(X + (Y * 0.5));
+        }
+        else
+        {
+            X = Normal(X - (Y * 0.5));
+        }
+    }
+    Pawn.Acceleration = X * 2000.0;
 }
 
-// @STUB(M3) @SYS-BASE-MOVE legacy:KF2BotBase.GetMoveDirection
 final function Vector GetMoveDirection()
 {
+    switch(MoveFlags)
+    {
+        case 1:
+            return DestinationPosition.Position - Pawn.Location;
+        case 2:
+            if (MoveTarget != None)
+            {
+                return MoveTarget.Location - Pawn.Location;
+            }
+            return vect(0, 0, 0);
+        default:
+            return vect(0, 0, 0);
+    }
 }
 
-// @STUB(M3) @SYS-BASE-MOVE legacy:KF2BotBase.ProcessMoveTo
 final function ProcessMoveTo()
 {
+    if (VSizeSq2D(DestinationPosition.Position - Pawn.Location) < 2500.0)
+    {
+        Pawn.Acceleration = vect(0.0, 0.0, 0.0);
+        MoveFlags = 0;
+        CurrentPath = None;
+        FinishedMove();
+    }
+    else
+    {
+        if (bSerpentineMove)
+        {
+            StrafeTowardPoint(DestinationPosition.Position);
+        }
+        else
+        {
+            Pawn.Acceleration = DestinationPosition.Position - Pawn.Location;
+        }
+    }
 }
 
-// @STUB(M3) @SYS-BASE-MOVE legacy:KF2BotBase.ProcessMoveToward
 final function ProcessMoveToward()
 {
+    if (MoveTarget == None || Pawn.ReachedDestination(MoveTarget))
+    {
+        if (NavigationPoint(MoveTarget) != None)
+        {
+            Pawn.SetAnchor(NavigationPoint(MoveTarget));
+        }
+        Pawn.Acceleration = vect(0.0, 0.0, 0.0);
+        MoveFlags = 0;
+        CurrentPath = None;
+        FinishedMove();
+    }
+    else
+    {
+        if (bSerpentineMove)
+        {
+            StrafeTowardPoint(MoveTarget.Location);
+        }
+        else
+        {
+            Pawn.Acceleration = MoveTarget.Location - Pawn.Location;
+        }
+    }
 }
 
-// @STUB(M3) @SYS-BASE-MOVE legacy:KF2BotBase.AbortMove
 final function AbortMove()
 {
+    Pawn.Acceleration = vect(0.0, 0.0, 0.0);
+    MoveFlags = 0;
+    bAdjusting = false;
+    CurrentPath = None;
 }
 
-// @STUB(M3) @SYS-BASE-MOVE legacy:KF2BotBase.CheckBlockedPath
 final function CheckBlockedPath(Actor Start, NavigationPoint End)
 {
+    local KFPawnBlockingVolume B;
+    local Vector HL, HN;
+
+    if ((Start == None) || (End == None) || (BotBlockRoutes.Find(End) >= 0))
+    {
+        return;
+    }
+
+    foreach Pawn.TraceActors(class'KFPawnBlockingVolume', B, HL, HN, End.Location, Start.Location, vect(32.0, 32.0, 64.0))
+    {
+        if (B.bBlockPlayers)
+        {
+            BotBlockRoutes.AddItem(End);
+            break;
+        }
+    }
 }
 
-// @STUB(M3) @SYS-BASE-MOVE legacy:KF2BotBase.FollowNotifyHub
 function FollowNotifyHub(EFollowStatus NewStatus)
 {
-    // PASS-THROUGH: overrides EcholonFollowNavBase; keep the engine behaviour until the real port lands.
-    super.FollowNotifyHub(NewStatus);
+    switch (NewStatus)
+    {
+        case FS_Arrived:
+            `log("[FollowNav] EcholonBot: FS_Arrived -- holding slot " $ string(FollowSlotIndex) $ "/" $ string(FollowSlotCount));
+            break;
+
+        case FS_LeaderTeleported:
+            `log("[FollowNav] EcholonBot: FS_LeaderTeleported -- route invalid, decorrelated");
+            break;
+
+        case FS_LeaderLost:
+        case FS_Blocked:
+            `log("[FollowNav] EcholonBot: " $ string(int(NewStatus)) @ "-- returning to PickNextMove");
+            FollowExitState = 'PickNextMove';
+            bFollowExitPending = true;
+            break;
+    }
 }
 
 // @STUB(M3) @SYS-BASE-MOVE legacy:KF2BotBase.FollowOnGaveUp
