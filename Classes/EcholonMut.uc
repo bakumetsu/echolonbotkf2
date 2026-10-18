@@ -1405,9 +1405,112 @@ function InheritSquadOrder(int GroupIdx, EcholonBot NewLeader)
     EchelonLog("ORDER_INHERIT squad=" $ string(GroupIdx + 1) $ " newLeader=" $ string(NewLeader.Name) $ " goalKept=" $ string(GoalKept));
 }
 
-// @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.SampleSquadSlots
 function SampleSquadSlots(int GroupIdx)
 {
+    local SquadOrder O;
+    local EcholonBot Ldr, M;
+    local vector LeaderLoc, Candidate;
+    local array<vector> Candidates;
+    local array<bool> bAlive;
+    local float Angle, R0, DMin, Dist, BestDist;
+    local int N, i, j, BestIdx;
+
+    if (GroupIdx < 0 || GroupIdx >= SquadOrders.Length)
+        return;
+    if (GroupIdx >= Fireteams.Length)
+        return;
+
+    O = SquadOrders[GroupIdx];
+    Ldr = O.Leader;
+    if (Ldr == None || Ldr.Pawn == None || O.GoalNav == None)
+        return;
+
+    ReleaseSquadSlots(GroupIdx, "Resample");
+
+    LeaderLoc = Ldr.Pawn.Location;
+
+    N = 0;
+    for (i = 0; i < Fireteams[GroupIdx].Members.Length; i++)
+    {
+        if (Fireteams[GroupIdx].Members[i] == None)
+            continue;
+        if (Fireteams[GroupIdx].Members[i] == Ldr)
+            continue;
+        N++;
+    }
+    if (N > 4)
+        N = 4;
+    if (N <= 0)
+        return;
+
+    O.Slots.Length = 0;
+    O.SlotLocs.Length = 0;
+
+    R0 = 96.0;
+    for (i = 0; i < N; i++)
+    {
+        Angle = O.SquadSeedAngle + (float(i) * 6.2831855 / float(N));
+        Candidate.X = O.GoalPoint.X + Cos(Angle) * R0;
+        Candidate.Y = O.GoalPoint.Y + Sin(Angle) * R0;
+        Candidate.Z = O.GoalPoint.Z;
+        Candidates.AddItem(Candidate);
+        bAlive.AddItem(true);
+    }
+
+    // SDK-UNVERIFIED: EncompassesPoint not separately verified in SDK index
+    for (i = 0; i < N; i++)
+    {
+        if (O.Zone != None && !O.Zone.EncompassesPoint(Candidates[i]))
+        {
+            bAlive[i] = false;
+        }
+        if (Abs(Candidates[i].Z - LeaderLoc.Z) >= 50.0)
+        {
+            bAlive[i] = false;
+        }
+    }
+
+    BestDist = 0.0;
+    while (true)
+    {
+        BestIdx = INDEX_NONE;
+        for (i = 0; i < N; i++)
+        {
+            if (!bAlive[i])
+                continue;
+            DMin = VSize(Candidates[i] - O.GoalPoint);
+            for (j = 0; j < O.SlotLocs.Length; j++)
+            {
+                Dist = VSize(Candidates[i] - O.SlotLocs[j]);
+                if (Dist < DMin)
+                    DMin = Dist;
+            }
+            if (BestIdx == INDEX_NONE || DMin > BestDist)
+            {
+                BestDist = DMin;
+                BestIdx = i;
+            }
+        }
+        if (BestIdx == INDEX_NONE)
+            break;
+        if (BestIdx >= O.SlotLocs.Length)
+        {
+            O.SlotLocs.Length = BestIdx + 1;
+        }
+        O.SlotLocs[BestIdx] = Candidates[BestIdx];
+        O.Slots.AddItem(BestIdx);
+        bAlive[BestIdx] = false;
+        BestDist = 0.0;
+    }
+    SquadOrders[GroupIdx] = O;
+
+    for (j = 0; j < O.Slots.Length; j++)
+    {
+        M = GetFollowerBySlot(GroupIdx, O.Slots[j]);
+        if (M == None)
+            continue;
+        EchelonLog("SLOT_CLAIM bot=" $ string(M.Name) $ " squad=" $ string(GroupIdx + 1) $ " slot=" $ string(O.Slots[j]) $ " angle=" $ string(Atan2(Candidates[O.Slots[j]].Y - O.GoalPoint.Y, Candidates[O.Slots[j]].X - O.GoalPoint.X) * 57.2957795) $ " dist=" $ string(VSize(Candidates[O.Slots[j]] - O.GoalPoint)));
+    }
 }
 
 // @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.ReleaseSquadSlots
