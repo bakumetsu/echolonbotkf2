@@ -99,54 +99,102 @@ var Actor FollowNode;
 var float FollowWaitTime;
 var EFollowStatus FollowStatus;
 
-// @STUB(M2) @SYS-NAV-EPISODE legacy:KF2BotsFollowNavBase.FollowStart
 function FollowStart(Controller NewLeaderCtrl)
 {
+    FollowSetLeader(NewLeaderCtrl);
+
+    if (bEnableAdvancedLocomotion)
+    {
+        GotoState('FollowingLeader');
+    }
+    else
+    {
+        GotoState('FollowingLeaderBasic');
+    }
 }
 
-// @STUB(M2) @SYS-NAV-EPISODE legacy:KF2BotsFollowNavBase.FollowSetLeader
 function FollowSetLeader(Controller NewLeaderCtrl)
 {
+    FollowLeaderCtrl = NewLeaderCtrl;
+    FollowLeaderPawn = None;
+    FollowLeaderInvalidSince = 0.0;
+    bFollowArrived = false;
+    FollowResetEpisode();
 }
 
-// @STUB(M2) @SYS-NAV-EPISODE legacy:KF2BotsFollowNavBase.FollowSetSlot
 function FollowSetSlot(int NewSlotIndex, int NewSlotCount)
 {
+	FollowSlotIndex = Max(NewSlotIndex, 0);
+	FollowSlotCount = Max(NewSlotCount, 1);
 }
 
-// @STUB(M2) @SYS-NAV-EPISODE legacy:KF2BotsFollowNavBase.FollowGetOrderAnchor
 function bool FollowGetOrderAnchor(out vector OutLoc)
 {
+    OutLoc = vect(0, 0, 0);
+    return false;
 }
 
-// @STUB(M2) @SYS-NAV-EPISODE legacy:KF2BotsFollowNavBase.FollowResetEpisode
 function FollowResetEpisode()
 {
+    FollowRetries = 0;
+    FollowBlocksThisEpisode = 0;
+    FollowSameNodeCount = 0;
+    FollowNodeLast = None;
+    FollowWallHitCount = 0;
+    FollowLastWall = None;
+    bFollowEscaping = false;
+    FollowEscapeNormal = vect(0, 0, 0);
+    FollowEscapeUntil = 0.0;
+    FollowForcePathUntil = 0.0;
+    FollowStuckRefTime = 0.0;
+    bFollowYieldPending = false;
+    bFollowYielding = false;
+    bFollowDispatchPending = false;
+    bFollowExitPending = false;
+
+    if (Pawn != None)
+    {
+        FollowRetryAnchorLoc = Pawn.Location;
+    }
+    FollowInvalidateRoute();
 }
 
-// @STUB(M2) @SYS-NAV-EPISODE legacy:KF2BotsFollowNavBase.FollowInvalidateRoute
 function FollowInvalidateRoute()
 {
+    FollowRoute.Length = 0;
+    FollowRouteIdx = 0;
+    bFollowRouteStale = true;
+    bFollowReachKnown = false;
+    FollowReachFailStreak = 0;
+    FollowNextReachCheckTime = 0.0;
 }
 
-// @STUB(M2) @SYS-NAV-EPISODE legacy:KF2BotsFollowNavBase.FollowSlotPhase
 function float FollowSlotPhase()
 {
+    return (float(FollowSlotIndex) / FMax(float(Max(FollowSlotCount, 1)), 0.0001)) * FollowWatchdogPeriod;
 }
 
-// @STUB(M2) @SYS-NAV-EPISODE legacy:KF2BotsFollowNavBase.FollowScheduleWatchdog
 function FollowScheduleWatchdog()
 {
+    local float IterDelay;
+
+    IterDelay = FollowSlotPhase() + (FRand() * FollowPhaseJitter);
+    if (IterDelay < 0.01)
+    {
+        IterDelay = 0.01;
+    }
+    SetTimer(IterDelay, false, 'FollowWatchdogBegin');
 }
 
-// @STUB(M2) @SYS-NAV-EPISODE legacy:KF2BotsFollowNavBase.FollowWatchdogBegin
 function FollowWatchdogBegin()
 {
+    SetTimer(FollowWatchdogPeriod, true, 'FollowWatchdog');
+    FollowWatchdog();
 }
 
-// @STUB(M2) @SYS-NAV-WATCHDOG legacy:KF2BotsFollowNavBase.FollowCheckExit
 function bool FollowCheckExit()
 {
+    return false;
 }
 
 // @STUB(M2) @SYS-NAV-WATCHDOG legacy:KF2BotsFollowNavBase.FollowWatchdog
