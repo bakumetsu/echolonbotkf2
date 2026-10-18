@@ -2051,9 +2051,44 @@ function EchelonLog(string Msg)
 	`log("[EcholonAudit] " $ Name $ " " $ Msg);
 }
 
-// @STUB(M5b) @SYS-BASE-AUDIT legacy:KF2BotBase.AuditRateLimit
 function bool AuditRateLimit(string Msg)
 {
+	local float IterNow;
+
+	IterNow = WorldInfo.TimeSeconds;
+	if (Left(Msg, 10) ~= "STATE_EXIT")
+	{
+		if (IterNow - AuditLastLog_STATE_EXIT < 5.0)
+		{
+			return false;
+		}
+		AuditLastLog_STATE_EXIT = IterNow;
+		return true;
+	}
+	if (Left(Msg, 4) ~= "GOAL")
+	{
+		if (IterNow - AuditLastLog_GOAL < 5.0)
+		{
+			return false;
+		}
+		AuditLastLog_GOAL = IterNow;
+		return true;
+	}
+	if (Left(Msg, 15) ~= "FOLLOWGATE_EVAL")
+	{
+		if (IterNow - AuditLastLog_FOLLOWGATE < 5.0)
+		{
+			return false;
+		}
+		AuditLastLog_FOLLOWGATE = IterNow;
+		return true;
+	}
+	if (IterNow - AuditLastLog_GEN < 5.0)
+	{
+		return false;
+	}
+	AuditLastLog_GEN = IterNow;
+	return true;
 }
 
 // @STUB(M5b) @SYS-BASE-AUDIT legacy:KF2BotBase.FollowGetOrderAnchor
