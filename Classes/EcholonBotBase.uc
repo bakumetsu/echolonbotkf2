@@ -2931,9 +2931,53 @@ final function CheckWeaponReequip()
 	}
 }
 
-// @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.ShouldThrowGrenade
 final function bool ShouldThrowGrenade(out Actor Aim, bool bFromSignal, Actor CurEnemy)
 {
+	local EcholonBot SL;
+
+	Aim = None;
+	bFromSignal = false;
+
+	if ((KFInvManager == None) || (KFInvManager.GrenadeCount <= 0) || (NextGrenadeTimer > WorldInfo.TimeSeconds))
+	{
+		return false;
+	}
+
+	if (BotRank == SQUAD_LEADER)
+	{
+		SL = EcholonBot(self);
+	}
+	else
+	{
+		SL = SquadLeader;
+	}
+
+	// (1) SL broadcast
+	if ((SL != None) && SL.GrenadeSignal && (SL.GrenadeThrowsLeft > 0) && (SL.GrenadeTargetPawn != None)
+		&& SL.GrenadeTargetPawn.IsAliveAndWell()
+		&& (VSizeSq(SL.GrenadeTargetPawn.Location - Pawn.Location) < 90000.0))
+	{
+		Aim = SL.GrenadeTargetPawn;
+		bFromSignal = true;
+		return true;
+	}
+
+	// (2) HearNoise
+	if ((CurEnemy != None) && (HearNoiseZedCount >= 2) && (WorldInfo.TimeSeconds < HearNoiseExpireTime)
+		&& (VSizeSq(LastNoiseLoc - Pawn.Location) < 160000.0))
+	{
+		Aim = CurEnemy;
+		return true;
+	}
+
+	// (3) self-preservation
+	if ((CurEnemy != None) && (Pawn.Health < (Pawn.HealthMax * 0.3)) && (CountNearbyZedsCached(200.0) >= 2))
+	{
+		Aim = CurEnemy;
+		return true;
+	}
+
+	return false;
 }
 
 // @STUB(M5b) @SYS-BASE-WEAPON legacy:KF2BotBase.TryThrowGrenade
