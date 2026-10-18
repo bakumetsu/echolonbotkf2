@@ -3,171 +3,865 @@ class EcholonBot extends EcholonBotLogic hidecategories(Navigation);
 // @STUB(M6) @SYS-BOT-HUB legacy:KF2Bot.PickNextMove
 state PickNextMove
 {
-    // @STUB(M6) @SYS-BOT-HUB legacy:KF2Bot.PickNextMove.BeginState
     event BeginState(Name PreviousStateName)
     {
+        AuditStateEntry();
+        `log("EcholonBot: Entered PickNextMove from " $ PreviousStateName);
     }
 
-    // @STUB(M6) @SYS-BOT-HUB legacy:KF2Bot.PickNextMove.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
     }
 
-    // @STUB(M6) @SYS-BOT-HUB legacy:KF2Bot.PickNextMove.PickMove
     function PickMove()
     {
+        local bool bHasAmmo;
+        local float RegroupElapsed;
+        local int RegroupMyIdx, RegroupTargetIdx, RegroupMySize, RegroupTargetSize, ZedNearLeader;
+        local Controller RegroupAttach;
+        local EcholonBot RegroupAttachBot, RegroupHoldLeader;
+
+        // Priority 1: Match Ended
+        if (bInTerminalState)
+        {
+            GotoState('VictoryDance');
+            return;
+        }
+        if (mut != None && mut.KF != None && mut.KF.MyKFGRI != None && mut.KF.MyKFGRI.bMatchIsOver)
+        {
+            GotoState('VictoryDance');
+            return;
+        }
+
+        // Priority 3: Critical Survival
+        if (KPawn != None && CheckShouldSelfHeal())
+        {
+            GotoState('HealingSelf');
+            return;
+        }
+
+        // Priority 4: Tactical Retreat
+        if (bIsGroupLeader && KPawn != None && !bIsRetreating && ShouldTacticalRetreat())
+        {
+            bIsRetreating = true;
+            GotoState('TacticalRetreat');
+            return;
+        }
+
+        // Priority 4.5: Regroup
+        if (mut != None && mut.GetSquadPhase(self) == mut.PHASE_REGROUP
+            && !IsInState('FollowingLeader') && !IsInState('FollowingLeaderBasic'))
+        {
+            RegroupElapsed = WorldInfo.TimeSeconds - mut.GetSquadStartTime(self);
+            if (RegroupElapsed < REGROUP_HARD_TIMEOUT && Pawn != None)
+            {
+                if (RegroupElapsed < REGROUP_DURATION
+                    && KFGRI.bTraderIsOpen && NextShoppingTime < WorldInfo.TimeSeconds && KFGRI.OpenedTrader != None)
+                {
+                    EchelonLog("REGROUP_SHOP bot=" $ Name $ " src=PickMove");
+                    GotoState('GoShopping');
+                    return;
+                }
+                if (RegroupElapsed < REGROUP_DURATION
+                    && GlobalZedCount > 0 && GlobalZedCount != 15 && GlobalZedCount <= 30)
+                {
+                    EchelonLog("REGROUP_HUNT bot=" $ Name $ " zeds=" $ string(GlobalZedCount));
+                    GotoState('Hunting');
+                    return;
+                }
+                if (GlobalZedCount <= 30)
+                {
+                    if (bIsGroupLeader && !mut.HasSquadGoal(self))
+                    {
+                        ZedNearLeader = mut.CountZedsInRadius(Pawn.Location, mut.REGROUP_SCAN_RADIUS);
+                        if (ZedNearLeader == 0)
+                        {
+                            RegroupMyIdx = GroupID - 1;
+                            RegroupAttach = mut.FindNearestActiveLeader(self, AUDIT_ATTACH_RADIUS);
+                            RegroupAttachBot = EcholonBot(RegroupAttach);
+                            if (RegroupAttachBot != None && RegroupAttachBot.GroupID - 1 != RegroupMyIdx)
+                            {
+                                RegroupTargetIdx = RegroupAttachBot.GroupID - 1;
+                                RegroupMySize = mut.GetGroupSize(GroupID);
+                                RegroupTargetSize = mut.GetGroupSize(RegroupAttachBot.GroupID);
+                                if (RegroupMySize > RegroupTargetSize
+                                    && mut.GetSquadPhase(RegroupAttachBot) == mut.PHASE_REGROUP)
+                                {
+                                    mut.MoveSquadMembers(RegroupTargetIdx, RegroupMyIdx);
+                                }
+                                else
+                                {
+                                    mut.MoveSquadMembers(RegroupMyIdx, RegroupTargetIdx);
+                                }
+                                EchelonLog("REGROUP_ATTACH bot=" $ Name $ " target=" $ string(RegroupTargetIdx + 1) $ " size=" $ string(RegroupMySize));
+                                if (!bIsGroupLeader && SquadLeader != None && SquadLeader.Pawn != None)
+                                {
+                                    FollowStart(SquadLeader);
+                                    return;
+                                }
+                            }
+                            else if (RegroupAttach != None && RegroupAttach.PlayerReplicationInfo != None)
+                            {
+                                EchelonLog("REGROUP_ATTACH bot=" $ Name $ " human=" $ string(RegroupAttach.PlayerReplicationInfo.Name));
+                                FollowStart(RegroupAttach);
+                                return;
+                            }
+                        }
+                    }
+                    RegroupHoldLeader = SquadLeader;
+                    if (!bIsGroupLeader && RegroupHoldLeader != None && RegroupHoldLeader.Pawn != None
+                        && VSizeSq(RegroupHoldLeader.Pawn.Location - Pawn.Location) > REGROUP_HOLD_DIST_SQ)
+                    {
+                        EchelonLog("REGROUP_HOLD bot=" $ Name $ " toLeader");
+                        FollowStart(RegroupHoldLeader);
+                        return;
+                    }
+                }
+                if (bIsGroupLeader)
+                {
+                    ExecuteCampState();
+                    return;
+                }
+            }
+        }
+
+        // Priority 5: SYG Enforcement
+        if (mut.bObjectiveActive)
+        {
+            bHasAmmo = (Pawn != None) && (Pawn.Weapon != None)
+                && (KFWeapon(Pawn.Weapon).GetTotalAmmoAmount(0) > 0);
+            if (ObjectiveGoal == None)
+            {
+                if (bHasAmmo)
+                {
+                    ObjectiveGoal = mut.GetBotObjective(self);
+                    ObjectiveBailUntil = 0.0;
+                    AuditGoalLog("GOAL_SET", "PickMove");
+                }
+            }
+            if (ObjectiveGoal != None && bHasAmmo && VSizeSq(ObjectiveGoal.Location - Pawn.Location) > SYG_DISTANCE_SQ
+                && WorldInfo.TimeSeconds >= ObjectiveBailUntil)
+            {
+                GotoState('DoObjective');
+                return;
+            }
+        }
+
+        // Priority 6: Squad Medic (Triage)
+        if (KPawn != None && WorldInfo.TimeSeconds - LastTriageTime >= TRIAGE_INTERVAL)
+        {
+            LastTriageTime = WorldInfo.TimeSeconds;
+            if (CheckMedicGunHeal())
+            {
+                GotoState('HealRanged');
+                return;
+            }
+            if (CheckShouldHealMate())
+            {
+                GotoState('HealOther');
+                return;
+            }
+        }
+
+        // Priority 7: Combat Engagement
+        if (Enemy != None && Enemy.IsAliveAndWell() && !(KFPawn_Monster(Enemy) != None && KFPawn_Monster(Enemy).bIsHeadless))
+        {
+            if (VSizeSq(Enemy.Location - Pawn.Location) > LEASH_DROP_DIST_SQ)
+            {
+                Enemy = None;
+                LastLeashDropTime = WorldInfo.TimeSeconds;
+            }
+            else if (LineOfSightTo(Enemy))
+            {
+                GotoState('FightEnemy');
+                return;
+            }
+            else
+            {
+                GotoState('Hunting');
+                return;
+            }
+        }
+
+        // Priority 8: Squad Tethering
+        if (EvaluateSquadTether())
+        {
+            return;
+        }
+
+        // Priority 8.5: Low zed count
+        if (Enemy == None && GlobalZedCount > 0 && GlobalZedCount < HUNT_ZED_THRESHOLD)
+        {
+            GotoState('Hunting');
+            return;
+        }
+
+        // Priority 9: Economy
+        if (KFGRI.bTraderIsOpen && NextShoppingTime < WorldInfo.TimeSeconds && KFGRI.OpenedTrader != None)
+        {
+            GotoState('GoShopping');
+            return;
+        }
+
+        // Priority 10: Camp
+        ExecuteCampState();
     }
 
 Begin:
+    Sleep(0.0);
+    PickMove();
     Stop;
 }
 
 // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming
 state Roaming
 {
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming.BeginState
     event BeginState(name PreviousStateName)
     {
+        local KFWeapon MW;
+
+        AuditStateEntry();
+        AbortMove();
+
+        if (KPawn != None)
+        {
+            KPawn.SetSprinting(!bIsGroupLeader);
+
+            if (KFGRI != None && KFGRI.bTraderIsOpen && Pawn.Weapon != None && !Pawn.Weapon.bMeleeWeapon)
+            {
+                foreach Pawn.InvManager.InventoryActors(class'KFWeapon', MW)
+                {
+                    if (MW != None && MW.bMeleeWeapon)
+                    {
+                        Pawn.InvManager.SetCurrentWeapon(MW);
+                        break;
+                    }
+                }
+            }
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
+
+        if (KPawn != None)
+        {
+            KPawn.SetSprinting(false);
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming.PickStyle
     function PickStyle()
     {
+        local EcholonBot GroupLeader;
+
+        if (PlayStyle == 0 && KPawn != None)
+        {
+            if (mut != None)
+            {
+                GroupLeader = mut.GetGroupLeader(GroupID);
+            }
+            else
+            {
+                GroupLeader = None;
+            }
+
+            if (!bIsGroupLeader && GroupLeader != None && GroupLeader.Pawn != None)
+            {
+                if (VSizeSq(GroupLeader.Pawn.Location - Pawn.Location) > 360000.0)
+                {
+                    if (ActorReachable(GroupLeader.Pawn))
+                    {
+                        MoveToX(GetPointNear(GroupLeader.Pawn, 600.0));
+                        return;
+                    }
+                    if (BuildPathToward(GroupLeader.Pawn))
+                    {
+                        MoveTowardX(MoveTarget);
+                        return;
+                    }
+                }
+                else
+                {
+                    if (Rand(3) == 0)
+                    {
+                        MoveToX(GetPointNear(GroupLeader.Pawn, 600.0));
+                    }
+                    else
+                    {
+                        Focus = None;
+                        SetFocalPoint(Pawn.Location + (VRand() * 1000.0));
+                    }
+                    return;
+                }
+            }
+        }
+        else
+        {
+            if (FollowingHuman != None)
+            {
+                if (!FollowingHuman.IsAliveAndWell())
+                {
+                    FollowingHuman = None;
+                }
+                else
+                {
+                    if (VSizeSq(FollowingHuman.Location - Pawn.Location) > 360000.0)
+                    {
+                        if (ActorReachable(FollowingHuman))
+                        {
+                            MoveToX(GetPointNear(FollowingHuman, 600.0));
+                            return;
+                        }
+                        if (BuildPathToward(FollowingHuman))
+                        {
+                            MoveTowardX(MoveTarget);
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        if (Rand(3) == 0)
+                        {
+                            MoveToX(GetPointNear(FollowingHuman, 600.0));
+                        }
+                        else
+                        {
+                            Focus = None;
+                            SetFocalPoint(Pawn.Location + (VRand() * 1000.0));
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+
+        if (RandGoal == None && !BuildRandomPath())
+        {
+            MoveToX(Pawn.Location + (VRand() * 300.0));
+            return;
+        }
+
+        if (ActorReachable(RandGoal))
+        {
+            MoveTowardX(RandGoal);
+            RandGoal = None;
+            return;
+        }
+
+        if (!BuildPathToward(RandGoal))
+        {
+            RandGoal = None;
+            MoveToX(Pawn.Location + (VRand() * 300.0));
+            return;
+        }
+
+        MoveTowardX(MoveTarget);
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming.FinishedMove
     function FinishedMove()
     {
+    	PickCombatStyle();
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming.EnemyChanged
     function EnemyChanged()
     {
+        PickCombatStyle();
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming.DonateMoney
     function DonateMoney(Pawn Other)
     {
+        if (ActorReachable(Other))
+        {
+            DonateHuman = Other;
+            GotoState('DonatingMoney');
+        }
     }
 
 Begin:
+    if(Pawn.Physics == 2)
+    {
+        WaitForLanding(2.0);
+    }
+    PickStyle();
     Stop;
+
 Camp:
+    Sleep(0.5 + FRand());
+    PickCombatStyle();
     Stop;
 }
 
 // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Camp
 state Camp
 {
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Camp.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        AbortMove();
+        if (KPawn != None)
+        {
+            KPawn.SetSprinting(false);
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Camp.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Camp.EnemyChanged
     function EnemyChanged()
     {
+        PickCombatStyle();
     }
 
 Begin:
+    if (Pawn.Physics == 2)
+    {
+        WaitForLanding(2.0);
+    }
+    Focus = None;
+    SetFocalPoint(Pawn.Location + (VRand() * 1000.0));
+    Sleep(1.0 + FRand());
+    PickCombatStyle();
     Stop;
 }
 
 // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.DoObjective
 state DoObjective extends Roaming
 {
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.DoObjective.FinishObjective
     function FinishObjective()
     {
+        global.FinishObjective();
+        PickCombatStyle();
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.DoObjective.PickStyle
     function PickStyle()
     {
+        local bool IterGoalReachable;
+
+        IterGoalReachable = false;
+
+        if (CheckObjectiveHazard())
+        {
+            return;
+        }
+
+        if (ObjectiveGoal == None)
+        {
+            ObjectiveGoal = mut.GetBotObjective(self);
+            ObjectiveBailUntil = 0.0;
+            AuditGoalLog("GOAL_SET", "DoObjectivePick");
+        }
+
+        if (ObjectiveGoal == None)
+        {
+            PickCombatStyle();
+            return;
+        }
+
+        if (mut != None && mut.IsNodeBlocked(self, ObjectiveGoal))
+        {
+            PickCombatStyle();
+            return;
+        }
+
+        if (VSizeSq(ObjectiveGoal.Location - Pawn.Location) > 90000.0)
+        {
+            if (ActorReachable(ObjectiveGoal))
+            {
+                IterGoalReachable = true;
+                MoveTowardX(ObjectiveGoal);
+                return;
+            }
+            if (BuildPathToward(ObjectiveGoal))
+            {
+                IterGoalReachable = true;
+                MoveTowardX(MoveTarget);
+                return;
+            }
+        }
+        else
+        {
+            Focus = None;
+            SetFocalPoint(Pawn.Location + (VRand() * 1000.0));
+            return;
+        }
+
+        if (!IterGoalReachable && VSizeSq(ObjectiveGoal.Location - Pawn.Location) > 90000.0)
+        {
+            if (WorldInfo.TimeSeconds < ObjectiveBailUntil)
+            {
+                PickCombatStyle();
+                return;
+            }
+            ObjectiveBailUntil = WorldInfo.TimeSeconds + OBJ_BAIL_COOLDOWN;
+            if (mut != None && ObjectiveGoal != None
+                && WorldInfo.TimeSeconds - LastNodeBlockTime >= 2.0
+                && NodeBlockCount < 2)
+            {
+                mut.AddNodeBlock(self, ObjectiveGoal);
+                LastNodeBlockTime = WorldInfo.TimeSeconds;
+                NodeBlockCount++;
+                EchelonLog("NODE_BLOCK bot=" $ Name $ " node=(" $ string(FFloor(ObjectiveGoal.Location.X / 100.0)) $ "," $ string(FFloor(ObjectiveGoal.Location.Y / 100.0)) $ "," $ string(FFloor(ObjectiveGoal.Location.Z / 100.0)) $ ") reason=pathfail ttl=8s");
+            }
+            EchelonLog("DoObjective: objective unreachable, bailing to combat (slot=" $ string(FollowSlotIndex) $ ")");
+            PickCombatStyle();
+            return;
+        }
+
+        if (RandGoal == None && !BuildRandomPath())
+        {
+            MoveToX(Pawn.Location + (VRand() * 300.0));
+            return;
+        }
+        if (ActorReachable(RandGoal))
+        {
+            MoveTowardX(RandGoal);
+            RandGoal = None;
+            return;
+        }
+        if (!BuildPathToward(RandGoal))
+        {
+            RandGoal = None;
+            MoveToX(Pawn.Location + (VRand() * 300.0));
+            return;
+        }
+        MoveTowardX(MoveTarget);
     }
 }
 
 // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy
 state FightEnemy
 {
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        AbortMove();
+        SetTimer(0.2, true, 'Timer');
+        Focus = Enemy;
+        Timer();
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
+        SetTimer(0.0, false);
+        ClearTimer('FinishedMove');
+        if (Pawn != None)
+        {
+            Pawn.ShouldCrouch(false);
+            Pawn.StopFiring();
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.Timer
     event Timer()
     {
+        if (Enemy == none)
+        {
+            return;
+        }
+        if (!Enemy.IsAliveAndWell() && !PickNextEnemy())
+        {
+            if (Pawn != none)
+            {
+                Pawn.StopFiring();
+            }
+            Enemy = none;
+            AbortMove();
+            CheckWeaponReequip();
+            FinishedMove();
+            return;
+        }
+        if (Enemy != none && KFPawn_Monster(Enemy) != none && KFPawn_Monster(Enemy).bIsHeadless)
+        {
+            if (Pawn != none)
+            {
+                Pawn.StopFiring();
+            }
+            Enemy = none;
+            AbortMove();
+            CheckWeaponReequip();
+            FinishedMove();
+            return;
+        }
+        if (SyncLineFocus())
+        {
+            return;
+        }
+        CheckWeaponReequip();
+        EnemyEncounterTime = WorldInfo.TimeSeconds;
+        Focus = Enemy;
+        if (!HasOwnFireLine(Enemy))
+        {
+            Pawn.StopFiring();
+            if (BotRank == GRUNT && SquadLeader != none && SquadLeader.CurrentFormation == 'LineFormation')
+            {
+                SquadLeader.NotifyBlockedShooter(self);
+            }
+            return;
+        }
+        FireWeaponAt(Enemy);
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.NotifyKilled
     function NotifyKilled(Controller Killer, Controller Killed, Pawn KilledPawn, Class<DamageType> damageTyp)
     {
+        if (KFPawn_MonsterBoss(KilledPawn) != None)
+        {
+            Enemy = None;
+            bBossKillVictory = true;
+            GotoState('VictoryDance');
+            return;
+        }
+
+        if (Enemy == KilledPawn)
+        {
+            if (!PickNextEnemy())
+            {
+                Enemy = None;
+                AbortMove();
+                if ((Killer == self) && (NextVictoryDance < WorldInfo.TimeSeconds) && (Rand(3) == 0) && mut.ShouldDoVictoryDance())
+                {
+                    GotoState('VictoryDance');
+                    return;
+                }
+                FinishedMove();
+            }
+            else
+            {
+                Focus = Enemy;
+                Target = Enemy;
+            }
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.FinishedMove
     function FinishedMove()
     {
+        Pawn.ShouldCrouch(false);
+        PickCombatStyle();
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.PickStyle
     function PickStyle()
     {
+        local bool bMelee;
+        local EcholonBot GroupLeader;
+        local float RetreatDistSq;
+
+        if (BotRank == GRUNT)
+        {
+            GruntPickCombatStyle();
+            return;
+        }
+
+        if (mut.bObjectiveActive)
+        {
+            if (ObjectiveGoal == None)
+            {
+                ObjectiveGoal = mut.GetBotObjective(self);
+                AuditGoalLog("GOAL_SET", "PickCombatStyle");
+            }
+            if (ObjectiveGoal != None && VSizeSq(ObjectiveGoal.Location - Pawn.Location) > 640000.0)
+            {
+                if (ActorReachable(ObjectiveGoal))
+                {
+                    MoveTowardX(ObjectiveGoal);
+                    return;
+                }
+                if (BuildPathToward(ObjectiveGoal))
+                {
+                    MoveTowardX(MoveTarget);
+                    return;
+                }
+            }
+        }
+
+        if (mut != None)
+        {
+            GroupLeader = mut.GetGroupLeader(GroupID);
+        }
+        else
+        {
+            GroupLeader = None;
+        }
+
+        if ((!bIsGroupLeader) && GroupLeader != None && GroupLeader.Pawn != None && VSizeSq(GroupLeader.Pawn.Location - Pawn.Location) > 2250000.0)
+        {
+            if (BuildPathToward(GroupLeader.Pawn))
+            {
+                MoveTowardX(MoveTarget, Enemy);
+                return;
+            }
+        }
+        else
+        {
+            if ((FollowingHuman != None) && VSizeSq(FollowingHuman.Location - Pawn.Location) > 2250000.0)
+            {
+                if (BuildPathToward(FollowingHuman))
+                {
+                    MoveTowardX(MoveTarget, Enemy);
+                    return;
+                }
+            }
+        }
+
+        bMelee = IsMeleeOnly();
+
+        if (bOutOfEffectiveRange && !bMelee)
+        {
+            CloseToEffectiveRange();
+            return;
+        }
+
+        if (bMelee && Enemy.Health > BOSS_HEALTH_THRESHOLD)
+        {
+            Enemy = None;
+            PickCombatStyle();
+            return;
+        }
+
+        if (Enemy.Health > 500)
+        {
+            RetreatDistSq = 250000.0;
+        }
+        else
+        {
+            RetreatDistSq = 14400.0;
+        }
+
+        if ((((KPawn != None) || !bMelee) && !bMelee || (Vector(Enemy.Rotation) Dot (Enemy.Location - Pawn.Location)) < 0.0) && VSizeSq(Enemy.Location - Pawn.Location) < RetreatDistSq)
+        {
+            PickRetreatMove();
+        }
+        else
+        {
+            if (bMelee)
+            {
+                if (Pawn.Weapon != None && VSizeSq(Enemy.Location - Pawn.Location) < 40000.0)
+                {
+                    Pawn.Weapon.StartFire(0);
+                }
+                if (ActorReachable(Enemy))
+                {
+                    MoveTowardX(Enemy);
+                }
+                else
+                {
+                    if (BuildPathToward(Enemy))
+                    {
+                        MoveTowardX(MoveTarget, Enemy);
+                    }
+                    else
+                    {
+                        MoveToX((Normal(Enemy.Location - Pawn.Location) * 150.0) + Pawn.Location + (VRand() * 200.0), Enemy);
+                    }
+                }
+            }
+            else
+            {
+                if (Rand(2) == 0)
+                {
+                    MoveToX(Pawn.Location + (VRand() * 300.0), Enemy);
+                }
+                else
+                {
+                    Pawn.ShouldCrouch(Rand(2) == 0);
+                    SetTimer(0.5 + (FRand() * 1.5), false, 'FinishedMove');
+                }
+            }
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.NotifyBump
     event bool NotifyBump(Actor Other, Vector HitNormal)
     {
+        global.NotifyBump(Other, HitNormal);
+
+        if (Other == Enemy && MoveTarget == Enemy)
+        {
+            if ((Vector(Enemy.Rotation) Dot (Enemy.Location - Pawn.Location)) < 0.0)
+            {
+                FinishedMove();
+            }
+            else
+            {
+                MoveTarget = None;
+                AbortMove();
+                SetTimer(0.2 + (FRand() * 0.75), false, 'FinishedMove');
+            }
+        }
+
+        return false;
     }
 
 Begin:
+    if (Pawn.Physics == PHYS_Falling)
+    {
+        WaitForLanding(2.0);  // W4: bounded, as in the other states
+    }
+    PickStyle();
     Stop;
 }
 
 // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.TacticalRetreat
 state TacticalRetreat
 {
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.TacticalRetreat.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        AbortMove();
+        bIsRetreating = true;
+        if (KPawn != None)
+        {
+            KPawn.SetSprinting(true);
+        }
+        SetTimer(ZED_COUNT_INTERVAL, true, 'CheckRetreatStatus');
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.TacticalRetreat.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
+        ClearTimer('CheckRetreatStatus');
+        bIsRetreating = false;
+        if (KPawn != None)
+        {
+            KPawn.SetSprinting(false);
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.TacticalRetreat.CheckRetreatStatus
     function CheckRetreatStatus()
     {
+        if (Pawn == None || Pawn.Health <= 0)
+        {
+            return;
+        }
+
+        if (CountNearbyZeds(RETREAT_ZED_RADIUS) < RETREAT_ZED_CLEAR_COUNT && !HeavyZedWithin(RETREAT_HEAVY_RADIUS))
+        {
+            bIsRetreating = false;
+            PickCombatStyle();
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.TacticalRetreat.FinishedMove
     function FinishedMove()
     {
+        if (bIsRetreating)
+        {
+            PickRetreatMove();
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.TacticalRetreat.EnemyChanged
     function EnemyChanged()
     {
+        // Deliberately ignored -- P4 overrides P7: a newly spotted Zed must
+        // not interrupt an active retreat.
     }
 
 Begin:
+    if (Pawn.Physics == 2)
+    {
+        WaitForLanding(2.0);
+    }
+    PickRetreatMove();
     Stop;
 }
 
@@ -176,56 +870,202 @@ state BreakLose
 {
     ignores CheckGrabbed;
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.BreakLose.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        AbortMove();
+        BreakFreeAttempts = 0;
+        GrabStartTime = WorldInfo.TimeSeconds;
+        NextEscapeAttempt = 0.0;
+        bGrappleFailsafeTriggered = false;
+        SetTimer(0.15, true, 'Timer');
+        Focus = KPawn.InteractionPawn;
+
+        if (BotRank == GRUNT && SquadLeader != None)
+        {
+            SquadLeader.OnGruntGrabbed(self);
+        }
+
+        if (mut != None && mut.bDebugGrapple)
+        {
+            mut.DebugMessage(GetHumanReadableName() $ " grabbed - attempting to break free.");
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.BreakLose.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
+        SetTimer(0.0, false);
+        if (Pawn != None)
+        {
+            Pawn.StopFiring();
+        }
+        OnBreakLoseComplete();
+        if (((mut != None) && mut.bDebugGrapple) && (Pawn != None) && (Pawn.IsAliveAndWell() && ((KPawn == None) || !KPawn.IsDoingSpecialMove(31))))
+        {
+            mut.DebugMessage(GetHumanReadableName() $ " broke free after " $ string(BreakFreeAttempts) $ " attempt(s), " $ string(int(WorldInfo.TimeSeconds - GrabStartTime)) $ "s.");
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.BreakLose.Timer
     function Timer()
     {
+        local int NearbyZeds;
+
+        if( (KPawn != None) && (KPawn.Health > 0) && KPawn.IsDoingSpecialMove(31) && (KPawn.InteractionPawn != None) )
+        {
+            Focus = KPawn.InteractionPawn;
+
+            if( WorldInfo.TimeSeconds >= NextEscapeAttempt )
+            {
+                NextEscapeAttempt = WorldInfo.TimeSeconds + 1.5;
+                BreakFreeAttempts++;
+                TryBreakFree();
+                if( (mut != None) && mut.bDebugGrapple )
+                {
+                    mut.DebugMessage( GetHumanReadableName() $ " struggling free (attempt " $ string(BreakFreeAttempts) $ ")" );
+                }
+            }
+
+            if( (mut != None) && !bGrappleFailsafeTriggered && (WorldInfo.TimeSeconds - GrabStartTime) >= mut.FailsafeActivationDelay )
+            {
+                NearbyZeds = CountNearbyZeds(600.0);
+                if( NearbyZeds <= mut.MaxZedsForFailsafe )
+                {
+                    bGrappleFailsafeTriggered = true;
+                    ForceBreakGrapple();
+                }
+            }
+        }
+        else
+        {
+            PickCombatStyle();
+        }
     }
 }
 
 // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting
 state Hunting
 {
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        AbortMove();
+        if (KPawn != None)
+        {
+            KPawn.SetSprinting(true);
+        }
+        SetTimer(0.25, true);
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
+        SetTimer(0.0, false);
+        if (KPawn != None)
+        {
+            KPawn.SetSprinting(false);
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting.PickStyle
     function PickStyle()
     {
+        local EcholonBot GroupLeader;
+
+        GroupLeader = None;
+        if (mut != None)
+        {
+            GroupLeader = mut.GetGroupLeader(GroupID);
+        }
+
+        if (!bIsGroupLeader && GroupLeader != None && GroupLeader.Pawn != None && VSizeSq(GroupLeader.Pawn.Location - Pawn.Location) > 810000.0)
+        {
+            Enemy = None;
+        }
+        else
+        {
+            if (FollowingHuman != None && VSizeSq(FollowingHuman.Location - Pawn.Location) > 810000.0)
+            {
+                Enemy = None;
+            }
+        }
+
+        if (Enemy == None || !Enemy.IsAliveAndWell())
+        {
+            PickCombatStyle();
+            return;
+        }
+
+        if (!BuildPathToward(Enemy))
+        {
+            Enemy = None;
+            PickCombatStyle();
+        }
+        else
+        {
+            MoveTowardX(MoveTarget, Enemy);
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting.FinishedMove
     function FinishedMove()
     {
+        PickCombatStyle();
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting.EnemyChanged
     function EnemyChanged()
     {
+        PickCombatStyle();
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting.Timer
     function Timer()
     {
+        local KFPawn_Monster BestZed;
+        local float BestDist;
+
+        BestZed = None;
+        BestDist = 999999.0;
+
+        foreach WorldInfo.AllPawns(class'KFPawn_Monster', BestZed, Pawn.Location, HUNT_SCAN_RADIUS)
+        {
+            if (!BestZed.IsAliveAndWell())
+            {
+                continue;
+            }
+            if (BestZed.GetTeamNum() == GetTeamNum())
+            {
+                continue;
+            }
+            if (!FastTrace(BestZed.Location, Pawn.Location))
+            {
+                continue;
+            }
+            if (VSizeSq(BestZed.Location - Pawn.Location) < BestDist)
+            {
+                BestDist = VSizeSq(BestZed.Location - Pawn.Location);
+            }
+        }
+
+        if (BestZed != None)
+        {
+            SetEnemy(BestZed);
+            BuildPathToward(Enemy);
+            MoveTowardX(MoveTarget, Enemy);
+        }
+        else if ((Enemy == None) || !Enemy.IsAliveAndWell())
+        {
+            PickCombatStyle();
+        }
+        else if (LineOfSightTo(Enemy))
+        {
+            PickCombatStyle();
+        }
     }
 
 Begin:
+    if (Pawn.Physics == 2)
+    {
+        WaitForLanding(2.0);
+    }
+    PickStyle();
     Stop;
 }
 
@@ -234,27 +1074,96 @@ state HealingSelf
 {
     ignores FinishedMove;
 
-    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealingSelf.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        AbortMove();
     }
 
-    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealingSelf.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
+        ClearTimer('HealFailsafe');
+        ClearTimer('VerifyWeapon');
+        PendingHeal = None;
+        if(Pawn != None)
+        {
+            Pawn.StopFiring();
+            if(KFWeap_HealerBase(Pawn.Weapon) != None)
+            {
+                Pawn.InvManager.SwitchToBestWeapon(true);
+            }
+            SetTimer(1.5, false, 'VerifyWeapon');
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealingSelf.TimeOut
     function TimeOut()
     {
+        HealFail();
+        PickCombatStyle();
     }
 
-    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealingSelf.HealFailsafe
     function HealFailsafe()
     {
+    	HealFail();
+    	PickCombatStyle();
     }
 
 Begin:
+    if(Pawn.Physics == PHYS_Walking)
+    {
+        landingDeadline = WorldInfo.TimeSeconds + 2.0;
+        while(Pawn.Physics == PHYS_Walking && WorldInfo.TimeSeconds < landingDeadline)
+        {
+            Sleep(0.1);
+        }
+    }
+    SetTimer(8.0, false, 'HealFailsafe');
+
+    if((KPawn == None) || KPawn.Health <= 0)
+    {
+        HealFail();
+        PickCombatStyle();
+        Stop;
+    }
+
+    if(!CanAffordHeal(0))
+    {
+        HealFail();
+        PickCombatStyle();
+        Stop;
+    }
+
+    equipDeadline = WorldInfo.TimeSeconds + 3.0;
+    while(Pawn.Weapon != MedicGun && WorldInfo.TimeSeconds < equipDeadline)
+    {
+        Pawn.InvManager.SetCurrentWeapon(MedicGun);
+        Sleep(0.1);
+    }
+    if(Pawn.Weapon != MedicGun)
+    {
+        HealFail();
+        PickCombatStyle();
+        Stop;
+    }
+
+    Focus = Pawn;
+
+    MedicGun.AmmoCount[0] -= 100;
+    MedicGun.PerformReload();
+    MedicGun.PlayAnimation('Heal_Self');
+    KPawn.HealthToRegen += 20;
+    Sleep(FMin(FMax(MedicGun.MySkelMesh.GetAnimInterruptTime('Heal_Self'), 0.1), 3.0));
+
+    if(KPawn.Health + KPawn.HealthToRegen > KPawn.HealthMax)
+    {
+        KPawn.HealthToRegen = KPawn.HealthMax - KPawn.Health;
+    }
+    KPawn.SetTimer(KPawn.HealthRegenRate, true, 'GiveHealthOverTime');
+    KPawn.PlayHeal(class'KFDT_Healing');
+
+    HealSuccess();
+    PickCombatStyle();
     Stop;
 }
 
@@ -263,27 +1172,115 @@ state HealOther
 {
     ignores FinishedMove;
 
-    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealOther.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        AbortMove();
     }
 
-    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealOther.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
+        ClearTimer('HealFailsafe');
+        ClearTimer('VerifyWeapon');
+        PendingHeal = None;
+        if(Pawn != None)
+        {
+            Pawn.StopFiring();
+            if(KFWeap_HealerBase(Pawn.Weapon) != None)
+            {
+                Pawn.InvManager.SwitchToBestWeapon(true);
+            }
+            SetTimer(1.5, false, 'VerifyWeapon');
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealOther.TimeOut
     function TimeOut()
     {
+        HealFail();
+        PickCombatStyle();
     }
 
-    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealOther.HealFailsafe
     function HealFailsafe()
     {
+        HealFail();
+        PickCombatStyle();
     }
 
 Begin:
+    if(Pawn.Physics == PHYS_Walking)
+    {
+        landingDeadline = WorldInfo.TimeSeconds + 2.0;
+        while(Pawn.Physics == PHYS_Walking && WorldInfo.TimeSeconds < landingDeadline)
+        {
+            Sleep(0.1);
+        }
+    }
+    SetTimer(8.0, false, 'HealFailsafe');
+
+    if(PendingHeal == None)
+    {
+        HealFail();
+        PickCombatStyle();
+        Stop;
+    }
+
+    while(true)
+    {
+        if((PendingHeal == None) || !PendingHeal.IsAliveAndWell() || PendingHeal.Health >= (HEAL_MIN_NEED_PCT / 100.0) * PendingHeal.HealthMax)
+        {
+            HealFail();
+            PickCombatStyle();
+            Stop;
+        }
+        if((VSize(PendingHeal.Location - Pawn.Location) <= 200.0) && LineOfSightTo(PendingHeal))
+        {
+            break;
+        }
+        MoveTowardX(PendingHeal);
+        Sleep(0.1);
+    }
+
+    if(!CanAffordHeal(0))
+    {
+        HealFail();
+        PickCombatStyle();
+        Stop;
+    }
+    equipDeadline = WorldInfo.TimeSeconds + 3.0;
+    while(Pawn.Weapon != MedicGun && WorldInfo.TimeSeconds < equipDeadline)
+    {
+        Pawn.InvManager.SetCurrentWeapon(MedicGun);
+        Sleep(0.1);
+    }
+    if(Pawn.Weapon != MedicGun)
+    {
+        HealFail();
+        PickCombatStyle();
+        Stop;
+    }
+
+    AbortMove();
+    Pawn.Acceleration = vect(0, 0, 0);
+    Focus = PendingHeal;
+    Target = PendingHeal;
+    FinishRotation();
+
+    MedicGun.AmmoCount[0] -= 100;
+    MedicGun.PerformReload();
+    MedicGun.PlayAnimation('Heal_Team');
+    PendingHeal.HealthToRegen += 20;
+    Sleep(FMin(FMax(MedicGun.MySkelMesh.GetAnimInterruptTime('Heal_Team'), 0.1), 3.0));
+
+    if(PendingHeal.Health + PendingHeal.HealthToRegen > PendingHeal.HealthMax)
+    {
+        PendingHeal.HealthToRegen = PendingHeal.HealthMax - PendingHeal.Health;
+    }
+    PendingHeal.SetTimer(PendingHeal.HealthRegenRate, true, 'GiveHealthOverTime');
+    PendingHeal.PlayHeal(class'KFDT_Healing');
+
+    HealSuccess();
+    PickCombatStyle();
     Stop;
 }
 
@@ -292,157 +1289,452 @@ state HealRanged
 {
     ignores FinishedMove;
 
-    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealRanged.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        AbortMove();
     }
 
-    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealRanged.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
+        ClearTimer('HealFailsafe');
+        ClearTimer('VerifyWeapon');
+        PendingHeal = None;
+        if(Pawn != None)
+        {
+            Pawn.StopFiring();
+            if(KFWeap_MedicBase(Pawn.Weapon) != None)
+            {
+                Pawn.InvManager.SwitchToBestWeapon(true);
+            }
+            SetTimer(1.5, false, 'VerifyWeapon');
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealRanged.TimeOut
     function TimeOut()
     {
+        HealFail();
+        PickCombatStyle();
     }
 
-    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealRanged.HealFailsafe
     function HealFailsafe()
     {
+        HealFail();
+        PickCombatStyle();
     }
 
 Begin:
+    if(Pawn.Physics == PHYS_Walking)
+    {
+        landingDeadline = WorldInfo.TimeSeconds + 2.0;
+        while(Pawn.Physics == PHYS_Walking && WorldInfo.TimeSeconds < landingDeadline)
+        {
+            Sleep(0.1);
+        }
+    }
+    SetTimer(8.0, false, 'HealFailsafe');
+
+    if(PendingHeal == None)
+    {
+        HealFail();
+        PickCombatStyle();
+        Stop;
+    }
+
+    while(true)
+    {
+        if((PendingHeal == None) || !PendingHeal.IsAliveAndWell() || PendingHeal.Health >= (HEAL_MIN_NEED_PCT / 100.0) * PendingHeal.HealthMax)
+        {
+            HealFail();
+            PickCombatStyle();
+            Stop;
+        }
+        if((VSize(PendingHeal.Location - Pawn.Location) <= 1500.0) && LineOfSightTo(PendingHeal))
+        {
+            break;
+        }
+        MoveTowardX(PendingHeal);
+        Sleep(0.1);
+    }
+
+    if(!CanAffordHeal(1))
+    {
+        HealFail();
+        PickCombatStyle();
+        Stop;
+    }
+    equipDeadline = WorldInfo.TimeSeconds + 3.0;
+    while(Pawn.Weapon != RangeMedicGun && WorldInfo.TimeSeconds < equipDeadline)
+    {
+        Pawn.InvManager.SetCurrentWeapon(RangeMedicGun);
+        Sleep(0.1);
+    }
+    if(Pawn.Weapon != RangeMedicGun)
+    {
+        HealFail();
+        PickCombatStyle();
+        Stop;
+    }
+
+    AbortMove();
+    Pawn.Acceleration = vect(0, 0, 0);
+    Focus = PendingHeal;
+    Target = PendingHeal;
+    FinishRotation();
+
+    RangeMedicGun.AmmoCount[1] -= 50;
+    RangeMedicGun.StartHealRecharge();
+    RangeMedicGun.PlayAnimation('Shoot_Dart');
+    if(mut != None)
+    {
+        mut.RegisterRangedHealTarget(PendingHeal);
+    }
+    PendingHeal.HealthToRegen += RangeMedicGun.default.HealAmount;
+    Sleep(FMin(RangeMedicGun.GetFireInterval(1), 3.0));
+
+    if(PendingHeal.Health + PendingHeal.HealthToRegen > PendingHeal.HealthMax)
+    {
+        PendingHeal.HealthToRegen = PendingHeal.HealthMax - PendingHeal.Health;
+    }
+    PendingHeal.SetTimer(PendingHeal.HealthRegenRate, true, 'GiveHealthOverTime');
+    PendingHeal.PlayHeal(class'KFDT_Healing');
+
+    HealSuccess();
+    PickCombatStyle();
     Stop;
 }
 
 // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.GrenadeTarget UNVERIFIED-ENTRY
 state GrenadeTarget
 {
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.GrenadeTarget.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        AbortMove();
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.GrenadeTarget.EndState
     event EndState(name NextStateName)
     {
+        if (Pawn != None)
+        {
+            Pawn.StopFiring();
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.GrenadeTarget.FinishedMove
     function FinishedMove()
     {
+        PickCombatStyle();
     }
 
 Begin:
+    if (Pawn.Physics == 2)
+    {
+        WaitForLanding(2.0);
+    }
+    Focus = Target;
+    FinishRotation();
+    Pawn.Weapon.StartFire(4);
+    Sleep(0.2);
+    Enemy = Pawn(Target);
+    PickRetreatMove();
     Stop;
 }
 
 // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping
 state GoShopping
 {
-    // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        AbortMove();
+        if (KPawn != None)
+        {
+            KPawn.SetSprinting(true);
+        }
+        SetTimer(0.4 + FRand() * 0.25, true);  // default 'Timer': this state's Timer() walks to the trader
+        TraderRetryCount = 0;
     }
 
-    // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
+        ClearTimer('DoTrading');
+        SetTimer(0.0, false);
+        if (KPawn != None)
+        {
+            KPawn.SetSprinting(false);
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.EnemyChanged
     function EnemyChanged()
     {
+        PickCombatStyle();
     }
 
-    // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.PickStyle
     function PickStyle()
     {
+        if (KFGRI.OpenedTrader == None)
+        {
+            PickCombatStyle();
+            return;
+        }
+        if (ActorReachable(KFGRI.OpenedTrader))
+        {
+            TraderRetryCount = 0;
+            MoveToX(KFGRI.OpenedTrader.Location);
+            return;
+        }
+        if (BuildPathToward(KFGRI.OpenedTrader))
+        {
+            TraderRetryCount = 0;
+            MoveTowardX(MoveTarget);
+        }
+        else
+        {
+            AbortMove();
+            SetTimer(0.0, false);  // stop the repeating Timer before the backoff retry
+            ++TraderRetryCount;
+            if (TraderRetryCount >= TRADER_MAX_RETRIES)
+            {
+                TraderRetryCount = 0;
+                NextShoppingTime = WorldInfo.TimeSeconds + TRADER_GIVEUP_COOLDOWN;
+                PickCombatStyle();
+                return;
+            }
+            SetTimer((1.0 + (FRand() * 2.0)) + (float(TraderRetryCount) * 1.0), false, 'DoTrading');
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.Timer
     function Timer()
     {
+        if (KFGRI.OpenedTrader == None)
+        {
+            PickCombatStyle();
+        }
+        else
+        {
+            if (Pawn.IsOverlapping(KFGRI.OpenedTrader))
+            {
+                AbortMove();
+                SetTimer(0.0, false);
+                SetTimer(1.0 + (FRand() * 2.0), false, 'DoTrading');
+            }
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.FinishedMove
     function FinishedMove()
     {
+        PickCombatStyle();
     }
 
-    // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.DoTrading
     function DoTrading()
     {
+        if (KFGRI.TraderItems != None)
+        {
+            ProcessPurchase(KFGRI.TraderItems);
+        }
+        NextShoppingTime = WorldInfo.TimeSeconds + 60.0;
+        NextDoshShareTime = WorldInfo.TimeSeconds + 50.0;
+        if (Rand(3) == 0)
+        {
+            GotoState('VictoryDance', 'MoveTaunt');
+        }
+        else
+        {
+            PickCombatStyle();
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.NotifyBump
     event bool NotifyBump(Actor Other, Vector HitNormal)
     {
+        if (IsTimerActive('DoTrading'))
+        {
+            return false;
+        }
+        return global.NotifyBump(Other, HitNormal);
     }
 
 Begin:
+    if (Pawn.Physics == 2)
+    {
+        WaitForLanding();
+    }
+    PickStyle();
     Stop;
 }
 
 // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.GetItem UNVERIFIED-ENTRY
 state GetItem
 {
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.GetItem.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        AbortMove();
+        KPawn.SetSprinting(Enemy == None);
+        if ((Enemy != None) && LineOfSightTo(Enemy))
+        {
+            SetTimer(0.1 + FRand() * 0.15, true);  // default 'Timer', as legacy
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.GetItem.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
+        ClearTimer('Timer');
+        if (KPawn != None)
+        {
+            KPawn.SetSprinting(false);
+        }
+        if (Pawn != None)
+        {
+            Pawn.StopFiring();
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.GetItem.Timer
     function Timer()
     {
+        if(Enemy != None)
+        {
+            EnemyEncounterTime = WorldInfo.TimeSeconds;
+            Focus = Enemy;
+            FireWeaponAt(Enemy);
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.GetItem.FinishedMove
     function FinishedMove()
     {
+    	PickCombatStyle();
     }
 
 Begin:
+    if (Pawn.Physics == 2)
+    {
+        WaitForLanding(2.0);
+    }
+    MoveTowardX(LastFactory, Enemy);
     Stop;
 }
 
 // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.DonatingMoney
 state DonatingMoney
 {
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.DonatingMoney.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        if (Pawn != None)
+        {
+            Pawn.StopFiring();
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.DonatingMoney.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.DonatingMoney.Tick
     function Tick(float Delta)
     {
+        global.Tick(Delta);
+        if((DonateHuman == None) || (DonateHuman.Health <= 0) || (Pawn == None))
+        {
+            PickCombatStyle();
+            return;
+        }
+        if(VSizeSq(DonateHuman.Location - Pawn.Location) < 90000.0)
+        {
+            if(FastTrace(DonateHuman.Location, Pawn.Location))
+            {
+                PickCombatStyle();
+            }
+            else
+            {
+                if(MoveFlags != 0)
+                {
+                    AbortMove();
+                    GotoState('DonatingMoney', 'MoneyToss');
+                }
+                else
+                {
+                    Pawn.Acceleration = vect(0, 0, 0);
+                }
+            }
+        }
+        else
+        {
+            Pawn.Acceleration = DonateHuman.Location - Pawn.Location;
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.DonatingMoney.FinishedMove
     function FinishedMove()
     {
+        PickCombatStyle();
     }
 
-    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.DonatingMoney.DropMoney
     final function bool DropMoney()
     {
+        local Vector TossVel, StartLocation;
+        local Rotator R;
+        local Vector X, Y, Z;
+        local KFDroppedPickup_Cash KFDP;
+        local int Amount;
+
+        X = DonateHuman.Location - Pawn.Location;
+        TossVel = Normal(X);
+        TossVel = (TossVel * ((Pawn.Velocity Dot TossVel) + float(500))) + vect(0, 0, 200);
+        X.Z = 0;
+        R = Rotator(X);
+        GetAxes(R, X, Y, Z);
+        StartLocation = (Pawn.Location + ((0.8 * Pawn.CylinderComponent.CollisionRadius) * X)) - ((0.5 * Pawn.CylinderComponent.CollisionRadius) * Y);
+        Amount = Min(50, int(PlayerReplicationInfo.Score));
+        if (Amount <= 0)
+        {
+            return false;
+        }
+        StartLocation.Z += (Pawn.BaseEyeHeight / float(2));
+        KFDP = Spawn(Class'KFGame.KFDroppedPickup_Cash', self,, StartLocation,,, true);
+        if (KFDP == None)
+        {
+            return false;
+        }
+        KFDP.SetPhysics(2);
+        KFDP.InventoryClass = Class'KFGameContent.KFInventory_Money';
+        KFDP.Velocity = TossVel * 1.6;
+        KFDP.Instigator = Pawn;
+        KFDP.SetPickupMesh(Class'KFGameContent.KFInventory_Money'.default.DroppedPickupMesh);
+        KFDP.SetPickupParticles(Class'KFGameContent.KFInventory_Money'.default.DroppedPickupParticles);
+        KFDP.CashAmount = Amount;
+        KFDP.TosserPRI = PlayerReplicationInfo;
+        PlayerReplicationInfo.Score -= float(Amount);
+        if ((Role == ROLE_Authority) && (KFGameInfo(WorldInfo.Game) != None) && (KFGameInfo(WorldInfo.Game).DialogManager != None))
+        {
+            KFGameInfo(WorldInfo.Game).DialogManager.PlayDoshTossDialog(KPawn);
+        }
+        return true;
     }
 
 Begin:
+    if (Pawn.Physics == 2)
+    {
+        WaitForLanding(2.0);
+    }
+    MoveTowardX(DonateHuman, DonateHuman, false);
     Stop;
+
 MoneyToss:
+    NextDoshShareTime = WorldInfo.TimeSeconds + 5.0;
+    Sleep(0.45);
+    DoshDropCounter = byte(Rand(4));
+    while (DoshDropCounter < 8)
+    {
+        Sleep(0.35);
+        if (!DropMoney())
+        {
+            break;
+        }
+        ++DoshDropCounter;
+    }
+    PickCombatStyle();
     Stop;
 }
 
@@ -451,19 +1743,30 @@ state Dead
 {
     ignores StopAdjusting, Tick, CheckGrabbed, PickCombatStyle, SetEnemy, KilledBy, HearNoise, SeeMonster, SeePlayer;
 
-    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.Dead.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        SetTimer(1.0, true, 'ReassertScoreboardFlags');
     }
 
-    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.Dead.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
+        ClearTimer('ReassertScoreboardFlags');
     }
 
-    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.Dead.ReassertScoreboardFlags
     function ReassertScoreboardFlags()
     {
+        local KFPlayerReplicationInfo KFPRI;
+
+        if (PlayerReplicationInfo != None)
+        {
+            KFPRI = KFPlayerReplicationInfo(PlayerReplicationInfo);
+            if (KFPRI != None)
+            {
+                KFPRI.bHasSpawnedIn = true;
+            }
+        }
     }
 
 Begin:
@@ -475,14 +1778,19 @@ state IsRagdolled
 {
     ignores StopAdjusting, Tick, CheckGrabbed, PickCombatStyle, SetEnemy, HearNoise, SeeMonster, SeePlayer;
 
-    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.IsRagdolled.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        AbortMove();
+        if (Pawn != None)
+        {
+            Pawn.StopFiring();
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.IsRagdolled.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
     }
 }
 
@@ -491,39 +1799,98 @@ state VictoryDance
 {
     ignores HearNoise, SeeMonster, SeePlayer;
 
-    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.VictoryDance.BeginState
     event BeginState(name PreviousStateName)
     {
+        AuditStateEntry();
+        AbortMove();
+        if (Pawn != None)
+        {
+            Pawn.StopFiring();
+        }
+
+        // P1 Terminal Lock: derive the flag from the live match-over condition
+        // rather than from WHY VictoryDance was entered
+        if (mut != None && mut.KF != None && mut.KF.MyKFGRI != None && mut.KF.MyKFGRI.bMatchIsOver)
+        {
+            bInTerminalState = true;
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.VictoryDance.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
+        bBossKillVictory = false;
     }
 
-    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.VictoryDance.PlayDance
     final function PlayDance()
     {
+        local KFPawn B;
+
+        NextVictoryDance = WorldInfo.TimeSeconds + 20.0;
+        B = KFPawn(Pawn);
+        if (B != None)
+        {
+            B.DoSpecialMove(35, true, , mut.PickRandEmote());
+        }
     }
 
-    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.VictoryDance.FinishedMove
     function FinishedMove()
     {
+        local Vector V;
+
+        V.X = FRand() - 0.5;
+        V.Y = FRand() - 0.5;
+        Focus = None;
+        SetFocalPoint(Pawn.Location + (Normal2D(V) * 1000.0));
+        GotoState('VictoryDance', 'Begin');
     }
 
-    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.VictoryDance.GetRandMove
     final function Vector GetRandMove()
     {
+        local Vector V;
+        local int I;
+
+        I = 0;
+        while (I < 5)
+        {
+            V.X = FRand() - 0.5;
+            V.Y = FRand() - 0.5;
+            V = Pawn.Location + (Normal2D(V) * ((FRand() * 200.0) + 250.0));
+            if (FastTrace(V, Pawn.Location))
+            {
+                break;
+            }
+            I++;
+        }
+
+        return V;
     }
 
-    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.VictoryDance.EnemyChanged
     function EnemyChanged()
     {
+        if (!bBossKillVictory)
+        {
+            PickCombatStyle();
+        }
     }
 
 MoveTaunt:
+    MoveToX(GetRandMove(), , false);
     Stop;
+
 Begin:
+    if (Pawn.Physics == 2)
+    {
+        WaitForLanding(2.0);
+    }
+    Sleep(0.1 + FRand());
+    PlayDance();
+    DoshDropCounter = 0;
+    while (KPawn.IsDoingSpecialMove(35) && ++DoshDropCounter < 250)
+    {
+        Sleep(0.1);
+    }
+    PickCombatStyle();
     Stop;
 }
 
