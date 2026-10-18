@@ -971,9 +971,50 @@ function FinishObjective()
 	NodeBlockCount = 0;
 }
 
-// @STUB(M5c) @SYS-LOGIC-UTIL legacy:KF2BotLogic.GetPointNear
 final function Vector GetPointNear(Pawn Other, float MaxDist)
 {
+    local Vector V, HL, HN, E, Start;
+    local byte I;
+
+    E = Other.GetCollisionExtent();
+    Start = Other.Location;
+
+    if (Other.Physics == 2)
+    {
+        Start.Z -= 1000;
+        if (Trace(HL, HN, Start, Other.Location, false, E) != None)
+        {
+            Start = HL;
+        }
+    }
+
+    E *= 0.75;
+    I = 0;
+
+    while (true)
+    {
+        I++;
+        V.X = FRand() - 0.5;
+        V.Y = FRand() - 0.5;
+        V = Start + (Normal2D(V) * ((0.25 + (FRand() * 0.75)) * MaxDist));
+
+        if (Trace(HL, HN, V, Start, false, E) != None)
+        {
+            if (I >= 25)
+            {
+                V = HL;
+                break;
+            }
+            continue;
+        }
+
+        if ((Trace(HL, HN, V - vect(0, 0, 500), V, false, E) != None) || (I >= 25))
+        {
+            break;
+        }
+    }
+
+    return V;
 }
 
 // @STUB(M5c) @SYS-LOGIC-DEATH legacy:KF2BotLogic.NotifyKilled
