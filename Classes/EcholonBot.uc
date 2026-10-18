@@ -337,9 +337,16 @@ state FightEnemy
         Timer();
     }
 
-    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
+        SetTimer(0.0, false);
+        ClearTimer('FinishedMove');
+        if (Pawn != None)
+        {
+            Pawn.ShouldCrouch(false);
+            Pawn.StopFiring();
+        }
     }
 
     // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.Timer
