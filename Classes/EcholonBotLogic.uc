@@ -1124,9 +1124,24 @@ function bool EvaluateFollowerMove()
     return MoveTowardGoal(None, FormationGoal, false);
 }
 
-// @STUB(M5c) @SYS-LOGIC-MOVEVAL legacy:KF2BotLogic.MoveTowardGoal
 function bool MoveTowardGoal(Actor GoalActor, vector GoalPoint, bool bActorGoal)
 {
+    local NavigationPoint PathNode;
+
+    if (bActorGoal && GoalActor != None)
+    {
+        PathNode = NavigationPoint(FindPathToward(GoalActor));
+        LastRouteDist = RouteDist;
+        if (PathNode != None)
+        {
+            MoveTowardX(PathNode);
+            return true;
+        }
+        MoveToX(GoalActor.Location);
+        return true;
+    }
+    MoveToX(GoalPoint);
+    return true;
 }
 
 // @STUB(M5c) @SYS-LOGIC-MOVEVAL legacy:KF2BotLogic.UpdateCQBFormation
