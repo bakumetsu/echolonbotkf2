@@ -554,9 +554,22 @@ function UpdateMacroWaypoints()
     }
 }
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.PropagateAnchorToFollowers
 function PropagateAnchorToFollowers(int GroupIdx)
 {
+    local int i;
+    local EcholonBot Member;
+
+    if (Fireteams[GroupIdx].Leader == None)
+        return;
+
+    for (i = 0; i < Fireteams[GroupIdx].Members.Length; i++)
+    {
+        Member = Fireteams[GroupIdx].Members[i];
+        if (Member != None && !Member.bIsGroupLeader)
+        {
+            Member.AssignedAnchor = Fireteams[GroupIdx].Leader.AssignedAnchor;
+        }
+    }
 }
 
 // @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.FindNearestNavPoint
