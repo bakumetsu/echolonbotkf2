@@ -2510,9 +2510,10 @@ final function bool IsRetreatSafe(Vector RetreatDest)
 	return true;
 }
 
-// @STUB(M5a) @SYS-BASE-CQB legacy:KF2BotBase.SetSquadCrouchHold
 final function SetSquadCrouchHold()
 {
+	bSquadCrouchHold = true;
+	SetTimer(3.0, false, 'ClearSquadCrouchHold');
 }
 
 // @STUB(M5a) @SYS-BASE-CQB legacy:KF2BotBase.ClearSquadCrouchHold
