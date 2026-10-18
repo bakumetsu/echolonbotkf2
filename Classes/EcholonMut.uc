@@ -255,169 +255,909 @@ function UnregisterBot(EcholonBot LeavingBot)
     HandleFireteamCasualty(LeavingBot);
 }
 
-// @STUB(M4) @SYS-MUT-WAVE legacy:KF2BotsMut.PollWaveStart
 function PollWaveStart()
 {
+    local KFGameReplicationInfo KFGRI;
+
+    KFGRI = KFGameReplicationInfo(WorldInfo.GRI);
+    if (KFGRI == None || !KFGRI.bMatchHasBegun)
+        return;
+
+    if (KFGRI.WaveNum != LastPolledWaveNum)
+    {
+        LastPolledWaveNum = KFGRI.WaveNum;
+        InitializePlatoon();
+        RelocateBotsToAmmoCrates();
+    }
 }
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.InitializePlatoon
 function InitializePlatoon()
 {
+    local int i, GroupCount, GroupIdx;
+    local EcholonBot Bot;
+
+    PruneInvalidBots();
+    ShuffleActiveBots();
+
+    if (ActiveBots.Length == 0)
+        return;
+
+    for (GroupIdx = 0; GroupIdx < Fireteams.Length; GroupIdx++)
+    {
+        for (i = Fireteams[GroupIdx].Members.Length - 1; i >= 0; i--)
+        {
+            if (Fireteams[GroupIdx].Members[i] == None
+                || Fireteams[GroupIdx].Members[i].bDeleteMe
+                || Fireteams[GroupIdx].Members[i].Pawn == None
+                || Fireteams[GroupIdx].Members[i].Pawn.Health <= 0)
+            {
+                Fireteams[GroupIdx].Members.Remove(i, 1);
+            }
+        }
+    }
+
+    GroupCount = DetermineGroupCount(ActiveBots.Length);
+    NumGroups = GroupCount;
+
+    Fireteams.Length = 0;
+    Fireteams.Length = GroupCount;
+
+    for (i = 0; i < ActiveBots.Length; i++)
+    {
+        Bot = ActiveBots[i];
+        if (Bot == None)
+            continue;
+
+        GroupIdx = i % GroupCount;
+        Bot.GroupID = GroupIdx + 1;
+        Bot.bIsGroupLeader = false;
+        Fireteams[GroupIdx].Members.AddItem(Bot);
+    }
+
+    for (GroupIdx = 0; GroupIdx < GroupCount; GroupIdx++)
+    {
+        if (Fireteams[GroupIdx].Members.Length > 0)
+        {
+            Fireteams[GroupIdx].Leader = Fireteams[GroupIdx].Members[0];
+            Fireteams[GroupIdx].Leader.bIsGroupLeader = true;
+            Fireteams[GroupIdx].Leader.BotRank = SQUAD_LEADER;
+        }
+    }
+
+    for (i = 0; i < ActiveBots.Length; i++)
+    {
+        Bot = ActiveBots[i];
+        if (Bot == None)
+            continue;
+        if (Bot.bIsGroupLeader)
+            continue;
+        Bot.BotRank = GRUNT;
+    }
+
+    for (i = 0; i < ActiveBots.Length; i++)
+    {
+        Bot = ActiveBots[i];
+        if (Bot == None)
+            continue;
+        if (Bot.bIsAlphaCommander)
+            Bot.BotRank = LIEUTENANT;
+        else if (Bot == VIPController)
+            Bot.BotRank = CAPTAIN;
+    }
+
+    SyncSquadLeaders();
+
+    for (i = 0; i < ActiveBots.Length; i++)
+    {
+        Bot = ActiveBots[i];
+        if (Bot == None)
+            continue;
+        InitBotCharacter(Bot);
+        Bot.RefreshRoleNameTag();
+    }
+
+    UpdateMacroWaypoints();
+    if (!IsTimerActive('UpdateMacroWaypoints'))
+        SetTimer(MACRO_WAYPOINT_INTERVAL, true, 'UpdateMacroWaypoints');
 }
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.SyncSquadLeaders
 function SyncSquadLeaders()
 {
+    local int GroupIdx, i;
+    local int FollowerSlot, FollowerTotal;
+    local EcholonBot Ldr, Member;
+
+    for (GroupIdx = 0; GroupIdx < Fireteams.Length; GroupIdx++)
+    {
+        Ldr = Fireteams[GroupIdx].Leader;
+        if (Ldr != None && (Ldr.bDeleteMe || Ldr.Pawn == None || Ldr.Pawn.Health <= 0))
+        {
+            Ldr = None;
+        }
+
+        FollowerTotal = 0;
+        for (i = 0; i < Fireteams[GroupIdx].Members.Length; i++)
+        {
+            Member = Fireteams[GroupIdx].Members[i];
+            if (Member != None && Member != Ldr)
+            {
+                FollowerTotal++;
+            }
+        }
+
+        FollowerSlot = 0;
+        for (i = 0; i < Fireteams[GroupIdx].Members.Length; i++)
+        {
+            Member = Fireteams[GroupIdx].Members[i];
+            if (Member == None)
+            {
+                continue;
+            }
+
+            if (Member == Ldr)
+            {
+                Member.SquadLeader = None;
+            }
+            else
+            {
+                Member.SquadLeader = Ldr;
+                Member.FollowSetSlot(FollowerSlot, FollowerTotal);
+                FollowerSlot++;
+            }
+        }
+    }
 }
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.ShuffleActiveBots
 function ShuffleActiveBots()
 {
+    local int i, SwapIdx;
+    local EcholonBot Temp;
+
+    for (i = ActiveBots.Length - 1; i > 0; i--)
+    {
+        SwapIdx = Rand(i + 1);
+        Temp = ActiveBots[i];
+        ActiveBots[i] = ActiveBots[SwapIdx];
+        ActiveBots[SwapIdx] = Temp;
+    }
 }
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.PruneInvalidBots
 function PruneInvalidBots()
 {
+    local int i;
+    for (i = ActiveBots.Length - 1; i >= 0; i--)
+    {
+        if (ActiveBots[i] == None || ActiveBots[i].bDeleteMe || ActiveBots[i].Pawn == None || ActiveBots[i].Pawn.Health <= 0)
+        {
+            ActiveBots.Remove(i, 1);
+        }
+    }
 }
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.DetermineGroupCount
 function int DetermineGroupCount(int BotCount)
 {
+    local int Count;
+    Count = BotCount / BOTS_PER_GROUP_TARGET;
+    if (Count < MIN_GROUPS)
+        Count = MIN_GROUPS;
+    if (Count > MAX_GROUPS)
+        Count = MAX_GROUPS;
+    return Count;
 }
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.UpdateMacroWaypoints
 function UpdateMacroWaypoints()
 {
+    local int GroupIdx;
+    local EcholonBot GroupLeader;
+    local KFGameReplicationInfo KFGRI;
+    local Pawn BossPawn;
+    local Actor NewAnchor;
+    local vector ProjectedLoc;
+    local Controller VIP;
+
+    PruneInvalidBots();
+    ProcessPromotionQueue();
+    CleanupRangedHealCooldowns();
+
+    if (VIPController != None && (VIPController.Pawn == None || VIPController.Pawn.Health <= 0))
+    {
+        HandleVIPSuccession();
+    }
+
+    if (ActiveBots.Length == 0 || NumGroups <= 0)
+    {
+        return;
+    }
+
+    EvaluateRegroupEntries();
+
+    KFGRI = KFGameReplicationInfo(WorldInfo.GRI);
+
+    if (KFGRI != None && KFGRI.IsBossWave())
+    {
+        BossPawn = FindBossPawn();
+        if (BossPawn != None)
+        {
+            for (GroupIdx = 0; GroupIdx < NumGroups; GroupIdx++)
+            {
+                GroupLeader = Fireteams[GroupIdx].Leader;
+                if (GroupLeader == None)
+                {
+                    continue;
+                }
+                Fireteams[GroupIdx].Anchor = None;
+                GroupLeader.AssignedAnchor = BossPawn;
+                PropagateAnchorToFollowers(GroupIdx);
+            }
+            return;
+        }
+    }
+
+    VIP = GetVIPController();
+
+    for (GroupIdx = 0; GroupIdx < NumGroups; GroupIdx++)
+    {
+        GroupLeader = Fireteams[GroupIdx].Leader;
+        if (GroupLeader == None)
+        {
+            continue;
+        }
+
+        switch (GroupIdx)
+        {
+            case 0:
+                if (KFGRI != None && KFGRI.bTraderIsOpen)
+                {
+                    Fireteams[GroupIdx].Anchor = None;
+                    GroupLeader.AssignedAnchor = None;
+                }
+                else if (VIP != None && VIP.Pawn != None)
+                {
+                    Fireteams[GroupIdx].Anchor = None;
+                    GroupLeader.AssignedAnchor = VIP.Pawn;
+                }
+                break;
+            case 1:
+                if (VIP != None && VIP.Pawn != None)
+                {
+                    ProjectedLoc = VIP.Pawn.Location + (vector(VIP.Pawn.Rotation) * VANGUARD_OFFSET);
+                    NewAnchor = FindNearestNavPoint(ProjectedLoc, NAV_SEARCH_RADIUS);
+                    if (NewAnchor != None)
+                    {
+                        Fireteams[GroupIdx].Anchor = NavigationPoint(NewAnchor);
+                        GroupLeader.AssignedAnchor = NewAnchor;
+                    }
+                }
+                break;
+            case 2:
+                if (VIP != None && VIP.Pawn != None)
+                {
+                    ProjectedLoc = VIP.Pawn.Location - (vector(VIP.Pawn.Rotation) * REARGUARD_OFFSET);
+                    NewAnchor = FindNearestNavPoint(ProjectedLoc, NAV_SEARCH_RADIUS);
+                    if (NewAnchor != None)
+                    {
+                        Fireteams[GroupIdx].Anchor = NavigationPoint(NewAnchor);
+                        GroupLeader.AssignedAnchor = NewAnchor;
+                    }
+                }
+                break;
+            case 3:
+                NewAnchor = FindNearestChokepoint(VIP);
+                if (NewAnchor != None)
+                {
+                    Fireteams[GroupIdx].Anchor = NavigationPoint(NewAnchor);
+                    GroupLeader.AssignedAnchor = NewAnchor;
+                }
+                break;
+        }
+        PropagateAnchorToFollowers(GroupIdx);
+    }
 }
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.PropagateAnchorToFollowers
 function PropagateAnchorToFollowers(int GroupIdx)
 {
+    local int i;
+    local EcholonBot Member;
+
+    if (Fireteams[GroupIdx].Leader == None)
+        return;
+
+    for (i = 0; i < Fireteams[GroupIdx].Members.Length; i++)
+    {
+        Member = Fireteams[GroupIdx].Members[i];
+        if (Member != None && !Member.bIsGroupLeader)
+        {
+            Member.AssignedAnchor = Fireteams[GroupIdx].Leader.AssignedAnchor;
+        }
+    }
 }
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.FindNearestNavPoint
 function NavigationPoint FindNearestNavPoint(vector ProjectedLoc, float SearchRadius)
 {
+    local NavigationPoint FoundNav, BestNav;
+    local float Dist, BestDist;
+
+    // C4 fix, BEHAVIOR-CHANGE: legacy returned the first hit of the radius iterator, which is not
+    // ordered by distance. Return the closest navigation point instead.
+    foreach WorldInfo.RadiusNavigationPoints(class'NavigationPoint', FoundNav, ProjectedLoc, SearchRadius)
+    {
+        Dist = VSizeSq(FoundNav.Location - ProjectedLoc);
+        if (BestNav == None || Dist < BestDist)
+        {
+            BestNav = FoundNav;
+            BestDist = Dist;
+        }
+    }
+    return BestNav;
 }
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.FindNearestChokepoint
+
 function NavigationPoint FindNearestChokepoint(Controller VIP)
 {
+    local vector ProjectedLoc, LateralVec;
+
+    if (VIP == None || VIP.Pawn == None)
+        return None;
+
+    LateralVec = Normal(vector(VIP.Pawn.Rotation) cross vect(0,0,1));
+    ProjectedLoc = VIP.Pawn.Location + (LateralVec * CHOKEPOINT_LATERAL_OFFSET);
+
+    // C4 fix, BEHAVIOR-CHANGE: closest point to the flank position, not the iterator's first hit.
+    return FindNearestNavPoint(ProjectedLoc, NAV_SEARCH_RADIUS);
 }
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.GetVIPController
+
 function Controller GetVIPController()
 {
+    local Controller C;
+
+    if (VIPController != None && !VIPController.bDeleteMe
+        && VIPController.Pawn != None && VIPController.Pawn.Health > 0)
+    {
+        return VIPController;
+    }
+
+    foreach WorldInfo.AllControllers(class'Controller', C)
+    {
+        if (PlayerController(C) != None && C.Pawn != None && C.Pawn.Health > 0)
+        {
+            VIPController = C;
+            return VIPController;
+        }
+    }
+
+    VIPController = None;
+    return None;
 }
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.FindBossPawn
 function Pawn FindBossPawn()
 {
+    local Pawn P;
+    local Pawn BestBoss;
+
+    if (CachedBossPawn != None && !CachedBossPawn.bDeleteMe && CachedBossPawn.Health > 0)
+    {
+        return CachedBossPawn;
+    }
+
+    foreach WorldInfo.AllPawns(class'Pawn', P)
+    {
+        if (KFPawn_Monster(P) != None && P.Health > 5000)
+        {
+            if (BestBoss == None || P.Health > BestBoss.Health)
+            {
+                BestBoss = P;
+            }
+        }
+    }
+
+    CachedBossPawn = BestBoss;
+    return BestBoss;
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.OnBotKilled
 function OnBotKilled(EcholonBot DeadBot)
 {
+    local PromotionRequest Req;
+
+    if (DeadBot == None)
+    {
+        return;
+    }
+
+    if (DeadBot.BotRank == SQUAD_LEADER || DeadBot.BotRank == LIEUTENANT || DeadBot.BotRank == CAPTAIN)
+    {
+        Req.DeadOfficer = DeadBot;
+        Req.OldRank = DeadBot.BotRank;
+        Req.Replacement = None;
+        Req.Score = 0;
+        PendingPromotions.AddItem(Req);
+    }
+
+    if (DeadBot == VIPController)
+    {
+        HandleVIPSuccession();
+        UpdateMacroWaypoints();
+    }
+
+    UnregisterBot(DeadBot);
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.ComputeCommandScore
 function int ComputeCommandScore(EcholonBot Bot)
 {
+    if (Bot == None || Bot.PlayerReplicationInfo == None || Bot.Pawn == None)
+        return -1;
+    return (Bot.PlayerReplicationInfo.Kills * 10) + Bot.Pawn.Health;
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.FindBestCandidate
 function EcholonBot FindBestCandidate(array<EcholonBot> Candidates)
 {
+    local int i;
+    local EcholonBot Best;
+
+    Best = None;
+    for (i = 0; i < Candidates.Length; i++)
+    {
+        if (Candidates[i] == None || Candidates[i].Pawn == None || Candidates[i].Pawn.Health <= 0)
+            continue;
+        if (Best == None || ComputeCommandScore(Candidates[i]) > ComputeCommandScore(Best))
+            Best = Candidates[i];
+    }
+    return Best;
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.FindExpendableMember
 function EcholonBot FindExpendableMember(array<EcholonBot> Candidates)
 {
+    local int i;
+    local EcholonBot Worst;
+    Worst = None;
+    for (i = 0; i < Candidates.Length; i++)
+    {
+        if (Candidates[i] == None || Candidates[i].bIsGroupLeader)
+            continue;
+        if (Candidates[i].Pawn == None || Candidates[i].Pawn.Health <= 0)
+            continue;
+        if (Worst == None || ComputeCommandScore(Candidates[i]) < ComputeCommandScore(Worst))
+            Worst = Candidates[i];
+    }
+    return Worst;
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.ProcessPromotionQueue
 function ProcessPromotionQueue()
 {
+    local int i, MaxPerTick;
+    local int DeadGroupIdx;
+    local PromotionRequest Req;
+    local array<EcholonBot> Candidates;
+    local KFGameReplicationInfo KFGRI;
+
+    if (PendingPromotions.Length == 0)
+    {
+        return;
+    }
+
+    KFGRI = KFGameReplicationInfo(WorldInfo.GRI);
+
+    MaxPerTick = 1;
+    if (KFGRI != None && KFGRI.WaveNum > 5)
+    {
+        MaxPerTick = 2;
+    }
+
+    Candidates.Length = 0;
+    for (i = 0; i < ActiveBots.Length; i++)
+    {
+        if (ActiveBots[i] != None && ActiveBots[i].BotRank == GRUNT
+            && ActiveBots[i].Pawn != None && ActiveBots[i].Pawn.Health > 0)
+        {
+            Candidates.AddItem(ActiveBots[i]);
+        }
+    }
+
+    while (PendingPromotions.Length > 0 && MaxPerTick > 0)
+    {
+        Req = PendingPromotions[PendingPromotions.Length - 1];
+        PendingPromotions.Remove(PendingPromotions.Length - 1, 1);
+
+        if (Req.OldRank == SQUAD_LEADER && Req.DeadOfficer != None)
+        {
+            DeadGroupIdx = Req.DeadOfficer.GroupID - 1;
+            if (DeadGroupIdx >= 0 && DeadGroupIdx < Fireteams.Length)
+            {
+                if (Fireteams[DeadGroupIdx].Leader != None
+                    && Fireteams[DeadGroupIdx].Leader.bIsGroupLeader
+                    && Fireteams[DeadGroupIdx].Leader.Pawn != None
+                    && Fireteams[DeadGroupIdx].Leader.Pawn.Health > 0)
+                {
+                    continue;
+                }
+            }
+        }
+
+        if (Req.Replacement == None)
+        {
+            Req.Replacement = FindBestCandidate(Candidates);
+        }
+        if (Req.Replacement != None && Req.Replacement.Pawn != None && Req.Replacement.Pawn.Health > 0)
+        {
+            PromoteBot(Req.Replacement, Req.OldRank);
+            i = Candidates.Find(Req.Replacement);
+            if (i != INDEX_NONE)
+            {
+                Candidates.Remove(i, 1);
+            }
+            MaxPerTick = MaxPerTick - 1;
+        }
+    }
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.PromoteBot
 function PromoteBot(EcholonBot Bot, EBotRank NewRank)
 {
+    if (Bot == None)
+        return;
+    Bot.BotRank = NewRank;
 }
 
-// @STUB(M4) @SYS-MUT-HEALCOOL legacy:KF2BotsMut.RegisterRangedHealTarget
 function RegisterRangedHealTarget(KFPawn_Human Target)
 {
+    local int I;
+
+    if (Target == None)
+        return;
+
+    for (I = 0; I < RangedHealTargets.Length; I++)
+    {
+        if (RangedHealTargets[I] == Target)
+        {
+            RangedHealCooldownEnds[I] = WorldInfo.TimeSeconds + 25.0;
+            return;
+        }
+    }
+
+    RangedHealTargets.AddItem(Target);
+    RangedHealCooldownEnds.AddItem(WorldInfo.TimeSeconds + 25.0);
 }
 
-// @STUB(M4) @SYS-MUT-HEALCOOL legacy:KF2BotsMut.IsRangedHealTargetOnCooldown
 function bool IsRangedHealTargetOnCooldown(KFPawn_Human Target)
 {
+    local int I;
+
+    if (Target == None)
+    {
+        return false;
+    }
+
+    I = 0;
+    while (I < RangedHealTargets.Length)
+    {
+        if (RangedHealTargets[I] == Target)
+        {
+            return WorldInfo.TimeSeconds < RangedHealCooldownEnds[I];
+        }
+        I++;
+    }
+    return false;
 }
 
-// @STUB(M4) @SYS-MUT-HEALCOOL legacy:KF2BotsMut.CleanupRangedHealCooldowns
 function CleanupRangedHealCooldowns()
 {
+    local int I;
+
+    I = RangedHealTargets.Length - 1;
+    while (I >= 0)
+    {
+        if (WorldInfo.TimeSeconds >= RangedHealCooldownEnds[I])
+        {
+            RangedHealTargets.Remove(I, 1);
+            RangedHealCooldownEnds.Remove(I, 1);
+        }
+        I--;
+    }
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.HandleVIPSuccession
 function HandleVIPSuccession()
 {
+    local EcholonBot Best;
+
+    Best = FindBestCandidate(ActiveBots);
+    if (Best == None)
+    {
+        return;
+    }
+
+    VIPController = Best;
+    AlphaCommander = Best;
+    Best.bIsAlphaCommander = true;
+
+    if (Best.bIsGroupLeader)
+    {
+        DemoteGroupLeader(Best);
+    }
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.HandleFireteamCasualty
 function HandleFireteamCasualty(EcholonBot DeadBot)
 {
+    local int GroupIdx, MemberIdx;
+    local bool bWasLeader;
+    local EcholonBot NewLeader;
+
+    if (DeadBot == None)
+    {
+        return;
+    }
+
+    GroupIdx = DeadBot.GroupID - 1;
+    if (GroupIdx < 0 || GroupIdx >= Fireteams.Length)
+    {
+        return;
+    }
+
+    bWasLeader = DeadBot.bIsGroupLeader;
+
+    MemberIdx = Fireteams[GroupIdx].Members.Find(DeadBot);
+    if (MemberIdx != INDEX_NONE)
+    {
+        Fireteams[GroupIdx].Members.Remove(MemberIdx, 1);
+    }
+
+    if (bWasLeader)
+    {
+        NewLeader = FindBestCandidate(Fireteams[GroupIdx].Members);
+        if (NewLeader != None)
+        {
+            NewLeader.bIsGroupLeader = true;
+            NewLeader.BotRank = SQUAD_LEADER;
+            NewLeader.ResetStuckState();
+            Fireteams[GroupIdx].Leader = NewLeader;
+            InheritSquadOrder(GroupIdx, NewLeader);
+        }
+        else
+        {
+            Fireteams[GroupIdx].Leader = None;
+            if (GroupIdx < SquadOrders.Length)
+            {
+                SquadOrders[GroupIdx].Leader = None;
+                SquadOrders[GroupIdx].ObjectiveBailUntil = 0.0;
+            }
+        }
+    }
+
+    ConsolidateFireteams();
+    SampleSquadSlots(GroupIdx);
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.DemoteGroupLeader
 function DemoteGroupLeader(EcholonBot OldLeader)
 {
+    local int GroupIdx, i;
+    local EcholonBot Candidate, NewLeader;
+
+    NewLeader = None;
+
+    if (OldLeader == None || !OldLeader.bIsGroupLeader)
+        return;
+
+    GroupIdx = OldLeader.GroupID - 1;
+    if (GroupIdx < 0 || GroupIdx >= Fireteams.Length)
+        return;
+
+    OldLeader.bIsGroupLeader = false;
+
+    for (i = 0; i < Fireteams[GroupIdx].Members.Length; i++)
+    {
+        Candidate = Fireteams[GroupIdx].Members[i];
+        if (Candidate == None || Candidate == OldLeader)
+            continue;
+        if (Candidate.Pawn == None || Candidate.Pawn.Health <= 0)
+            continue;
+
+        if (NewLeader == None || ComputeCommandScore(Candidate) > ComputeCommandScore(NewLeader))
+        {
+            NewLeader = Candidate;
+        }
+    }
+
+    if (NewLeader != None)
+    {
+        NewLeader.bIsGroupLeader = true;
+        NewLeader.ResetStuckState();
+        Fireteams[GroupIdx].Leader = NewLeader;
+        InheritSquadOrder(GroupIdx, NewLeader);
+    }
+
+    ConsolidateFireteams();
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.RequestLeaderDemotion
 function RequestLeaderDemotion(EcholonBot StuckLeader)
 {
+    DemoteGroupLeader(StuckLeader);
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.ConsolidateFireteams
 function ConsolidateFireteams()
 {
+    local int GroupIdx;
+
+    if (Fireteams.Length > 0 && Fireteams[0].Members.Length < VIP_ESCORT_MIN_SIZE)
+    {
+        PullBotFromNearestGroup(0);
+    }
+    for (GroupIdx = 0; GroupIdx < Fireteams.Length; GroupIdx++)
+    {
+        if (Fireteams[GroupIdx].Members.Length == GROUP_DISSOLVE_SIZE)
+        {
+            DissolveGroup(GroupIdx);
+        }
+    }
+    SyncSquadLeaders();
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.PullBotFromNearestGroup
 function PullBotFromNearestGroup(int TargetGroupIdx)
 {
+    local int SourceGroupIdx, BestSourceIdx;
+    local float BestDistSq, DistSq;
+    local EcholonBot Puller;
+    local vector TargetLoc;
+
+    if (Fireteams[TargetGroupIdx].Leader == None || Fireteams[TargetGroupIdx].Leader.Pawn == None)
+        return;
+
+    TargetLoc = Fireteams[TargetGroupIdx].Leader.Pawn.Location;
+    BestSourceIdx = INDEX_NONE;
+    BestDistSq = 0.0;
+
+    for (SourceGroupIdx = 0; SourceGroupIdx < Fireteams.Length; SourceGroupIdx++)
+    {
+        if (SourceGroupIdx == TargetGroupIdx) continue;
+        if (Fireteams[SourceGroupIdx].Members.Length <= 2) continue;
+        if (Fireteams[SourceGroupIdx].Leader == None || Fireteams[SourceGroupIdx].Leader.Pawn == None) continue;
+
+        DistSq = VSizeSq(Fireteams[SourceGroupIdx].Leader.Pawn.Location - TargetLoc);
+        if (BestSourceIdx == INDEX_NONE || DistSq < BestDistSq)
+        {
+            BestSourceIdx = SourceGroupIdx;
+            BestDistSq = DistSq;
+        }
+    }
+
+    if (BestSourceIdx == INDEX_NONE) return;
+
+    Puller = FindExpendableMember(Fireteams[BestSourceIdx].Members);
+    if (Puller == None) return;
+
+    ReassignBotToGroup(Puller, TargetGroupIdx);
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.DissolveGroup
 function DissolveGroup(int GroupIdx)
 {
+    local EcholonBot Remaining;
+    local int NearestGroupIdx;
+
+    if (Fireteams[GroupIdx].Members.Length != GROUP_DISSOLVE_SIZE)
+        return;
+
+    Remaining = Fireteams[GroupIdx].Members[0];
+    NearestGroupIdx = FindNearestEligibleGroup(GroupIdx, Remaining);
+
+    if (NearestGroupIdx == INDEX_NONE)
+        return;
+
+    Fireteams[GroupIdx].Members.Remove(0, 1);
+    Fireteams[GroupIdx].Leader = None;
+
+    ReassignBotToGroup(Remaining, NearestGroupIdx);
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.FindNearestEligibleGroup
 function int FindNearestEligibleGroup(int ExcludeGroupIdx, EcholonBot Bot)
 {
+    local int GroupIdx, BestIdx;
+    local float BestDistSq, DistSq;
+
+    BestIdx = INDEX_NONE;
+    BestDistSq = 0.0;
+
+    if (Bot == None || Bot.Pawn == None)
+    {
+        return INDEX_NONE;
+    }
+
+    for (GroupIdx = 0; GroupIdx < Fireteams.Length; GroupIdx++)
+    {
+        if (GroupIdx == ExcludeGroupIdx)
+        {
+            continue;
+        }
+        if (Fireteams[GroupIdx].Members.Length < 2)
+        {
+            continue;
+        }
+        if (Fireteams[GroupIdx].Leader == None || Fireteams[GroupIdx].Leader.Pawn == None)
+        {
+            continue;
+        }
+
+        DistSq = VSizeSq(Fireteams[GroupIdx].Leader.Pawn.Location - Bot.Pawn.Location);
+        if (BestIdx == INDEX_NONE || DistSq < BestDistSq)
+        {
+            BestIdx = GroupIdx;
+            BestDistSq = DistSq;
+        }
+    }
+
+    return BestIdx;
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.ReassignBotToGroup
 function ReassignBotToGroup(EcholonBot Bot, int NewGroupIdx)
 {
+	local int OldGroupIdx, MemberIdx;
+
+	if (Bot == None)
+	{
+		return;
+	}
+
+	OldGroupIdx = Bot.GroupID - 1;
+	if (OldGroupIdx >= 0 && OldGroupIdx < Fireteams.Length)
+	{
+		MemberIdx = Fireteams[OldGroupIdx].Members.Find(Bot);
+		if (MemberIdx != INDEX_NONE)
+		{
+			Fireteams[OldGroupIdx].Members.Remove(MemberIdx, 1);
+		}
+	}
+
+	Bot.bIsGroupLeader = false;
+	Bot.GroupID = NewGroupIdx + 1;
+	Bot.ResetStuckState();
+	Fireteams[NewGroupIdx].Members.AddItem(Bot);
+
+	if (Fireteams[NewGroupIdx].Leader != None)
+	{
+		Bot.AssignedAnchor = Fireteams[NewGroupIdx].Leader.AssignedAnchor;
+	}
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.GetGroupLeader
 function EcholonBot GetGroupLeader(int GroupID)
 {
+    local int GroupIdx;
+    GroupIdx = GroupID - 1;
+    if (GroupIdx < 0 || GroupIdx >= Fireteams.Length)
+    {
+        return None;
+    }
+    return Fireteams[GroupIdx].Leader;
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.GetGroupSize
 function int GetGroupSize(int GroupID)
 {
+    local int GroupIdx;
+
+    GroupIdx = GroupID - 1;
+    if (GroupIdx < 0 || GroupIdx >= Fireteams.Length)
+    {
+        return 0;
+    }
+    return Fireteams[GroupIdx].Members.Length;
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.GetFollowerIndex
 function int GetFollowerIndex(EcholonBot Bot)
 {
+    local int GroupIdx, i, FollowerCount;
+
+    if (Bot == None)
+        return 1;
+
+    GroupIdx = Bot.GroupID - 1;
+    if (GroupIdx < 0 || GroupIdx >= Fireteams.Length)
+        return 1;
+
+    FollowerCount = 0;
+    for (i = 0; i < Fireteams[GroupIdx].Members.Length; i++)
+    {
+        if (Fireteams[GroupIdx].Members[i] == Fireteams[GroupIdx].Leader)
+            continue;
+        FollowerCount++;
+        if (Fireteams[GroupIdx].Members[i] == Bot)
+            return FollowerCount;
+    }
+    return FollowerCount + 1;
 }
 
 function BroadcastSpottedEnemy(int GroupID, Pawn Spotted)
@@ -493,19 +1233,112 @@ function CheckWave()
     EvaluateSquadPhase();
 }
 
-// @STUB(M4) @SYS-MUT-WAVE legacy:KF2BotsMut.SetHoldObjective
 final function SetHoldObjective(Volume V)
 {
+    local NavigationPoint N;
+    local NavigationPoint GP;
+    local int i;
+
+    ValidPoints.Length = 0;
+    foreach WorldInfo.AllNavigationPoints(Class'Engine.NavigationPoint', N)
+    {
+        if (V.Encompasses(N))
+        {
+            ValidPoints.AddItem(N);
+        }
+    }
+    bObjectiveActive = ValidPoints.Length != 0;
+
+    if (bObjectiveActive)
+    {
+        EnsureSquadOrderTable();
+        for (i = 0; i < SquadOrders.Length; i++)
+        {
+            SquadOrders[i].Zone = HoldVolume;
+            SquadOrders[i].SquadID = i + 1;
+            SquadOrders[i].NodeBlacklist.Length = 0;
+            SquadOrders[i].ObjectiveBailUntil = 0.0;
+            if (SquadOrders[i].Leader != None && SquadOrders[i].Leader.Pawn != None)
+            {
+                GP = NearestValidPoint(SquadOrders[i].Leader.Pawn.Location);
+                if (GP != None)
+                {
+                    SquadOrders[i].GoalNav = GP;
+                    SquadOrders[i].GoalPoint = GP.Location;
+                    SquadOrders[i].Phase = PHASE_ENROUTE;
+                    SquadOrders[i].StartTime = WorldInfo.TimeSeconds;
+                    SquadOrders[i].SquadSeedAngle = FRand() * 6.2831855;
+                    EchelonLog("ORDER_CREATED squad=" $ string(i + 1) $ " goal=" $ CoordStr(SquadOrders[i].GoalPoint));
+                    SampleSquadSlots(i);
+                }
+            }
+            else
+            {
+                SquadOrders[i].GoalNav = None;
+                SquadOrders[i].GoalPoint = vect(0, 0, 0);
+                SquadOrders[i].Phase = PHASE_IDLE;
+            }
+        }
+    }
 }
 
-// @STUB(M4) @SYS-MUT-WAVE legacy:KF2BotsMut.EndObjective
 final function EndObjective()
 {
+    local EcholonBot B;
+    local int i;
+
+    bObjectiveActive = false;
+    ValidPoints.Length = 0;
+
+    for (i = 0; i < SquadOrders.Length; i++)
+    {
+        ReleaseSquadSlots(i, "EndObjective");
+        SquadOrders[i].Leader = None;
+        SquadOrders[i].Zone = None;
+        SquadOrders[i].GoalNav = None;
+        SquadOrders[i].GoalPoint = vect(0, 0, 0);
+        SquadOrders[i].Slots.Length = 0;
+        SquadOrders[i].NodeBlacklist.Length = 0;
+        SquadOrders[i].ObjectiveBailUntil = 0.0;
+
+        if (Fireteams[i].Members.Length > 0)
+        {
+            SquadOrders[i].Phase = PHASE_REGROUP;
+            SquadOrders[i].StartTime = WorldInfo.TimeSeconds;
+        }
+        else
+        {
+            SquadOrders[i].Phase = PHASE_IDLE;
+        }
+    }
+
+    foreach WorldInfo.AllControllers(class'EcholonBot', B)
+    {
+        B.FinishObjective();
+    }
 }
 
-// @STUB(M4) @SYS-MUT-WAVE legacy:KF2BotsMut.NearestValidPoint
 function NavigationPoint NearestValidPoint(vector Loc)
 {
+    local int i;
+    local NavigationPoint N, Best;
+    local float BestDistSq, DistSq;
+
+    Best = None;
+    BestDistSq = 9999999999.0;
+    for (i = 0; i < ValidPoints.Length; i++)
+    {
+        N = ValidPoints[i];
+        if (N == None)
+            continue;
+        DistSq = VSizeSq(N.Location - Loc);
+        if (DistSq < BestDistSq)
+        {
+            BestDistSq = DistSq;
+            Best = N;
+        }
+    }
+    return Best;
 }
 
 function string CoordStr(vector L)
@@ -513,99 +1346,656 @@ function string CoordStr(vector L)
     return string(FFloor(L.X / 100.0)) $ "," $ string(FFloor(L.Y / 100.0)) $ "," $ string(FFloor(L.Z / 100.0));
 }
 
-// @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.EnsureSquadOrderTable
 function EnsureSquadOrderTable()
 {
+    local int i;
+
+    if (SquadOrders.Length == Fireteams.Length)
+        return;
+    for (i = SquadOrders.Length; i < Fireteams.Length; i++)
+    {
+        SquadOrders[i].SquadID = i + 1;
+        SquadOrders[i].Leader = None;
+        SquadOrders[i].Zone = None;
+        SquadOrders[i].GoalNav = None;
+        SquadOrders[i].GoalPoint = vect(0, 0, 0);
+        SquadOrders[i].Phase = PHASE_IDLE;
+    }
 }
 
-// @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.InheritSquadOrder
 function InheritSquadOrder(int GroupIdx, EcholonBot NewLeader)
 {
+    local SquadOrder O;
+    local NavigationPoint GP;
+    local int GoalKept;
+
+    if (NewLeader == None || NewLeader.Pawn == None)
+        return;
+    if (GroupIdx < 0 || GroupIdx >= SquadOrders.Length)
+        return;
+
+    O = SquadOrders[GroupIdx];
+    if (O.GoalNav == None)
+    {
+        O.Leader = NewLeader;
+        O.Phase = PHASE_IDLE;
+        O.ObjectiveBailUntil = 0.0;
+        SquadOrders[GroupIdx] = O;
+        return;
+    }
+
+    O.Leader = NewLeader;
+    O.ObjectiveBailUntil = 0.0;
+    GoalKept = 1;
+    if (O.Zone != None && !O.Zone.EncompassesPoint(O.GoalPoint)) // SDK-UNVERIFIED: EncompassesPoint
+    {
+        GP = NearestValidPoint(NewLeader.Pawn.Location);
+        if (GP != None)
+        {
+            O.GoalNav = GP;
+            O.GoalPoint = GP.Location;
+            GoalKept = 0;
+        }
+    }
+    SquadOrders[GroupIdx] = O;
+    if (O.GoalNav != None)
+    {
+        SampleSquadSlots(GroupIdx);
+    }
+    EchelonLog("ORDER_INHERIT squad=" $ string(GroupIdx + 1) $ " newLeader=" $ string(NewLeader.Name) $ " goalKept=" $ string(GoalKept));
 }
 
-// @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.SampleSquadSlots
 function SampleSquadSlots(int GroupIdx)
 {
+    local SquadOrder O;
+    local EcholonBot Ldr, M;
+    local vector LeaderLoc, Candidate;
+    local array<vector> Candidates;
+    local array<bool> bAlive;
+    local float Angle, R0, DMin, Dist, BestDist;
+    local int N, i, j, BestIdx;
+
+    if (GroupIdx < 0 || GroupIdx >= SquadOrders.Length)
+        return;
+    if (GroupIdx >= Fireteams.Length)
+        return;
+
+    O = SquadOrders[GroupIdx];
+    Ldr = O.Leader;
+    if (Ldr == None || Ldr.Pawn == None || O.GoalNav == None)
+        return;
+
+    ReleaseSquadSlots(GroupIdx, "Resample");
+
+    LeaderLoc = Ldr.Pawn.Location;
+
+    N = 0;
+    for (i = 0; i < Fireteams[GroupIdx].Members.Length; i++)
+    {
+        if (Fireteams[GroupIdx].Members[i] == None)
+            continue;
+        if (Fireteams[GroupIdx].Members[i] == Ldr)
+            continue;
+        N++;
+    }
+    if (N > 4)
+        N = 4;
+    if (N <= 0)
+        return;
+
+    O.Slots.Length = 0;
+    O.SlotLocs.Length = 0;
+
+    R0 = 96.0;
+    for (i = 0; i < N; i++)
+    {
+        Angle = O.SquadSeedAngle + (float(i) * 6.2831855 / float(N));
+        Candidate.X = O.GoalPoint.X + Cos(Angle) * R0;
+        Candidate.Y = O.GoalPoint.Y + Sin(Angle) * R0;
+        Candidate.Z = O.GoalPoint.Z;
+        Candidates.AddItem(Candidate);
+        bAlive.AddItem(true);
+    }
+
+    // SDK-UNVERIFIED: EncompassesPoint not separately verified in SDK index
+    for (i = 0; i < N; i++)
+    {
+        if (O.Zone != None && !O.Zone.EncompassesPoint(Candidates[i]))
+        {
+            bAlive[i] = false;
+        }
+        if (Abs(Candidates[i].Z - LeaderLoc.Z) >= 50.0)
+        {
+            bAlive[i] = false;
+        }
+    }
+
+    BestDist = 0.0;
+    while (true)
+    {
+        BestIdx = INDEX_NONE;
+        for (i = 0; i < N; i++)
+        {
+            if (!bAlive[i])
+                continue;
+            DMin = VSize(Candidates[i] - O.GoalPoint);
+            for (j = 0; j < O.SlotLocs.Length; j++)
+            {
+                Dist = VSize(Candidates[i] - O.SlotLocs[j]);
+                if (Dist < DMin)
+                    DMin = Dist;
+            }
+            if (BestIdx == INDEX_NONE || DMin > BestDist)
+            {
+                BestDist = DMin;
+                BestIdx = i;
+            }
+        }
+        if (BestIdx == INDEX_NONE)
+            break;
+        if (BestIdx >= O.SlotLocs.Length)
+        {
+            O.SlotLocs.Length = BestIdx + 1;
+        }
+        O.SlotLocs[BestIdx] = Candidates[BestIdx];
+        O.Slots.AddItem(BestIdx);
+        bAlive[BestIdx] = false;
+        BestDist = 0.0;
+    }
+    SquadOrders[GroupIdx] = O;
+
+    for (j = 0; j < O.Slots.Length; j++)
+    {
+        M = GetFollowerBySlot(GroupIdx, O.Slots[j]);
+        if (M == None)
+            continue;
+        EchelonLog("SLOT_CLAIM bot=" $ string(M.Name) $ " squad=" $ string(GroupIdx + 1) $ " slot=" $ string(O.Slots[j]) $ " angle=" $ string(Atan2(Candidates[O.Slots[j]].Y - O.GoalPoint.Y, Candidates[O.Slots[j]].X - O.GoalPoint.X) * 57.2957795) $ " dist=" $ string(VSize(Candidates[O.Slots[j]] - O.GoalPoint)));
+    }
 }
 
-// @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.ReleaseSquadSlots
 function ReleaseSquadSlots(int GroupIdx, string Reason)
 {
+    local SquadOrder O;
+    local EcholonBot M;
+    local int j;
+
+    if (GroupIdx < 0 || GroupIdx >= SquadOrders.Length)
+        return;
+
+    O = SquadOrders[GroupIdx];
+    for (j = 0; j < O.Slots.Length; j++)
+    {
+        M = GetFollowerBySlot(GroupIdx, O.Slots[j]);
+        if (M != None)
+        {
+            EchelonLog("SLOT_RELEASE bot=" $ string(M.Name) $ " squad=" $ string(GroupIdx + 1) $ " slot=" $ string(O.Slots[j]) $ " reason=" $ Reason);
+        }
+    }
+    O.Slots.Length = 0;
+    O.SlotLocs.Length = 0;
+    SquadOrders[GroupIdx] = O;
 }
 
-// @STUB(M4) @SYS-MUT-SUCCESSION legacy:KF2BotsMut.GetFollowerBySlot
 function EcholonBot GetFollowerBySlot(int GroupIdx, int SlotIdx)
 {
+    local int i, FollowerSlot;
+    local EcholonBot M;
+
+    if (GroupIdx < 0 || GroupIdx >= Fireteams.Length)
+        return None;
+
+    FollowerSlot = 0;
+    for (i = 0; i < Fireteams[GroupIdx].Members.Length; i++)
+    {
+        M = Fireteams[GroupIdx].Members[i];
+        if (M == None || M == Fireteams[GroupIdx].Leader)
+            continue;
+        if (FollowerSlot == SlotIdx)
+            return M;
+        FollowerSlot++;
+    }
+    return None;
 }
 
-// @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.GetSquadPhase
 function int GetSquadPhase(EcholonBot B)
 {
+    local int GroupIdx;
+
+    if (B == None)
+        return 0;
+    GroupIdx = B.GroupID - 1;
+    if (GroupIdx < 0 || GroupIdx >= SquadOrders.Length)
+        return 0;
+    return SquadOrders[GroupIdx].Phase;
 }
 
-// @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.IsSquadInObjectivePhase
 function bool IsSquadInObjectivePhase(EcholonBot B)
 {
+    local int GroupIdx;
+
+    if (B == None)
+        return false;
+
+    GroupIdx = B.GroupID - 1;
+    if (GroupIdx < 0 || GroupIdx >= SquadOrders.Length)
+        return false;
+
+    return (SquadOrders[GroupIdx].Phase == PHASE_ENROUTE) || (SquadOrders[GroupIdx].Phase == PHASE_HOLDING);
 }
 
-// @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.GetSlotLocation
 function vector GetSlotLocation(EcholonBot B)
 {
+    local int GroupIdx, SlotIdx;
+
+    if (B == None)
+        return vect(0, 0, 0);
+    GroupIdx = B.GroupID - 1;
+    if (GroupIdx < 0 || GroupIdx >= SquadOrders.Length)
+        return vect(0, 0, 0);
+    SlotIdx = B.FollowSlotIndex;
+    if (SlotIdx < 0 || SlotIdx >= SquadOrders[GroupIdx].SlotLocs.Length)
+        return vect(0, 0, 0);
+    return SquadOrders[GroupIdx].SlotLocs[SlotIdx];
 }
 
-// @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.EvaluateSquadPhase
 function EvaluateSquadPhase()
 {
+    local SquadOrder O;
+    local EcholonBot M;
+    local vector GoalLoc;
+    local float GoalRadiusSq;
+    local float DistSq;
+    local bool LeaderInside;
+    local bool MemberInside;
+    local int i;
+    local int MemberIdx;
+
+    if (WorldInfo == None || !bObjectiveActive)
+        return;
+
+    GoalRadiusSq = 9216.0;
+
+    for (i = 0; i < SquadOrders.Length; i++)
+    {
+        if (i >= Fireteams.Length)
+            break;
+
+        O = SquadOrders[i];
+        if (O.Leader == None || O.Leader.Pawn == None)
+            continue;
+        if (O.Phase != PHASE_ENROUTE && O.Phase != PHASE_HOLDING)
+            continue;
+
+        if (O.Zone != None)
+        {
+            LeaderInside = O.Zone.Encompasses(O.Leader.Pawn);
+        }
+        else
+        {
+            GoalLoc = O.GoalPoint;
+            DistSq = VSizeSq(O.Leader.Pawn.Location - GoalLoc);
+            LeaderInside = DistSq < GoalRadiusSq;
+        }
+
+        MemberInside = false;
+        for (MemberIdx = 0; MemberIdx < Fireteams[i].Members.Length; MemberIdx++)
+        {
+            M = Fireteams[i].Members[MemberIdx];
+            if (M == None || M == O.Leader)
+                continue;
+            if (M.Pawn == None || M.Pawn.Health <= 0)
+                continue;
+            if (O.Zone != None)
+            {
+                if (O.Zone.Encompasses(M.Pawn))
+                    MemberInside = true;
+            }
+            else
+            {
+                if (VSizeSq(M.Pawn.Location - O.GoalPoint) < GoalRadiusSq)
+                    MemberInside = true;
+            }
+        }
+
+        if (O.Phase == PHASE_ENROUTE && LeaderInside && MemberInside)
+        {
+            O.Phase = PHASE_HOLDING;
+            SquadOrders[i] = O;
+        }
+        else if (O.Phase == PHASE_HOLDING && !LeaderInside)
+        {
+            O.Phase = PHASE_ENROUTE;
+            SquadOrders[i] = O;
+        }
+    }
 }
 
-// @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.HasSquadGoal
 function bool HasSquadGoal(EcholonBot B)
 {
+    local int G;
+
+    if (B == None || B.GroupID - 1 < 0 || B.GroupID - 1 >= SquadOrders.Length)
+    {
+        return false;
+    }
+
+    G = B.GroupID - 1;
+    return (SquadOrders[G].GoalNav != None && SquadOrders[G].GoalPoint != vect(0, 0, 0));
 }
 
-// @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.ReissueSquadOrder
 function ReissueSquadOrder(EcholonBot B)
 {
+    local int G;
+    local SquadOrder O;
+
+    if (B == None || B.GroupID - 1 < 0 || B.GroupID - 1 >= SquadOrders.Length)
+    {
+        return;
+    }
+
+    G = B.GroupID - 1;
+    O = SquadOrders[G];
+    O.ObjectiveBailUntil = 0.0;
+    SquadOrders[G] = O;
+    SampleSquadSlots(G);
+    EchelonLog("ORDER_REISSUE group=" $ string(G + 1) $ " leader=" $ string(B.Name));
 }
 
-// @STUB(M4) @SYS-MUT-REGROUP legacy:KF2BotsMut.FindNearestActiveLeader
 function Controller FindNearestActiveLeader(EcholonBot B, float MaxDist)
 {
+    local int i;
+    local EcholonBot Cand;
+    local EcholonMut.CachedHumanInfo CH;
+    local KFPawn_Human CandH;
+    local float BestD2, D2;
+    local Controller BestCtrl;
+
+    if (B == None || B.Pawn == None)
+    {
+        return None;
+    }
+    BestD2 = MaxDist * MaxDist;
+    BestCtrl = None;
+    for (i = 0; i < Fireteams.Length; i++)
+    {
+        Cand = Fireteams[i].Leader;
+        if (Cand != None && Cand != B && Cand.Pawn != None && Cand.Pawn.Health > 0)
+        {
+            D2 = VSizeSq(Cand.Pawn.Location - B.Pawn.Location);
+            if (D2 < BestD2)
+            {
+                BestD2 = D2;
+                BestCtrl = Cand;
+            }
+        }
+    }
+    for (i = 0; i < CachedHumans.Length; i++)
+    {
+        CH = CachedHumans[i];
+        CandH = CH.HumanPawn;
+        if (CandH != None && CandH.IsAliveAndWell() && PlayerController(CandH.Controller) != None)
+        {
+            D2 = VSizeSq(CH.Loc - B.Pawn.Location);
+            if (D2 < BestD2)
+            {
+                BestD2 = D2;
+                BestCtrl = CandH.Controller;
+            }
+        }
+    }
+    return BestCtrl;
 }
 
-// @STUB(M4) @SYS-MUT-REGROUP legacy:KF2BotsMut.CountZedsInRadius
 function int CountZedsInRadius(vector Origin, float Radius)
 {
+    local int Count;
+    local KFPawn_Monster Zed;
+
+    Count = 0;
+    foreach DynamicActors(class'KFPawn_Monster', Zed)
+    {
+        if (Zed.IsAliveAndWell() && VSizeSq(Zed.Location - Origin) <= Radius * Radius)
+        {
+            Count++;
+        }
+    }
+    return Count;
 }
 
-// @STUB(M4) @SYS-MUT-REGROUP legacy:KF2BotsMut.EvaluateRegroupEntries
 function EvaluateRegroupEntries()
 {
+    local int i;
+    local SquadOrder O;
+    local EcholonBot Leader, NewLeader;
+    local bool bLeaderDead, bNoGoal, bIdleNow;
+    local float Now;
+
+    if (Fireteams.Length == 0)
+        return;
+    EnsureSquadOrderTable();
+    if (SquadIdleStamp.Length != SquadOrders.Length)
+        SquadIdleStamp.Length = SquadOrders.Length;
+    Now = WorldInfo.TimeSeconds;
+
+    for (i = 0; i < Fireteams.Length; i++)
+    {
+        Leader = Fireteams[i].Leader;
+        bLeaderDead = (Leader == None || Leader.Pawn == None || Leader.Pawn.Health <= 0);
+        if (bLeaderDead)
+        {
+            if (Fireteams[i].Members.Length > 0)
+            {
+                NewLeader = FindBestCandidate(Fireteams[i].Members);
+                if (NewLeader != None)
+                {
+                    Fireteams[i].Leader = NewLeader;
+                    NewLeader.bIsGroupLeader = true;
+                    NewLeader.BotRank = SQUAD_LEADER;
+                    NewLeader.ResetStuckState();
+                    InheritSquadOrder(i, NewLeader);
+                    SampleSquadSlots(i);
+                    O = SquadOrders[i];
+                    O.Phase = PHASE_REGROUP;
+                    O.StartTime = Now;
+                    SquadOrders[i] = O;
+                    EchelonLog("REGROUP_ENTER squad=" $ string(i + 1) $ " leaderDead newLeader=" $ string(NewLeader.Name));
+                    SyncSquadLeaders();
+                }
+            }
+            continue;
+        }
+
+        bNoGoal = !HasSquadGoal(Leader);
+        bIdleNow = Leader.IsInState('PickNextMove') || Leader.IsInState('Camp') || Leader.IsInState('Roaming');
+        if (bNoGoal && bIdleNow && SquadIdleStamp[i] == 0.0)
+        {
+            SquadIdleStamp[i] = Now;
+        }
+        else if (!(bNoGoal && bIdleNow))
+        {
+            SquadIdleStamp[i] = 0.0;
+        }
+        if (bNoGoal && bIdleNow && SquadIdleStamp[i] > 0.0
+            && Now - SquadIdleStamp[i] >= 3.0
+            && CountZedsInRadius(Leader.Pawn.Location, REGROUP_SCAN_RADIUS) == 0)
+        {
+            O = SquadOrders[i];
+            O.Phase = PHASE_REGROUP;
+            O.StartTime = Now;
+            SquadOrders[i] = O;
+            SquadIdleStamp[i] = 0.0;
+            EchelonLog("REGROUP_ENTER squad=" $ string(i + 1) $ " leaderIdle leader=" $ string(Leader.Name));
+        }
+    }
 }
 
-// @STUB(M4) @SYS-MUT-REGROUP legacy:KF2BotsMut.GetSquadStartTime
 function float GetSquadStartTime(EcholonBot B)
 {
+    local int GroupIdx;
+
+    if (B == None)
+        return 0.0;
+    GroupIdx = B.GroupID - 1;
+    if (GroupIdx < 0 || GroupIdx >= SquadOrders.Length)
+        return 0.0;
+    return SquadOrders[GroupIdx].StartTime;
 }
 
-// @STUB(M4) @SYS-MUT-REGROUP legacy:KF2BotsMut.MoveSquadMembers
 function int MoveSquadMembers(int FromIdx, int ToIdx)
 {
+    local int MemberIdx;
+    local SquadOrder O;
+    local EcholonBot M;
+
+    if (FromIdx == ToIdx)
+        return 0;
+    if (FromIdx < 0 || FromIdx >= Fireteams.Length || ToIdx < 0 || ToIdx >= Fireteams.Length)
+        return 0;
+
+    O = SquadOrders[FromIdx];
+    O.Phase = PHASE_IDLE;
+    SquadOrders[FromIdx] = O;
+
+    for (MemberIdx = 0; MemberIdx < Fireteams[FromIdx].Members.Length; MemberIdx++)
+    {
+        M = Fireteams[FromIdx].Members[MemberIdx];
+        if (M == None)
+            continue;
+        ReassignBotToGroup(M, ToIdx);
+        M.WdLastHubContactTime = WorldInfo.TimeSeconds;
+    }
+
+    Fireteams[FromIdx].Leader = None;
+    Fireteams[FromIdx].Anchor = None;
+
+    O = SquadOrders[ToIdx];
+    O.Leader = Fireteams[ToIdx].Leader;
+    O.StartTime = WorldInfo.TimeSeconds;
+    SquadOrders[ToIdx] = O;
+
+    ConsolidateFireteams();
+    return Fireteams[ToIdx].Members.Length;
 }
 
-// @STUB(M4) @SYS-MUT-ORDERS legacy:KF2BotsMut.GetBotObjective
 final function NavigationPoint GetBotObjective(EcholonBot B)
 {
+    local int GroupIdx, i;
+    local SquadOrder O;
+    local float BestDistSq, DistSq;
+    local NavigationPoint Best;
+
+    if (!bObjectiveActive)
+    {
+        return None;
+    }
+    if (B == None || B.Pawn == None)
+    {
+        return ValidPoints[Rand(ValidPoints.Length)];
+    }
+
+    EnsureSquadOrderTable();
+    GroupIdx = B.GroupID - 1;
+    if (GroupIdx >= 0 && GroupIdx < SquadOrders.Length)
+    {
+        O = SquadOrders[GroupIdx];
+        if (O.Leader != None && O.GoalNav != None)
+        {
+            return O.GoalNav;
+        }
+    }
+
+    Best = None;
+    BestDistSq = 9999999999.0;
+    for (i = 0; i < SquadOrders.Length; i++)
+    {
+        O = SquadOrders[i];
+        if (O.Leader == None || O.Leader.Pawn == None || O.GoalNav == None)
+        {
+            continue;
+        }
+        DistSq = VSizeSq(O.Leader.Pawn.Location - B.Pawn.Location);
+        if (DistSq < BestDistSq)
+        {
+            BestDistSq = DistSq;
+            Best = O.GoalNav;
+        }
+    }
+    if (Best != None)
+    {
+        return Best;
+    }
+    return ValidPoints[Rand(ValidPoints.Length)];
 }
 
-// @STUB(M4) @SYS-MUT-NODEBLOCK legacy:KF2BotsMut.IsNodeBlocked
 function bool IsNodeBlocked(EcholonBot OwnerBot, NavigationPoint Node)
 {
+    local int GroupIdx, i;
+    local SquadOrder O;
+    local float Now;
+
+    if (OwnerBot == None || Node == None)
+        return false;
+
+    GroupIdx = OwnerBot.GroupID - 1;
+    if (GroupIdx < 0 || GroupIdx >= SquadOrders.Length)
+        return false;
+
+    Now = WorldInfo.TimeSeconds;
+    O = SquadOrders[GroupIdx];
+
+    for (i = 0; i < O.NodeBlacklist.Length; i++)
+    {
+        if (O.NodeBlacklist[i].Owner != OwnerBot)
+            continue;
+        if (O.NodeBlacklist[i].Node != Node.Name)
+            continue;
+        if (O.NodeBlacklist[i].ExpiresAt > Now)
+            return true;
+    }
+
+    return false;
 }
 
-// @STUB(M4) @SYS-MUT-NODEBLOCK legacy:KF2BotsMut.AddNodeBlock
 function AddNodeBlock(EcholonBot OwnerBot, NavigationPoint Node)
 {
+    local int GroupIdx, i;
+    local SquadOrder O;
+    local NavNodeBlock B;
+    local float Now;
+
+    if (OwnerBot == None || Node == None)
+        return;
+
+    GroupIdx = OwnerBot.GroupID - 1;
+    if (GroupIdx < 0 || GroupIdx >= SquadOrders.Length)
+        return;
+
+    Now = WorldInfo.TimeSeconds;
+    O = SquadOrders[GroupIdx];
+
+    for (i = O.NodeBlacklist.Length - 1; i >= 0; i--)
+    {
+        if (O.NodeBlacklist[i].ExpiresAt <= Now)
+        {
+            O.NodeBlacklist.Remove(i, 1);
+        }
+    }
+
+    for (i = 0; i < O.NodeBlacklist.Length; i++)
+    {
+        if (O.NodeBlacklist[i].Owner == OwnerBot && O.NodeBlacklist[i].Node == Node.Name)
+        {
+            O.NodeBlacklist[i].ExpiresAt = Now + OBJ_BAIL_COOLDOWN;
+            SquadOrders[GroupIdx] = O;
+            return;
+        }
+    }
+
+    B.Node = Node.Name;
+    B.Owner = OwnerBot;
+    B.ExpiresAt = Now + OBJ_BAIL_COOLDOWN;
+    O.NodeBlacklist.AddItem(B);
+    SquadOrders[GroupIdx] = O;
 }
 
 final function InitTraderList(KFGFxObject_TraderItems L)
@@ -1246,19 +2636,45 @@ final function bool ShouldDoVictoryDance()
     return true;
 }
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.CacheHumans
 function CacheHumans()
 {
+    CacheHumanPositions();
 }
 
-// @STUB(M4) @SYS-MUT-PLATOON legacy:KF2BotsMut.CacheHumanPositions
 function CacheHumanPositions()
 {
+    local KFPawn_Human H;
+    local CachedHumanInfo Info;
+    local PlayerController PC;
+
+    CachedHumans.Length = 0;
+    foreach WorldInfo.AllPawns(class'KFPawn_Human', H)
+    {
+        if (H.IsAliveAndWell())
+        {
+            PC = PlayerController(H.Controller);
+            if (PC != None)
+            {
+                Info.HumanPawn = H;
+                Info.Loc = H.Location;
+                Info.Vel = H.Velocity;
+                CachedHumans.AddItem(Info);
+            }
+        }
+    }
 }
 
-// @STUB(M4) @SYS-MUT-WAVE legacy:KF2BotsMut.GetObjectiveLocation
 function vector GetObjectiveLocation()
 {
+    if (bObjectiveActive && PrevObjective != None)
+    {
+        return PrevObjective.Location;
+    }
+    if (HoldVolume != None)
+    {
+        return HoldVolume.Location;
+    }
+    return vect(0,0,0);
 }
 
 function SetupSquadSpawns(int NumSquads)
