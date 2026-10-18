@@ -1,0 +1,532 @@
+class EcholonBot extends EcholonBotLogic hidecategories(Navigation);
+
+// @STUB(M6) @SYS-BOT-HUB legacy:KF2Bot.PickNextMove
+state PickNextMove
+{
+    // @STUB(M6) @SYS-BOT-HUB legacy:KF2Bot.PickNextMove.BeginState
+    event BeginState(Name PreviousStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-HUB legacy:KF2Bot.PickNextMove.EndState
+    event EndState(name NextStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-HUB legacy:KF2Bot.PickNextMove.PickMove
+    function PickMove()
+    {
+    }
+
+Begin:
+    Stop;
+}
+
+// @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming
+state Roaming
+{
+    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming.BeginState
+    event BeginState(name PreviousStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming.EndState
+    event EndState(name NextStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming.PickStyle
+    function PickStyle()
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming.FinishedMove
+    function FinishedMove()
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming.EnemyChanged
+    function EnemyChanged()
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Roaming.DonateMoney
+    function DonateMoney(Pawn Other)
+    {
+    }
+
+Begin:
+    Stop;
+Camp:
+    Stop;
+}
+
+// @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Camp
+state Camp
+{
+    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Camp.BeginState
+    event BeginState(name PreviousStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Camp.EndState
+    event EndState(name NextStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.Camp.EnemyChanged
+    function EnemyChanged()
+    {
+    }
+
+Begin:
+    Stop;
+}
+
+// @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.DoObjective
+state DoObjective extends Roaming
+{
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.DoObjective.FinishObjective
+    function FinishObjective()
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.DoObjective.PickStyle
+    function PickStyle()
+    {
+    }
+}
+
+// @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy
+state FightEnemy
+{
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.BeginState
+    event BeginState(name PreviousStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.EndState
+    event EndState(name NextStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.Timer
+    event Timer()
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.NotifyKilled
+    function NotifyKilled(Controller Killer, Controller Killed, Pawn KilledPawn, Class<DamageType> damageTyp)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.FinishedMove
+    function FinishedMove()
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.PickStyle
+    function PickStyle()
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.FightEnemy.NotifyBump
+    event bool NotifyBump(Actor Other, Vector HitNormal)
+    {
+    }
+
+Begin:
+    Stop;
+}
+
+// @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.TacticalRetreat
+state TacticalRetreat
+{
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.TacticalRetreat.BeginState
+    event BeginState(name PreviousStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.TacticalRetreat.EndState
+    event EndState(name NextStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.TacticalRetreat.CheckRetreatStatus
+    function CheckRetreatStatus()
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.TacticalRetreat.FinishedMove
+    function FinishedMove()
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.TacticalRetreat.EnemyChanged
+    function EnemyChanged()
+    {
+    }
+
+Begin:
+    Stop;
+}
+
+// @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.BreakLose
+state BreakLose
+{
+    ignores CheckGrabbed;
+
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.BreakLose.BeginState
+    event BeginState(name PreviousStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.BreakLose.EndState
+    event EndState(name NextStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.BreakLose.Timer
+    function Timer()
+    {
+    }
+}
+
+// @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting
+state Hunting
+{
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting.BeginState
+    event BeginState(name PreviousStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting.EndState
+    event EndState(name NextStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting.PickStyle
+    function PickStyle()
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting.FinishedMove
+    function FinishedMove()
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting.EnemyChanged
+    function EnemyChanged()
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.Hunting.Timer
+    function Timer()
+    {
+    }
+
+Begin:
+    Stop;
+}
+
+// @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealingSelf
+state HealingSelf
+{
+    ignores FinishedMove;
+
+    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealingSelf.BeginState
+    event BeginState(name PreviousStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealingSelf.EndState
+    event EndState(name NextStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealingSelf.TimeOut
+    function TimeOut()
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealingSelf.HealFailsafe
+    function HealFailsafe()
+    {
+    }
+
+Begin:
+    Stop;
+}
+
+// @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealOther
+state HealOther
+{
+    ignores FinishedMove;
+
+    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealOther.BeginState
+    event BeginState(name PreviousStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealOther.EndState
+    event EndState(name NextStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealOther.TimeOut
+    function TimeOut()
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealOther.HealFailsafe
+    function HealFailsafe()
+    {
+    }
+
+Begin:
+    Stop;
+}
+
+// @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealRanged
+state HealRanged
+{
+    ignores FinishedMove;
+
+    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealRanged.BeginState
+    event BeginState(name PreviousStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealRanged.EndState
+    event EndState(name NextStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealRanged.TimeOut
+    function TimeOut()
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-HEAL legacy:KF2Bot.HealRanged.HealFailsafe
+    function HealFailsafe()
+    {
+    }
+
+Begin:
+    Stop;
+}
+
+// @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.GrenadeTarget UNVERIFIED-ENTRY
+state GrenadeTarget
+{
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.GrenadeTarget.BeginState
+    event BeginState(name PreviousStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.GrenadeTarget.EndState
+    event EndState(name NextStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.GrenadeTarget.FinishedMove
+    function FinishedMove()
+    {
+    }
+
+Begin:
+    Stop;
+}
+
+// @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping
+state GoShopping
+{
+    // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.BeginState
+    event BeginState(name PreviousStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.EndState
+    event EndState(name NextStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.EnemyChanged
+    function EnemyChanged()
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.PickStyle
+    function PickStyle()
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.Timer
+    function Timer()
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.FinishedMove
+    function FinishedMove()
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.DoTrading
+    function DoTrading()
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-SHOP legacy:KF2Bot.GoShopping.NotifyBump
+    event bool NotifyBump(Actor Other, Vector HitNormal)
+    {
+    }
+
+Begin:
+    Stop;
+}
+
+// @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.GetItem UNVERIFIED-ENTRY
+state GetItem
+{
+    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.GetItem.BeginState
+    event BeginState(name PreviousStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.GetItem.EndState
+    event EndState(name NextStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.GetItem.Timer
+    function Timer()
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.GetItem.FinishedMove
+    function FinishedMove()
+    {
+    }
+
+Begin:
+    Stop;
+}
+
+// @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.DonatingMoney
+state DonatingMoney
+{
+    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.DonatingMoney.BeginState
+    event BeginState(name PreviousStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.DonatingMoney.EndState
+    event EndState(name NextStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.DonatingMoney.Tick
+    function Tick(float Delta)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.DonatingMoney.FinishedMove
+    function FinishedMove()
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-MOVE legacy:KF2Bot.DonatingMoney.DropMoney
+    final function bool DropMoney()
+    {
+    }
+
+Begin:
+    Stop;
+MoneyToss:
+    Stop;
+}
+
+// @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.Dead
+state Dead
+{
+    ignores StopAdjusting, Tick, CheckGrabbed, PickCombatStyle, SetEnemy, KilledBy, HearNoise, SeeMonster, SeePlayer;
+
+    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.Dead.BeginState
+    event BeginState(name PreviousStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.Dead.EndState
+    event EndState(name NextStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.Dead.ReassertScoreboardFlags
+    function ReassertScoreboardFlags()
+    {
+    }
+
+Begin:
+    Stop;
+}
+
+// @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.IsRagdolled
+state IsRagdolled
+{
+    ignores StopAdjusting, Tick, CheckGrabbed, PickCombatStyle, SetEnemy, HearNoise, SeeMonster, SeePlayer;
+
+    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.IsRagdolled.BeginState
+    event BeginState(name PreviousStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.IsRagdolled.EndState
+    event EndState(name NextStateName)
+    {
+    }
+}
+
+// @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.VictoryDance
+state VictoryDance
+{
+    ignores HearNoise, SeeMonster, SeePlayer;
+
+    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.VictoryDance.BeginState
+    event BeginState(name PreviousStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.VictoryDance.EndState
+    event EndState(name NextStateName)
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.VictoryDance.PlayDance
+    final function PlayDance()
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.VictoryDance.FinishedMove
+    function FinishedMove()
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.VictoryDance.GetRandMove
+    final function Vector GetRandMove()
+    {
+    }
+
+    // @STUB(M6) @SYS-BOT-TERM legacy:KF2Bot.VictoryDance.EnemyChanged
+    function EnemyChanged()
+    {
+    }
+
+MoveTaunt:
+    Stop;
+Begin:
+    Stop;
+}
+
+defaultproperties
+{
+}

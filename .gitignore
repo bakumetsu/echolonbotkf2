@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.u
+
+# The agent kit lives only on the developer PC.
+kit/
