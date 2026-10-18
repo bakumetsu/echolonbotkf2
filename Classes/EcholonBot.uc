@@ -9,9 +9,9 @@ state PickNextMove
         `log("EcholonBot: Entered PickNextMove from " $ PreviousStateName);
     }
 
-    // @STUB(M6) @SYS-BOT-HUB legacy:KF2Bot.PickNextMove.EndState
     event EndState(name NextStateName)
     {
+        AuditStateExit(NextStateName);
     }
 
     // @STUB(M6) @SYS-BOT-HUB legacy:KF2Bot.PickNextMove.PickMove
