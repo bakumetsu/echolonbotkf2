@@ -103,6 +103,7 @@ var array<ReachSpec> FollowSpecialSpecs;
 // Direct-steer only when the leader is within this height; above it, a ledge or balcony is likely in between.
 var float FollowDirectMaxZ;
 var bool bFollowSavedCanJump;
+var int FollowPlanDepth;  // nesting guard so an inner Begin/End can't lose the saved bCanJump
 
 function FollowStart(Controller NewLeaderCtrl)
 {
@@ -509,7 +510,7 @@ function bool FollowCheckReachable(bool bForceNow)
 // the bot can still drop off ledges while moving (MayFall reads bCanJump).
 function FollowPlanBegin()
 {
-    if (Pawn != None)
+    if (Pawn != None && FollowPlanDepth++ == 0)
     {
         bFollowSavedCanJump = Pawn.bCanJump;
         Pawn.bCanJump = false;
@@ -518,7 +519,7 @@ function FollowPlanBegin()
 
 function FollowPlanEnd()
 {
-    if (Pawn != None)
+    if (FollowPlanDepth > 0 && --FollowPlanDepth == 0 && Pawn != None)
     {
         Pawn.bCanJump = bFollowSavedCanJump;
     }

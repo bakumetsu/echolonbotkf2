@@ -2664,7 +2664,7 @@ final function ApplySquadCrouchHold()
 	local bool bWant;
 
 	bWant = (SquadLeader != None) && SquadLeader.bSquadCrouchHold;
-	if (bWant && mut != None && !mut.bAllowBotCrouch)
+	if (bWant && (mut == None || !mut.bAllowBotCrouch))
 	{
 		bWant = false;
 	}
@@ -3250,7 +3250,7 @@ final function bool IsTraderFreeTime()
 
 final function ApplyCrouch(bool bWant)
 {
-    if (bWant && mut != None && !mut.bAllowBotCrouch)
+    if (bWant && (mut == None || !mut.bAllowBotCrouch))
     {
         bWant = false;
     }

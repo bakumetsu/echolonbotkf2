@@ -23,7 +23,10 @@ function int CountHumanVoters()
 
 function bool ShouldConcludeSkipTraderVote()
 {
-	return (YesVotes + NoVotes >= CountHumanVoters() || NoVotes > 0);
+	local int NumHumans;
+
+	NumHumans = CountHumanVoters();
+	return (NumHumans > 0 && (YesVotes + NoVotes >= NumHumans || NoVotes > 0));
 }
 
 // Stock ConcludeVoteSkipTrader with the pass rule counting humans only.
@@ -40,7 +43,10 @@ reliable server function ConcludeVoteSkipTrader()
 		GetKFPRIArray(PRIs, , false);
 		for (i = 0; i < PRIs.Length; i++)
 		{
-			PRIs[i].HideSkipTraderVote();
+			if (PRIs[i] != None)
+			{
+				PRIs[i].HideSkipTraderVote();
+			}
 		}
 
 		NumHumans = CountHumanVoters();
