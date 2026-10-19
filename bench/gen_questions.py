@@ -1,0 +1,835 @@
+#!/usr/bin/env python3
+"""Generate bench/questions-draft.md and .json from one data source (draft, nothing is run)."""
+import json, sys
+from pathlib import Path
+
+OUT = Path(sys.argv[1])
+REF = "main @ 2a04568 (M4-M6 merged)"
+
+BUDGET = {1: 2048, 2: 4096, 3: 2048, 4: 4096, 5: 8192, "D": 2048}
+
+CONVENTIONS = {
+    "ground_truth": REF + ". Every file:line below is on that commit. PR #7 = branch claude/project-thread-t6s2vg (open, not merged).",
+    "bench_class": "Each answer is spliced into its own class `Bench_<model>_<qid>` (qid with '-' removed, e.g. Bench_qwen27b_T201) in a separate, never-deployed package (e.g. `EcholonBench`, listed after EcholonBot in [ModPackages]). The class extends the base_class given per question and overrides only the target.",
+    "final_functions": "A `final` function cannot be overridden. For targets marked final=true the harness renames the answer to `BQ_<Name>` in the bench class (signature otherwise unchanged) so it compiles beside the original. Recursive self-calls do not occur in any chosen target.",
+    "state_targets": "State functions and label code are answered by redeclaring the state in the bench class (`state X { ... }`, or `state DoObjective extends Roaming` exactly as the parent declares it) containing only the target members. UNVERIFIED: that a subclass state redeclaration with only some members compiles and inherits the rest; the harness should smoke-compile one empty redeclaration first.",
+    "consts_across_packages": "UNVERIFIED: that `const` values declared in EcholonBotBase/EcholonMut are visible to subclasses in another package. Smoke-compile once; fallback is to compile the bench classes inside a throwaway copy of the EcholonBot package.",
+    "shared_prefix_coder": "Coder/fixer prompts start with BIBLE_CORE.md verbatim (shared, cache-friendly), then: 'Write ONLY the target below. Output ONE ```unrealscript block containing just that function (or the state block with just the listed members). Use only symbols listed in the context or in the UE3/KF2 SDK.'",
+    "shared_prefix_review": "Bug-hunter/reviewer prompts start with BIBLE_CORE.md plus the known false-alarm list from THREAD_SUMMARY_M4_M6.md (None is valid, dropped package prefixes are fine, static arrays exist, EchelonLog is the real helper name, `~=` is case-insensitive string equality).",
+    "legacy_slice": "The real kit (agent_runner) also feeds the legacy KF2Bots slice via legacy_ref. Default for this benchmark: NOT included for tiers 1, 2 and 5 (contract text only, so the score measures understanding, not transcription). Each question still lists legacy_ref so the harness can switch it on.",
+    "error_lines": "Tier 3 error lines below are drafts. Only \"Missing '>' in 'class limitor'\" is a real KFEditor message (commit dfe9f3f). Before the run, the harness compiles each injected file once and pastes the real first error line from Launch.log into the prompt.",
+    "bughunt_output": "Bug-hunt answers: a JSON array of {\"where\": \"State.Function or Function\", \"line\": <snippet line>, \"why\": \"one sentence\"}, or [] if clean. Snippets are shown with their own line numbers 1..N; the answer key uses anchor text, which the harness maps to snippet lines.",
+    "bughunt_matching": "A finding is a true positive when it names the same function, its line is within +/-2 of a key anchor line, and the 'why' names the same failure (Claude judges this blind). Findings on the neutral list score 0 either way. Everything else is a false alarm. Per bundle: precision, recall; the role score is F1 over all bundles, pooled.",
+    "review_output": "Reviewer answers per diff: first line `OK` or `NOT OK`, then at most 3 lines of reason. Score: verdict correct = 1; for NOT OK items, verdict correct but reason wrong = 0.5. False 'NOT OK' on a good diff = false alarm (reported separately).",
+    "invented_names": "symbols.json check: every identifier used must exist in symbols.json / contracts.json, the bench context, or sdk_symbols.json. Note ast_validator U010 checks calls only; the bench harness must also check member-variable names (swift's invented `KF` was a variable).",
+    "compile_batching": "One KFEditor run per batch of answers that passed the validator; if it fails, the log names the class, that answer is marked failed and removed, recompile. Tier 3 needs one compile round per fix attempt, batched across models.",
+    "repeats": "Per the plan: everything once at temp 0.6; borderline answers and the top 3 models on tiers 2 and 5 repeat twice.",
+}
+
+Q = []
+
+def q(**kw):
+    kw.setdefault("reasoning_budget", BUDGET[kw["tier"]])
+    Q.append(kw)
+
+# ---------------------------------------------------------------- Tier 1
+q(id="T1-01", tier=1, role="coder",
+  title="EcholonWeaponInfo.InitInformation: fill weapon info from a weapon definition",
+  source="Classes/EcholonWeaponInfo.uc:13-57",
+  legacy_ref="AIWeaponInfo.InitInformation",
+  base_class="EcholonWeaponInfo",
+  target={"kind": "function", "name": "InitInformation", "state": None, "final": True,
+          "signature": "final function bool InitInformation(Class<KFWeaponDefinition> Def, name ClassName)"},
+  prompt=("Write `InitInformation` for class EcholonWeaponInfo (extends Object).\n"
+          "Contract: return false if Def is None or its weapon class cannot be loaded "
+          "(load it from Def.default.WeaponClassPath with DynamicLoadObject as Class<KFWeapon>). Otherwise fill every member: "
+          "WeaponClass; Perk = the weapon's perk at index 0; AIRating = BuyPrice as float; BuyPrice, AmmoPricePerMag, "
+          "SecondaryAmmoMagSize, SecondaryAmmoMagPrice copied from Def.default; bCanSell = BuyPrice > 0; "
+          "PricePerBullet[0] = AmmoPricePerMag / primary MagazineCapacity[0] (or AmmoPricePerMag if capacity is 0); "
+          "PricePerBullet[1] = SecondaryAmmoMagPrice / SecondaryAmmoMagSize (or the price if size is 0). Return true. "
+          "ClassName is unused."),
+  context=["EcholonWeaponInfo.uc:1-11 (all member vars)",
+           "SDK: KFWeaponDefinition default props WeaponClassPath, BuyPrice, AmmoPricePerMag, SecondaryAmmoMagSize, SecondaryAmmoMagPrice",
+           "SDK: KFWeapon.static.GetWeaponPerkClassByIndex(byte), KFWeapon.default.MagazineCapacity[2]"],
+  expected="Reference: EcholonWeaponInfo.uc:13-57. Any equivalent that guards both divisions and both None cases.",
+  checks=["validator (U001-U015) clean", "real compile (as BQ_InitInformation)", "no invented names",
+          "grep: no integer division (float() casts on both operands or float members)",
+          "grep: both zero-guards present"],
+  rubric=None)
+
+q(id="T1-02", tier=1, role="coder",
+  title="EcholonMut.GetFollowerIndex: 1-based follower position in a squad",
+  source="Classes/EcholonMut.uc:1140-1161",
+  legacy_ref="(new in rewrite; contracts.json EcholonMut.GetFollowerIndex)",
+  base_class="EcholonMut",
+  target={"kind": "function", "name": "GetFollowerIndex", "state": None, "final": False,
+          "signature": "function int GetFollowerIndex(EcholonBot Bot)"},
+  prompt=("Write `GetFollowerIndex` in EcholonMut.\n"
+          "Contract: return Bot's 1-based position among the non-leader members of its fireteam "
+          "(Fireteams[Bot.GroupID - 1].Members, skipping the entry equal to that team's Leader). "
+          "Return 1 if Bot is None or its group index is out of range. If Bot is not found, return followers + 1."),
+  context=["EcholonMut.uc:25 struct FireteamData", "EcholonMut.uc:49 var array<FireteamData> Fireteams",
+           "EcholonBotBase.uc:110 var int GroupID (1-based)"],
+  expected="Reference: EcholonMut.uc:1140-1161.",
+  checks=["validator clean", "real compile", "no invented names",
+          "unit table (Claude reads code): leader skipped; GroupID 0 -> 1; not found -> count+1"],
+  rubric=None)
+
+q(id="T1-03", tier=1, role="coder",
+  title="EcholonBotBase.GetWeaponEffectiveRangeUU: range per weapon family",
+  source="Classes/EcholonBotBase.uc:2836-2855",
+  legacy_ref="(new in rewrite, M5b BASE-WEAPON)",
+  base_class="EcholonBot",
+  target={"kind": "function", "name": "GetWeaponEffectiveRangeUU", "state": None, "final": True,
+          "signature": "final function float GetWeaponEffectiveRangeUU(KFWeapon W)"},
+  prompt=("Write `GetWeaponEffectiveRangeUU`.\n"
+          "Contract: shotguns (subclasses of KFWeap_ShotgunBase) use ShotgunEffectiveRangeUU; flamethrowers "
+          "(KFWeap_Flame_Flamethrower or any KFWeap_FlameBase) use FlamethrowerEffectiveRangeUU; everything else, "
+          "and W == None, uses DefaultWeaponEffectiveRangeUU."),
+  context=["EcholonBotBase.uc:252-254 the three config floats"],
+  expected="Reference: EcholonBotBase.uc:2836-2855 (IsA('KFWeap_ShotgunBase') etc.). Class-cast checks such as KFWeap_ShotgunBase(W) != None are equally correct.",
+  checks=["validator clean", "real compile (as BQ_GetWeaponEffectiveRangeUU)", "no invented names",
+          "IsA() argument is a name literal, not a string (N9/U006)"],
+  rubric=None)
+
+q(id="T1-04", tier=1, role="coder",
+  title="EcholonBotBase.HeavyZedWithin: is a large zed or a Siren near the bot",
+  source="Classes/EcholonBotBase.uc:1871-1893",
+  legacy_ref="(new in rewrite, M5a)",
+  base_class="EcholonBot",
+  target={"kind": "function", "name": "HeavyZedWithin", "state": None, "final": True,
+          "signature": "final function bool HeavyZedWithin(float Radius)"},
+  prompt=("Write `HeavyZedWithin`.\n"
+          "Contract: true if any living KFPawn_Monster within Radius of the bot's Pawn is a large zed (bLargeZed) "
+          "or is exactly class KFPawn_ZedSiren. False if the bot has no Pawn."),
+  context=["Bible A7 (iterator form)", "SDK: KFPawn_Monster.bLargeZed, IsAliveAndWell()"],
+  expected="Reference: EcholonBotBase.uc:1871-1893 (foreach WorldInfo.AllPawns(class'KFPawn_Monster', Z, Pawn.Location, Radius)).",
+  checks=["validator clean", "real compile (as BQ_HeavyZedWithin)", "no invented names",
+          "iterator 2nd arg is a single local, not an array (A7)", "Pawn None guard before Pawn.Location"],
+  rubric=None)
+
+q(id="T1-05", tier=1, role="coder",
+  title="EcholonBotLogic.ConsumePathToken: 10 path builds per second rate limit",
+  source="Classes/EcholonBotLogic.uc:497-510",
+  legacy_ref="(new in rewrite, M5c LOGIC-UTIL)",
+  base_class="EcholonBot",
+  target={"kind": "function", "name": "ConsumePathToken", "state": None, "final": False,
+          "signature": "function bool ConsumePathToken()"},
+  prompt=("Write `ConsumePathToken`.\n"
+          "Contract: a token bucket of 10 per 1-second window. When WorldInfo.TimeSeconds has passed PathTokenResetTime, "
+          "reset PathTokensUsed to 0 and set the next reset 1 s ahead. If 10 tokens are used, return false; otherwise "
+          "use one and return true."),
+  context=["EcholonBotBase.uc:207-208 var int PathTokensUsed; var float PathTokenResetTime;"],
+  expected="Reference: EcholonBotLogic.uc:497-510.",
+  checks=["validator clean", "real compile", "no invented names", "no writes to any var other than the two token vars (boundary audit)"],
+  rubric=None)
+
+# ---------------------------------------------------------------- Tier 2
+q(id="T2-01", tier=2, role="coder",
+  title="Hunting.BeginState/EndState: start and stop the state's own Timer (default-timer trap)",
+  source="Classes/EcholonBot.uc:949-968; trap from commit ec120f3 (swift named timers where legacy used the default Timer)",
+  legacy_ref="KF2Bot.Hunting.BeginState / EndState",
+  base_class="EcholonBot",
+  target={"kind": "state_members", "state": "Hunting", "name": "BeginState, EndState", "final": False},
+  prompt=("Write `BeginState` and `EndState` for state Hunting (shown as a state block with only these two events).\n"
+          "Contract: on entry log the state entry (AuditStateEntry), abort any current move, make the pawn sprint if KPawn "
+          "exists, and make Hunting's scan (the Timer() function declared in this state, shown below) run every 0.25 s. "
+          "On exit log the exit (AuditStateExit), stop that scan, and stop sprinting."),
+  context=["EcholonBot.uc:1019-1061 Hunting.Timer() (body shown so the model sees it is the state's Timer)",
+           "EcholonBotBase.uc:1042 AbortMove(), 2116 AuditStateEntry(), 2126 AuditStateExit(name)",
+           "EcholonBotBase.uc:131 var KFPawn_Human KPawn"],
+  expected="Reference: EcholonBot.uc:949-968: SetTimer(0.25, true); ... SetTimer(0.0, false);",
+  trap_checklist=["Timer target is the default 'Timer' (SetTimer(0.25, true) or explicit 'Timer'); any other name (e.g. 'PickStyle') fails",
+                  "EndState stops the same timer (SetTimer(0.0,false) or ClearTimer('Timer'))",
+                  "No latent call in either event (N3)",
+                  "KPawn None-checked before SetSprinting"],
+  checks=["validator clean (U009 alone does NOT catch a wrong-but-existing timer name)", "real compile",
+          "timer_check.py: named-vs-default comparison against the reference", "no invented names"],
+  rubric="Trap checklist all-pass = solved; any timer-name miss = fail regardless of compile.")
+
+q(id="T2-02", tier=2, role="coder",
+  title="FindNearestNavPoint: the radius iterator is not distance-ordered (C4)",
+  source="Classes/EcholonMut.uc:575-593 (C4 review fix by Claude; legacy returned the iterator's first hit)",
+  legacy_ref="KF2BotsMut.FindNearestNavPoint",
+  base_class="EcholonMut",
+  target={"kind": "function", "name": "FindNearestNavPoint", "state": None, "final": False,
+          "signature": "function NavigationPoint FindNearestNavPoint(vector ProjectedLoc, float SearchRadius)"},
+  prompt=("Write `FindNearestNavPoint` in EcholonMut.\n"
+          "Contract: return the NavigationPoint nearest to ProjectedLoc among those within SearchRadius, or None if there is none."),
+  context=["Bible A7 (RadiusNavigationPoints form)",
+           "Callers: EcholonMut.uc:524, 536, 606"],
+  expected="Reference: EcholonMut.uc:575-593: iterate all, keep min VSizeSq.",
+  trap_checklist=["Iterates every result and keeps the minimum distance; returning or breaking on the first hit fails (A7: no distance order)",
+                  "Single out variable in foreach (A7)",
+                  "Returns None when nothing is found (Best starts None or is checked)"],
+  checks=["validator clean", "real compile", "no invented names", "grep: no `return` inside the foreach body"],
+  rubric="Trap checklist all-pass = solved.")
+
+q(id="T2-03", tier=2, role="coder",
+  title="AddNodeBlock: struct-in-array copy/write-back and removing while looping",
+  source="Classes/EcholonMut.uc:1959-1999",
+  legacy_ref="(new in rewrite, M4 MUT-NODEBLOCK)",
+  base_class="EcholonMut",
+  target={"kind": "function", "name": "AddNodeBlock", "state": None, "final": False,
+          "signature": "function AddNodeBlock(EcholonBot OwnerBot, NavigationPoint Node)"},
+  prompt=("Write `AddNodeBlock` in EcholonMut.\n"
+          "Contract: in the squad order of OwnerBot's group (SquadOrders[OwnerBot.GroupID - 1]), first drop every "
+          "NodeBlacklist entry that has expired (ExpiresAt <= now). Then, if this owner already blocks this node, push its "
+          "expiry to now + OBJ_BAIL_COOLDOWN; otherwise add a new entry {Node = Node.Name, Owner = OwnerBot, ExpiresAt = now + OBJ_BAIL_COOLDOWN}. "
+          "Do nothing if OwnerBot or Node is None or the group index is outside SquadOrders. The change must be stored in SquadOrders."),
+  context=["EcholonMut.uc:27 struct NavNodeBlock", "EcholonMut.uc:29 struct SquadOrder", "EcholonMut.uc:50 var array<SquadOrder> SquadOrders",
+           "EcholonMut.uc:15 const OBJ_BAIL_COOLDOWN", "Reader for comparison: IsNodeBlocked EcholonMut.uc:1930-1957"],
+  expected="Reference: EcholonMut.uc:1959-1999 (copy to local O, backward prune, refresh-or-add, SquadOrders[GroupIdx] = O on both exits).",
+  trap_checklist=["Expired entries removed with a backward loop or an index that does not skip after Remove (N8)",
+                  "If the struct is copied to a local, it is written back on EVERY path that changed it (prune-only path included)",
+                  "Node stored and compared as Node.Name (struct field is a name)",
+                  "Bounds check against SquadOrders.Length, not Fireteams.Length"],
+  checks=["validator clean (U011 warns on forward-loop removal)", "real compile", "no invented names"],
+  rubric="Trap checklist all-pass = solved.")
+
+q(id="T2-04", tier=2, role="coder",
+  title="VictoryDance Begin: label code: latent waits, no locals, byte counter, None after waits",
+  source="Classes/EcholonBot.uc:1881-1894",
+  legacy_ref="KF2Bot.VictoryDance (Begin:)",
+  base_class="EcholonBot",
+  target={"kind": "state_label", "state": "VictoryDance", "name": "Begin", "final": False},
+  prompt=("Write only the `Begin:` label code of state VictoryDance (return it inside `state VictoryDance { Begin: ... }`).\n"
+          "Contract: if the pawn is falling, wait for landing (bounded). Wait a random 0.1-1.1 s. Call PlayDance(). Then wait while "
+          "the emote special move (KPawn.IsDoingSpecialMove(35)) is playing, polling every 0.1 s, giving up after about 25 s. "
+          "Then hand control back to the hub with PickCombatStyle()."),
+  context=["EcholonBot.uc:1825-1835 PlayDance()", "EcholonBotBase.uc:125 var byte DoshDropCounter (free to reuse as a counter here)",
+           "EcholonBotBase.uc:131 var KFPawn_Human KPawn", "Bible N3, N4, A4, A6, W4"],
+  expected="Reference: EcholonBot.uc:1881-1894 (`while (KPawn.IsDoingSpecialMove(35) && ++DoshDropCounter < 250) Sleep(0.1);`). NOTE: the reference does not re-check KPawn after the sleeps; the checklist asks for it (see 'grounding' notes).",
+  trap_checklist=["No `local` declarations inside label code; counter is an existing member (DoshDropCounter) or time-based (WorldInfo.TimeSeconds deadline into an existing float such as landingDeadline)",
+                  "If the byte DoshDropCounter is used, the cap is below 256 (byte wrap, A4)",
+                  "WaitForLanding has a deadline (W4)",
+                  "KPawn (or Pawn) re-checked for None after latent waits before dereferencing",
+                  "No `return` in label code; ends with PickCombatStyle(); Stop; (N4/A6)"],
+  checks=["validator clean (U003/U004/U005)", "real compile", "no invented names"],
+  rubric="Checklist items 1,2,3,5 required for 'solved'; item 4 scored as a bonus point in the logic score (the merged reference also misses it).")
+
+q(id="T2-05", tier=2, role="coder",
+  title="DonatingMoney.Tick: in-state override must call global.Tick (state super-call trap)",
+  source="Classes/EcholonBot.uc:1636-1667",
+  legacy_ref="KF2Bot.DonatingMoney.Tick",
+  base_class="EcholonBot",
+  target={"kind": "state_members", "state": "DonatingMoney", "name": "Tick", "final": False,
+          "signature": "function Tick(float Delta)"},
+  prompt=("Write `Tick` for state DonatingMoney.\n"
+          "Contract: keep everything the class-level Tick does (movement, perception). Then: if DonateHuman is None or dead, or the bot "
+          "has no Pawn, hand back to the hub (PickCombatStyle). If within 300 uu of DonateHuman: when there is a clear trace to them "
+          "hand back to the hub; otherwise, if a move is in progress (MoveFlags != 0) abort it and jump to this state's MoneyToss label, "
+          "else stop the pawn. If farther away, steer straight at DonateHuman. Bots steer by setting Pawn.Acceleration (W2)."),
+  context=["EcholonBotBase.uc:1096-1213 class-level Tick (summary: drives ProcessMoveTo/ProcessMoveToward from MoveFlags)",
+           "EcholonBotBase.uc:122 var byte MoveFlags; 134 var Pawn DonateHuman",
+           "EcholonBot.uc:1716-1738 DonatingMoney label code (Begin, MoneyToss)", "Bible A5 (global.F() inside a state; in-state super is UNVERIFIED), W2"],
+  expected="Reference: EcholonBot.uc:1636-1667 (first line `global.Tick(Delta);`).",
+  trap_checklist=["Calls global.Tick(Delta) (super.Tick in a state is UNVERIFIED per Bible A5; omitting it stops all movement)",
+                  "Label jump from a function uses GotoState('DonatingMoney', 'MoneyToss') with name literals",
+                  "No latent calls (Sleep/MoveTo) in Tick",
+                  "Steers with Pawn.Acceleration, not MoveTo/MoveToward (W2)",
+                  "Squared distance compared to 90000 (or VSize to 300), consistent units"],
+  checks=["validator clean", "real compile", "no invented names", "U009: label 'MoneyToss' exists in DonatingMoney"],
+  rubric="Item 1 required (missing global.Tick = fail). Others scored by checklist.")
+
+# ---------------------------------------------------------------- Tier 3
+T3_COMMON = ["after ONE fix: real compile passes", "diff vs reference limited to the broken construct (Claude checks: no rewrite, no behavior change)", "no invented names"]
+
+q(id="T3-01", tier=3, role="fixer",
+  title="CheckShouldSelfHeal: swift's invented `KF` variable (real failure, 3 fix rounds lost)",
+  source="Classes/EcholonBotLogic.uc:185-239; commit b2ab915 ('the local model failed three compile fixes (it invented a KF variable for the trader check)')",
+  legacy_ref="KF2BotLogic.CheckShouldSelfHeal",
+  base_class="EcholonBot",
+  target={"kind": "function", "name": "CheckShouldSelfHeal", "state": None, "final": True,
+          "signature": "final function bool CheckShouldSelfHeal()"},
+  injection={"anchor": "if (WorldInfo.TimeSeconds < HealPacingEnd && !(KFGRI != None && KFGRI.bTraderIsOpen))",
+             "replace": "if (WorldInfo.TimeSeconds < HealPacingEnd && !(KF != None && KF.MyKFGRI.bTraderIsOpen))"},
+  error_line_draft="...\\EcholonBench\\Classes\\Bench_<m>_T301.uc(<line>) : Error, Bad or missing expression for token: KF, in '!'   [DRAFT: capture the real line]",
+  prompt="This function fails to compile. Error from KFEditor:\n<error line>\nReturn the corrected function, changing as little as possible.",
+  context=["the broken function", "EcholonBotBase.uc:136 var KFGameReplicationInfo KFGRI", "EcholonBotBase.uc:129 var EcholonMut mut",
+           "EcholonMut.uc:56 var KFGameInfo_Survival KF (member of the mutator, not of the bot)"],
+  expected="Use KFGRI (reference line). Also accepted: `mut != None && mut.KF != None && mut.KF.MyKFGRI != None && mut.KF.MyKFGRI.bTraderIsOpen` (the form PickMove uses, EcholonBot.uc:31). Not accepted: declaring a new `KF` var/local.",
+  checks=T3_COMMON + ["no new member or local named KF"],
+  rubric=None)
+
+q(id="T3-02", tier=3, role="fixer",
+  title="GetPointNear: `local` after a statement (N1)",
+  source="Classes/EcholonBotLogic.uc:974-1018",
+  legacy_ref="KF2BotLogic.GetPointNear",
+  base_class="EcholonBot",
+  target={"kind": "function", "name": "GetPointNear", "state": None, "final": True,
+          "signature": "final function Vector GetPointNear(Pawn Other, float MaxDist)"},
+  injection={"anchor": "    local byte I;\n\n    E = Other.GetCollisionExtent();",
+             "replace": "\n    E = Other.GetCollisionExtent();\n    local byte I;"},
+  error_line_draft="...Bench_<m>_T302.uc(<line>) : Error, <message about 'local'>   [DRAFT: capture the real line]",
+  prompt="This function fails to compile. Error from KFEditor:\n<error line>\nReturn the corrected function, changing as little as possible.",
+  context=["the broken function"],
+  expected="Move `local byte I;` up with the other locals. Nothing else changes.",
+  checks=T3_COMMON,
+  rubric=None)
+
+q(id="T3-03", tier=3, role="fixer",
+  title="ResetPerkPool: `>>` closing nested type brackets (N14, real first-compile error)",
+  source="Classes/EcholonMut.uc:2196-2212; real error from commit dfe9f3f (PerkPool declaration)",
+  legacy_ref="KF2BotsMut.ResetPerkPool",
+  base_class="EcholonMut",
+  target={"kind": "function", "name": "ResetPerkPool", "state": None, "final": True,
+          "signature": "final function ResetPerkPool()"},
+  injection={"note": "Variant of the real function that builds into a local first (only the local declaration carries the error).",
+             "anchor": "    local Class<KFPerk> P;\n\n    PerkPool.Length = 0;",
+             "replace": "    local Class<KFPerk> P;\n    local array<Class<KFPerk>> NewPool;\n\n    PerkPool.Length = 0;",
+             "also": "replace `PerkPool.AddItem(P);` with `NewPool.AddItem(P);` and append `PerkPool = NewPool;` before the closing brace"},
+  error_line_draft="...Bench_<m>_T303.uc(<line>) : Error, Missing '>' in 'class limitor'   (real message text, from dfe9f3f)",
+  prompt="This function fails to compile. Error from KFEditor:\n<error line>\nReturn the corrected function, changing as little as possible.",
+  context=["the broken function", "EcholonMut.uc:78 AllowedPerks; 92-93 PerkPool, PerkPoolCounts"],
+  expected="`local array<Class<KFPerk> > NewPool;` (space between the brackets). Nothing else changes.",
+  checks=T3_COMMON,
+  rubric=None)
+
+q(id="T3-04", tier=3, role="fixer",
+  title="IsNodeBlocked: name vs NavigationPoint type mismatch",
+  source="Classes/EcholonMut.uc:1930-1957",
+  legacy_ref="(new in rewrite, M4 MUT-NODEBLOCK)",
+  base_class="EcholonMut",
+  target={"kind": "function", "name": "IsNodeBlocked", "state": None, "final": False,
+          "signature": "function bool IsNodeBlocked(EcholonBot OwnerBot, NavigationPoint Node)"},
+  injection={"anchor": "if (O.NodeBlacklist[i].Node != Node.Name)", "replace": "if (O.NodeBlacklist[i].Node != Node)"},
+  error_line_draft="...Bench_<m>_T304.uc(<line>) : Error, Type mismatch in '!='   [DRAFT: capture the real line]",
+  prompt="This function fails to compile. Error from KFEditor:\n<error line>\nReturn the corrected function, changing as little as possible.",
+  context=["the broken function", "EcholonMut.uc:27 struct NavNodeBlock { var name Node; ... }"],
+  expected="Compare against Node.Name. Not accepted: changing the struct, or casting name(Node).",
+  checks=T3_COMMON + ["struct untouched; comparison uses .Name"],
+  rubric=None)
+
+q(id="T3-05", tier=3, role="fixer",
+  title="TacticalRetreat.BeginState: SetTimer arguments in the wrong order",
+  source="Classes/EcholonBot.uc:808-818",
+  legacy_ref="KF2Bot.TacticalRetreat.BeginState",
+  base_class="EcholonBot",
+  target={"kind": "state_members", "state": "TacticalRetreat", "name": "BeginState", "final": False},
+  injection={"anchor": "SetTimer(ZED_COUNT_INTERVAL, true, 'CheckRetreatStatus');",
+             "replace": "SetTimer('CheckRetreatStatus', ZED_COUNT_INTERVAL, true);"},
+  error_line_draft="...Bench_<m>_T305.uc(<line>) : Error, Call to 'SetTimer': type mismatch in parameter 1   [DRAFT: capture the real line]",
+  prompt="This event fails to compile. Error from KFEditor:\n<error line>\nReturn the corrected state block, changing as little as possible.",
+  context=["the broken state block (BeginState only)", "SDK: Actor.SetTimer(float InRate, optional bool inbLoop, optional Name inTimerFunc='Timer', optional Object inObj)",
+           "EcholonBot.uc:831 TacticalRetreat.CheckRetreatStatus()"],
+  expected="SetTimer(ZED_COUNT_INTERVAL, true, 'CheckRetreatStatus');",
+  checks=T3_COMMON + ["timer target still 'CheckRetreatStatus' and looping (EndState clears that name, EcholonBot.uc:823)"],
+  rubric=None)
+
+# ---------------------------------------------------------------- Tier 4 (bug hunt bundles)
+BH_PROMPT = ("Below are {n} functions from EcholonBot (UnrealScript, KF2). Some may contain real bugs; some are correct. "
+             "List only real bugs (wrong behavior or an Accessed None that can actually happen), as the JSON array described. "
+             "Return [] if you find none. Do not report style issues.")
+
+q(id="T4-01", tier=4, role="bughunter",
+  title="Bundle A: GoShopping state with two of swift's timer bugs planted back",
+  source="Classes/EcholonBot.uc:1445-1565; planted = commit ec120f3 reversed (hunks 1 and 2)",
+  base_class="n/a (no compile)",
+  shown=["GoShopping.BeginState 1447-1457", "GoShopping.EndState 1459-1468", "GoShopping.PickStyle 1475-1507",
+         "GoShopping.Timer 1509-1524", "GoShopping.DoTrading 1531-1547", "GoShopping.NotifyBump 1549-1556", "GoShopping Begin: 1558-1564"],
+  plants=[{"anchor": "SetTimer(0.4 + FRand() * 0.25, true);  // default 'Timer': this state's Timer() walks to the trader",
+           "replace": "SetTimer(0.4 + FRand() * 0.25, true, 'DoTrading');"},
+          {"anchor": "            SetTimer(0.0, false);  // stop the repeating Timer before the backoff retry\n", "replace": ""}],
+  prompt=BH_PROMPT.format(n=7),
+  context=["state members listed under 'shown' (with plants applied, comments stripped)", "one-line contracts: Timer() checks arrival at the trader; DoTrading() buys and leaves; PickStyle() walks to the trader or backs off"],
+  answer_key=[
+      {"key": "A1", "where": "GoShopping.BeginState", "anchor": "SetTimer(0.4 + FRand() * 0.25, true, 'DoTrading');",
+       "why": "Loops DoTrading (buy and leave) every ~0.5 s from entry instead of the state's Timer, so the bot never walks to the trader. Should be the default Timer.",
+       "origin": "swift timer bug 1 (ec120f3)"},
+      {"key": "A2", "where": "GoShopping.PickStyle", "anchor": "AbortMove();\n            ++TraderRetryCount;",
+       "why": "Backoff branch does not stop the repeating Timer (SetTimer(0.0,false)) before scheduling the DoTrading retry; the poll keeps running during backoff.",
+       "origin": "swift timer bug 3 (ec120f3)"}],
+  neutral=["Begin: uses bare WaitForLanding() (W4 wants a deadline) - rule deviation, not proven bug",
+           "KFGRI / Pawn not None-checked in Timer or PickStyle",
+           "DoTrading buys without checking the bot is at the trader (legacy behavior)"],
+  checks=["JSON parses", "precision/recall vs key"],
+  rubric=None)
+
+q(id="T4-02", tier=4, role="bughunter",
+  title="Bundle B: timer and combat code, one planted timer bug + one real Accessed None",
+  source="EcholonBot.uc GetItem 1570-1603 (planted: ec120f3 hunk 3 reversed); FightEnemy.PickStyle 645-773 (main, real bug fixed in PR #7 b3e6af9); decoys Hunting 949-968, TacticalRetreat 808-843",
+  base_class="n/a (no compile)",
+  shown=["GetItem.BeginState 1570-1579 (planted)", "GetItem.EndState 1581-1593", "GetItem.Timer 1595-1603",
+         "Hunting.BeginState 949-958", "Hunting.EndState 960-968",
+         "TacticalRetreat.BeginState 808-818", "TacticalRetreat.EndState 820-829", "TacticalRetreat.CheckRetreatStatus 831-843",
+         "FightEnemy.PickStyle 645-773"],
+  plants=[{"anchor": "SetTimer(0.1 + FRand() * 0.15, true);  // default 'Timer', as legacy",
+           "replace": "SetTimer(0.1 + FRand() * 0.15, true, 'FireWeaponAt');"}],
+  prompt=BH_PROMPT.format(n=9),
+  context=["listed members", "signatures: FireWeaponAt(Actor inActor) EcholonBotBase.uc:729; PickCombatStyle() 1740"],
+  answer_key=[
+      {"key": "B1", "where": "GetItem.BeginState", "anchor": "SetTimer(0.1 + FRand() * 0.15, true, 'FireWeaponAt');",
+       "why": "Timer calls FireWeaponAt with no argument (inActor None) and GetItem.Timer (which focuses and fires at Enemy) never runs. Should be the default Timer.",
+       "origin": "swift timer bug 2 (ec120f3)"},
+      {"key": "B2", "where": "FightEnemy.PickStyle", "anchor": "if (bMelee && Enemy.Health > BOSS_HEALTH_THRESHOLD)",
+       "why": "Enemy can be cleared (killed / NotifyKilled) before PickStyle runs; Enemy.Health and the later Enemy reads are Accessed None. Needs an Enemy == None guard that hands back to the hub.",
+       "origin": "PR #7 b3e6af9 (FightEnemy.PickStyle)"}],
+  neutral=["GetItem.BeginState: KPawn.SetSprinting without KPawn None check",
+           "FightEnemy.PickStyle: mut.bObjectiveActive read without mut None check (ap false-alarm family)",
+           "FightEnemy.PickStyle: Pawn None"],
+  checks=["JSON parses", "precision/recall vs key", "flags on Hunting/TacticalRetreat timers = false alarms (both are correct)"],
+  rubric=None)
+
+q(id="T4-03", tier=4, role="bughunter",
+  title="Bundle C: heal states, None after latent waits and InvManager during death",
+  source="EcholonBot.uc HealOther 1171-1285 (main), HealingSelf.EndState 1083-1098 (main); decoys EcholonBotLogic.uc:453-474. Real bugs fixed in PR #7 b3e6af9.",
+  base_class="n/a (no compile)",
+  shown=["HealOther (whole state) 1171-1285", "HealingSelf.EndState 1083-1098",
+         "EcholonBotLogic.CanAffordHeal 453-460", "EcholonBotLogic.HealFail 462-467", "EcholonBotLogic.HealSuccess 469-474"],
+  plants=[],
+  prompt=BH_PROMPT.format(n=5) + " Remember FinishRotation and Sleep are latent: other code (timers, EndState, damage) runs while they wait.",
+  context=["listed members", "PendingHeal is cleared by HealFail() and by the heal states' EndState"],
+  answer_key=[
+      {"key": "C1", "where": "HealOther Begin:", "anchor": ["MedicGun.AmmoCount[0] -= 100;", "if(PendingHeal.Health + PendingHeal.HealthToRegen > PendingHeal.HealthMax)"],
+       "why": "PendingHeal is dereferenced after FinishRotation() and after the heal Sleep() without re-checking; the target can die or be cleared during the wait (Accessed None / healing a dead pawn). Either site matches.",
+       "origin": "PR #7 b3e6af9 (HealOther label)"},
+      {"key": "C2", "where": "HealOther.EndState", "anchor": "Pawn.InvManager.SwitchToBestWeapon(true);",
+       "why": "Pawn.InvManager can be None while the pawn is dying; needs a None check.",
+       "origin": "PR #7 b3e6af9 (EndState guards)"},
+      {"key": "C3", "where": "HealingSelf.EndState", "anchor": "Pawn.InvManager.SwitchToBestWeapon(true);",
+       "why": "Same as C2 in HealingSelf.",
+       "origin": "PR #7 b3e6af9 (EndState guards)"}],
+  neutral=["HealOther Begin: waits while Physics == PHYS_Walking (looks inverted; unverified against legacy)",
+           "MedicGun None after the waits", "Pawn.InvManager.SetCurrentWeapon in the equip loop without InvManager check",
+           "HealOther Begin: moves with MoveTowardX inside a loop with Sleep(0.1) (by design, W2)"],
+  checks=["JSON parses", "precision/recall vs key"],
+  rubric=None)
+
+q(id="T4-04", tier=4, role="bughunter",
+  title="Bundle D: ranged heal, grenade throw, squad merge (array removal while looping)",
+  source="EcholonBot.uc HealRanged Begin: 1327-1405, GrenadeTarget 1409-1442; EcholonMut.uc MoveSquadMembers 1844-1878 (all main; fixed in PR #7 b3e6af9 and f8e6a47); decoys EcholonMut.uc ReassignBotToGroup 1087-1115, CleanupRangedHealCooldowns 841-855, PruneInvalidBots 425-435",
+  base_class="n/a (no compile)",
+  shown=["HealRanged Begin: 1327-1405", "GrenadeTarget (whole state) 1409-1442", "EcholonMut.MoveSquadMembers 1844-1878",
+         "EcholonMut.ReassignBotToGroup 1087-1115", "EcholonMut.CleanupRangedHealCooldowns 841-855", "EcholonMut.PruneInvalidBots 425-435"],
+  plants=[],
+  prompt=BH_PROMPT.format(n=6),
+  context=["listed members", "EcholonMut.uc:25 struct FireteamData; ConsolidateFireteams() 974 (summary)"],
+  answer_key=[
+      {"key": "D1", "where": "HealRanged Begin:", "anchor": ["RangeMedicGun.AmmoCount[1] -= 50;", "if(PendingHeal.Health + PendingHeal.HealthToRegen > PendingHeal.HealthMax)"],
+       "why": "PendingHeal used after FinishRotation() and after Sleep() without re-check (target can die or be cleared). Either site matches.",
+       "origin": "PR #7 b3e6af9 (HealRanged label)"},
+      {"key": "D2", "where": "GrenadeTarget Begin:", "anchor": "Pawn.Weapon.StartFire(4);",
+       "why": "Pawn.Weapon can be None (weapon swap in progress) after FinishRotation; Accessed None.",
+       "origin": "PR #7 b3e6af9 (GrenadeTarget)"},
+      {"key": "D3", "where": "EcholonMut.MoveSquadMembers", "anchor": "for (MemberIdx = 0; MemberIdx < Fireteams[FromIdx].Members.Length; MemberIdx++)",
+       "why": "ReassignBotToGroup removes the bot from Fireteams[FromIdx].Members, so the forward loop skips every second member, who stays in the dissolved squad with no leader. Loop backwards.",
+       "origin": "PR #7 f8e6a47 (legacy bug)"}],
+  neutral=["ReassignBotToGroup: no bounds check on NewGroupIdx (callers check)", "GrenadeTarget.EndState lacks AuditStateExit (style)",
+           "GrenadeTarget: Target None at Focus = Target", "MoveSquadMembers: SquadOrders index not bounds-checked separately from Fireteams"],
+  checks=["JSON parses", "precision/recall vs key", "flags on CleanupRangedHealCooldowns / PruneInvalidBots removal = false alarms (both loop backwards)"],
+  rubric=None)
+
+# ---------------------------------------------------------------- Tier 4 review set
+R = []
+def r(**kw): R.append(kw)
+
+r(id="R1", verdict="OK", source="PR #7 commit f8e6a47", where="EcholonMut.MoveSquadMembers",
+  diff="""--- a/Classes/EcholonMut.uc  (function MoveSquadMembers)
++++ b/Classes/EcholonMut.uc
+-    for (MemberIdx = 0; MemberIdx < Fireteams[FromIdx].Members.Length; MemberIdx++)
++    // ReassignBotToGroup removes M from this same Members array, so a forward loop skipped every second bot. Walk backwards.
++    for (MemberIdx = Fireteams[FromIdx].Members.Length - 1; MemberIdx >= 0; MemberIdx--)
+     {
+         M = Fireteams[FromIdx].Members[MemberIdx];""",
+  why="Correct fix: removal inside the loop requires a backward walk (N8).")
+r(id="R2", verdict="NOT OK", source="commit ec120f3 hunk 3, reversed (swift's original)", where="GetItem.BeginState",
+  diff="""--- a/Classes/EcholonBot.uc  (state GetItem, BeginState)
++++ b/Classes/EcholonBot.uc
+         if ((Enemy != None) && LineOfSightTo(Enemy))
+         {
+-            SetTimer(0.1 + FRand() * 0.15, true);  // default 'Timer', as legacy
++            SetTimer(0.1 + FRand() * 0.15, true, 'FireWeaponAt');
+         }""",
+  why="FireWeaponAt(Actor) is called by the timer with no target and GetItem.Timer stops running; keep the default Timer.")
+r(id="R3", verdict="OK", source="PR #7 commit b3e6af9 (GrenadeTarget hunk)", where="GrenadeTarget Begin:",
+  diff="""--- a/Classes/EcholonBot.uc  (state GrenadeTarget, Begin:)
++++ b/Classes/EcholonBot.uc
+     Focus = Target;
+     FinishRotation();
+-    Pawn.Weapon.StartFire(4);
++    if (Pawn.Weapon != None)  // no weapon equipped during a swap
++    {
++        Pawn.Weapon.StartFire(4);
++    }
+     Sleep(0.2);""",
+  why="Correct None guard after a latent wait.")
+r(id="R4", verdict="NOT OK", source="synthetic: C4 fix reverted (EcholonMut.uc:575-593)", where="EcholonMut.FindNearestNavPoint",
+  diff="""--- a/Classes/EcholonMut.uc  (function FindNearestNavPoint)
++++ b/Classes/EcholonMut.uc
+ function NavigationPoint FindNearestNavPoint(vector ProjectedLoc, float SearchRadius)
+ {
+-    local NavigationPoint FoundNav, BestNav;
+-    local float Dist, BestDist;
+-
+-    // C4 fix, BEHAVIOR-CHANGE: legacy returned the first hit of the radius iterator, which is not
+-    // ordered by distance. Return the closest navigation point instead.
++    local NavigationPoint FoundNav;
++
++    // Simplified: return as soon as we find a point.
+     foreach WorldInfo.RadiusNavigationPoints(class'NavigationPoint', FoundNav, ProjectedLoc, SearchRadius)
+     {
+-        Dist = VSizeSq(FoundNav.Location - ProjectedLoc);
+-        if (BestNav == None || Dist < BestDist)
+-        {
+-            BestNav = FoundNav;
+-            BestDist = Dist;
+-        }
++        return FoundNav;
+     }
+-    return BestNav;
++    return None;
+ }""",
+  why="RadiusNavigationPoints yields in no distance order (A7); the first hit is not the nearest. Reintroduces C4.")
+r(id="R5", verdict="NOT OK", source="synthetic from commit b2ab915 message (swift invented `KF`)", where="EcholonBotLogic.CheckShouldSelfHeal",
+  diff="""--- a/Classes/EcholonBotLogic.uc  (function CheckShouldSelfHeal)
++++ b/Classes/EcholonBotLogic.uc
+     // Behavioural pacing: skip chip-damage heals, except below 50% health or while the trader is open.
+-    if (WorldInfo.TimeSeconds < HealPacingEnd && !(KFGRI != None && KFGRI.bTraderIsOpen))
++    if (WorldInfo.TimeSeconds < HealPacingEnd && !(KF != None && KF.MyKFGRI.bTraderIsOpen))""",
+  why="`KF` is not a member of the bot (it is EcholonMut.KF); does not compile. Use KFGRI.")
+r(id="R6", verdict="OK", source="PR #7 commit b3e6af9 (FightEnemy hunk)", where="FightEnemy.PickStyle",
+  diff="""--- a/Classes/EcholonBot.uc  (state FightEnemy, PickStyle)
++++ b/Classes/EcholonBot.uc
++        // Enemy can be cleared (killed, NotifyKilled) between the hub and here; the
++        // Enemy.Health reads below would be Accessed None.
++        if (Enemy == None)
++        {
++            PickCombatStyle();
++            return;
++        }
+         bMelee = IsMeleeOnly();""",
+  why="Correct guard; return is allowed in a state function (not label code).")
+r(id="R7", verdict="OK", source="commit 8b471dd (ResolvePerkByName added)", where="EcholonMut.ResolvePerkByName",
+  diff="""--- a/Classes/EcholonMut.uc  (function ResolvePerkByName)
++++ b/Classes/EcholonMut.uc
+ final function Class<KFPerk> ResolvePerkByName(string PerkName)
+ {
++    local int I;
++
++    I = 0;
++    while (I < Class'KFGame.KFPlayerController'.default.PerkList.Length)
++    {
++        if (string(Class'KFGame.KFPlayerController'.default.PerkList[I].PerkClass.Name) ~= PerkName)
++        {
++            return Class'KFGame.KFPlayerController'.default.PerkList[I].PerkClass;
++        }
++        I++;
++    }
++    return None;
+ }""",
+  why="Correct. Bait for ap's known false alarms (`~=`, package-qualified class literal, returning None).")
+r(id="R8", verdict="NOT OK", source="synthetic: PruneInvalidBots (EcholonMut.uc:425-435) 'readability' rewrite", where="EcholonMut.PruneInvalidBots",
+  diff="""--- a/Classes/EcholonMut.uc  (function PruneInvalidBots)
++++ b/Classes/EcholonMut.uc
+-    for (i = ActiveBots.Length - 1; i >= 0; i--)
++    // Walk forward for readability.
++    for (i = 0; i < ActiveBots.Length; i++)
+     {
+         if (ActiveBots[i] == None || ActiveBots[i].bDeleteMe || ActiveBots[i].Pawn == None || ActiveBots[i].Pawn.Health <= 0)
+         {
+             ActiveBots.Remove(i, 1);
+         }
+     }""",
+  why="Removing while walking forward skips the element after each removal (N8).")
+r(id="R9", verdict="OK", source="commit ec120f3 hunk 1 (Claude's review fix)", where="GoShopping.BeginState",
+  diff="""--- a/Classes/EcholonBot.uc  (state GoShopping, BeginState)
++++ b/Classes/EcholonBot.uc
+-        SetTimer(0.4 + FRand() * 0.25, true, 'DoTrading');
++        SetTimer(0.4 + FRand() * 0.25, true);  // default 'Timer': this state's Timer() walks to the trader
+         TraderRetryCount = 0;""",
+  why="Correct: restores the default Timer, which polls arrival at the trader.")
+r(id="R10", verdict="NOT OK", source="synthetic on FightEnemy.EndState (EcholonBot.uc:547-557)", where="FightEnemy.EndState",
+  diff="""--- a/Classes/EcholonBot.uc  (state FightEnemy, EndState)
++++ b/Classes/EcholonBot.uc
+         AuditStateExit(NextStateName);
+-        SetTimer(0.0, false);
+-        ClearTimer('FinishedMove');
++        SetTimer(0.0, false);  // stops all timers""",
+  why="SetTimer(0.0,false) clears only the default 'Timer'. The one-shot 'FinishedMove' timer set by PickStyle/NotifyBump survives and fires FinishedMove in the next state.")
+
+q(id="T4-05", tier=4, role="reviewer",
+  title="Review set: 10 diffs (5 OK, 5 NOT OK), answer OK / NOT OK + reason",
+  source="PR #7 f8e6a47/b3e6af9, ec120f3, 8b471dd, b2ab915, C4 at EcholonMut.uc:575; synthetic reverts marked per item",
+  base_class="n/a (no compile)",
+  prompt=("You are reviewing a change to EcholonBot (UnrealScript, KF2). Answer `OK` if the change is correct and safe to merge, "
+          "or `NOT OK` if it introduces a bug or does not compile, then give your reason in at most 3 lines.\n<diff>"),
+  context=["one diff per call (10 calls), plus the full containing function after the change", "for R10 also FightEnemy.PickStyle line 769 and NotifyBump line 789 (where 'FinishedMove' timers are set)"],
+  review_items=R,
+  checks=["first line parses as OK / NOT OK", "verdict accuracy, false-alarm rate on the 5 OK items", "reason match on NOT OK items (Claude, blind)"],
+  rubric="Per item: 1 = right verdict (+ right reason for NOT OK), 0.5 = right NOT OK verdict with wrong reason, 0 otherwise.",
+  reasoning_budget=BUDGET[4])
+
+# ---------------------------------------------------------------- Tier 5
+q(id="T5-01", tier=5, role="coder",
+  title="FightEnemy entry and exit: BeginState, EndState and Begin: label",
+  source="Classes/EcholonBot.uc:538-557 and 796-802; Begin: written by Claude in ab317ea (M6-079/082)",
+  legacy_ref="KF2Bot.FightEnemy",
+  base_class="EcholonBot",
+  target={"kind": "state_members", "state": "FightEnemy", "name": "BeginState, EndState, Begin:", "final": False},
+  prompt=("Write `BeginState`, `EndState` and the `Begin:` label code of state FightEnemy (the other members exist and are shown).\n"
+          "Contract: on entry log it, abort the current move, run this state's Timer() (the fire loop) every 0.2 s, focus the enemy "
+          "and run Timer() once right away. On exit log it, stop every timer this state may have started (the fire loop and the "
+          "one-shot 'FinishedMove' timers set by PickStyle and NotifyBump), stand up and stop firing if there is a pawn. "
+          "Label code: if falling, wait for landing (bounded), then PickStyle(), then stop."),
+  context=["EcholonBot.uc:559-606 FightEnemy.Timer", "EcholonBot.uc:645-773 FightEnemy.PickStyle (note SetTimer(..., false, 'FinishedMove') at 769)",
+           "EcholonBot.uc:775-794 FightEnemy.NotifyBump (SetTimer at 789)", "EcholonBot.uc:639-643 FightEnemy.FinishedMove",
+           "Bible A5, A6, A8, N3, N4, W4"],
+  expected="Reference: EcholonBot.uc:538-557, 796-802.",
+  checks=["validator clean", "real compile", "timer_check: every SetTimer name in BeginState is cleared in EndState", "no invented names"],
+  rubric=("Blind 0-10: repeating 0.2 s timer on the state's Timer (2); Focus = Enemy and immediate Timer() (1); EndState stops the "
+          "repeating Timer AND ClearTimer('FinishedMove') (2); un-crouch + StopFiring under a Pawn None guard (2); Begin: bounded "
+          "WaitForLanding only when falling, PickStyle(), Stop (2); no invented timer names / no latent call outside label code (1)."))
+
+q(id="T5-02", tier=5, role="coder",
+  title="PickNextMove.PickMove: the priority hub (without regroup P4.5)",
+  source="Classes/EcholonBot.uc:17-209; written by Claude (THREAD_SUMMARY: PickNextMove is one of the 4 hand-written functions), commits 3046fb5 / ab317ea",
+  legacy_ref="KF2Bot.PickNextMove.PickMove",
+  base_class="EcholonBot",
+  target={"kind": "state_members", "state": "PickNextMove", "name": "PickMove", "final": False,
+          "signature": "function PickMove()"},
+  prompt=("Write `PickMove` for state PickNextMove: the hub that picks the bot's next state. Check in this order and leave "
+          "(GotoState + return) on the first match:\n"
+          "P1 terminal: bInTerminalState, or the match is over (mut.KF.MyKFGRI.bMatchIsOver, None-checked) -> VictoryDance.\n"
+          "P3 self-heal: KPawn exists and CheckShouldSelfHeal() -> HealingSelf.\n"
+          "P4 retreat: group leader with a KPawn, not already retreating, ShouldTacticalRetreat() -> set bIsRetreating, TacticalRetreat.\n"
+          "(P4.5 regroup: OMIT. Write the comment `// P4.5 regroup omitted for the benchmark` in its place.)\n"
+          "P5 objective (only while mut.bObjectiveActive): the bot has ammo if its weapon's GetTotalAmmoAmount(0) > 0. With no ObjectiveGoal "
+          "and ammo, take mut.GetBotObjective(self), reset ObjectiveBailUntil and AuditGoalLog(\"GOAL_SET\", \"PickMove\"). If the goal is "
+          "farther than SYG_DISTANCE_SQ (squared), the bot has ammo and the bail cooldown has passed -> DoObjective.\n"
+          "P6 medic: at most every TRIAGE_INTERVAL s (LastTriageTime): CheckMedicGunHeal() -> HealRanged; else CheckShouldHealMate() -> HealOther.\n"
+          "P7 combat: a living Enemy that is not a headless KFPawn_Monster: beyond LEASH_DROP_DIST_SQ drop it (Enemy = None, stamp "
+          "LastLeashDropTime); else with line of sight -> FightEnemy; else -> Hunting.\n"
+          "P8 tether: if EvaluateSquadTether() returns true, return.\n"
+          "P8.5 few zeds: no Enemy and 0 < GlobalZedCount < HUNT_ZED_THRESHOLD -> Hunting.\n"
+          "P9 shop: trader open, NextShoppingTime passed and KFGRI.OpenedTrader set -> GoShopping.\n"
+          "P10 otherwise ExecuteCampState()."),
+  context=["state and helper signatures: CheckShouldSelfHeal, ShouldTacticalRetreat, CheckMedicGunHeal, CheckShouldHealMate, EvaluateSquadTether, ExecuteCampState, AuditGoalLog, mut.GetBotObjective",
+           "vars: bInTerminalState, bIsRetreating, bIsGroupLeader, ObjectiveGoal, ObjectiveBailUntil, LastTriageTime, LastLeashDropTime, GlobalZedCount, NextShoppingTime, KFGRI, KPawn, mut (EcholonBotBase.uc:102-290)",
+           "consts EcholonBotBase.uc:13-53", "Bible W5 (hub funnel)"],
+  expected="Reference: EcholonBot.uc:17-209 with lines 52-127 replaced by the comment.",
+  checks=["validator clean", "real compile", "no invented names", "U009: every GotoState target exists",
+          "grep: no GotoState('PickNextMove') (W5) and no latent call"],
+  rubric=("Blind 0-10: priority order exactly as given (3); every GotoState followed by return (1); None-safety on mut / mut.KF / "
+          "MyKFGRI / Pawn / Pawn.Weapon where dereferenced (2); P5 ammo and bail logic matches (1); P7 leash drop does not leave "
+          "(falls through to P8) (1); P8 only returns when true (1); P10 fallback (1)."))
+
+q(id="T5-03", tier=5, role="coder",
+  title="BreakLose state: grab escape loop with failsafe",
+  source="Classes/EcholonBot.uc:869-944",
+  legacy_ref="KF2Bot.BreakLose",
+  base_class="EcholonBot",
+  target={"kind": "state_members", "state": "BreakLose", "name": "ignores, BeginState, EndState, Timer", "final": False},
+  prompt=("Write state BreakLose (ignores CheckGrabbed; BeginState, EndState, Timer).\n"
+          "Contract: entry: log, abort move, reset BreakFreeAttempts, GrabStartTime = now, NextEscapeAttempt = 0, "
+          "bGrappleFailsafeTriggered = false, run Timer every 0.15 s, focus the grabbing pawn (KPawn.InteractionPawn); if the bot is a GRUNT "
+          "with a SquadLeader, tell the leader (OnGruntGrabbed(self)); debug message if mut.bDebugGrapple.\n"
+          "Timer: while KPawn is alive and in the grabbed special move (IsDoingSpecialMove(31)) with an InteractionPawn: keep focus on it; "
+          "every 1.5 s count an attempt and call TryBreakFree() (debug message if enabled); once mut.FailsafeActivationDelay seconds have "
+          "passed since the grab, if CountNearbyZeds(600) <= mut.MaxZedsForFailsafe, trigger the failsafe once (ForceBreakGrapple()). "
+          "Otherwise (no longer grabbed) hand back to the hub.\n"
+          "Exit: log, stop the timer, stop firing, OnBreakLoseComplete(); debug summary if enabled and the bot is alive and free."),
+  context=["EcholonBotBase.uc:155-158 grab vars; 781 TryBreakFree; 1964 ForceBreakGrapple; 3405 OnBreakLoseComplete; 3522 OnGruntGrabbed; 1823 CountNearbyZeds",
+           "EcholonMut.uc:81-83 bDebugGrapple, MaxZedsForFailsafe, FailsafeActivationDelay; 2413 static DebugMessage(string)",
+           "EBotRank GRUNT (EcholonBotBase enum)"],
+  expected="Reference: EcholonBot.uc:869-944.",
+  checks=["validator clean", "real compile", "no invented names", "timer_check: Timer started in BeginState is stopped in EndState",
+          "mut None-checked before every mut.<field>"],
+  rubric=("Blind 0-10: timer start/stop pairing (2); attempt pacing via NextEscapeAttempt (2); failsafe fires at most once and only "
+          "after the delay and zed check (2); exit-to-hub when no longer grabbed (2); KPawn/mut None-safety (1); grunt notification (1)."))
+
+q(id="T5-04", tier=5, role="coder",
+  title="PickRetreatMove: score nav points away from the enemy, with fallbacks",
+  source="Classes/EcholonBotLogic.uc:839-887 (swift, M5c-023 commit 6f96527)",
+  legacy_ref="KF2BotLogic.PickRetreatMove",
+  base_class="EcholonBot",
+  target={"kind": "function", "name": "PickRetreatMove", "state": None, "final": True,
+          "signature": "final function PickRetreatMove()"},
+  prompt=("Write `PickRetreatMove`.\n"
+          "Contract: among navigation points within 1200 uu of the pawn, skip those closer than 80 uu (2D). Score each: with an Enemy, "
+          "(squared distance from the enemy) - (squared distance from the pawn); without one, squared distance from the pawn. Multiply by a "
+          "random factor in [0.5, 1.5). Keep the best-scoring point that is directly reachable (ActorReachable). If one is found, move "
+          "toward it looking at the enemy (MoveTowardX(Best, Enemy)). Otherwise: with no enemy move to a random point 400 uu away "
+          "(MoveToX); with an enemy move 500 uu directly away from it plus up to 200 uu of random jitter, looking at it."),
+  context=["EcholonBotBase.uc:906 MoveToX(Vector, optional Actor, optional bool), 923 MoveTowardX(Actor, optional Actor, optional bool)",
+           "Bible A7 (RadiusNavigationPoints; no distance order)"],
+  expected="Reference: EcholonBotLogic.uc:839-887.",
+  checks=["validator clean", "real compile (as BQ_PickRetreatMove)", "no invented names",
+          "ActorReachable called only for candidates that beat the current best (cost: native reachability per point)"],
+  rubric=("Blind 0-10: iterator correct and full scan (2); skip radius and scoring formula (2); random factor (1); reachability gate "
+          "(2); both fallbacks correct incl. direction away from the enemy (2); Pawn None-safety or documented assumption (1)."))
+
+q(id="T5-05", tier=5, role="coder",
+  title="DoObjective.PickStyle: go to the objective, block unreachable nodes, bail with cooldown",
+  source="Classes/EcholonBot.uc:440-532 (state DoObjective extends Roaming)",
+  legacy_ref="KF2Bot.DoObjective.PickStyle",
+  base_class="EcholonBot",
+  target={"kind": "state_members", "state": "DoObjective extends Roaming", "name": "PickStyle", "final": False,
+          "signature": "function PickStyle()"},
+  prompt=("Write `PickStyle` for state DoObjective (which extends Roaming).\n"
+          "Contract: if CheckObjectiveHazard() returns true, stop. If there is no ObjectiveGoal, take mut.GetBotObjective(self), reset "
+          "ObjectiveBailUntil and AuditGoalLog(\"GOAL_SET\", \"DoObjectivePick\"); if still none, or mut says the node is blocked for this "
+          "bot (IsNodeBlocked), hand back to the hub. If the goal is more than 300 uu away: move to it if directly reachable, else along "
+          "a path (BuildPathToward then MoveTowardX(MoveTarget)). Within 300 uu: look around (clear Focus, random focal point 1000 uu away) and stop.\n"
+          "If the far goal is unreachable: if still inside the bail cooldown, hand back to the hub. Otherwise start a new cooldown "
+          "(OBJ_BAIL_COOLDOWN); if at least 2 s since the last node block and fewer than 2 blocks so far, block the node (mut.AddNodeBlock), "
+          "stamp LastNodeBlockTime, count it and log a NODE_BLOCK line with EchelonLog; log the bail and hand back to the hub."),
+  context=["EcholonBotBase.uc:147-149, 161-162 objective vars; 20 OBJ_BAIL_COOLDOWN; 1921 CheckObjectiveHazard; 1243 BuildPathToward; 2147 AuditGoalLog; 2041 EchelonLog",
+           "EcholonMut.uc:1880 GetBotObjective, 1930 IsNodeBlocked, 1959 AddNodeBlock, 1344 CoordStr"],
+  expected="Reference: EcholonBot.uc:440-532. The trailing random-roam block (514-531) is unreachable in the reference; an answer may omit it.",
+  checks=["validator clean", "real compile", "no invented names", "state header redeclared as `state DoObjective extends Roaming`"],
+  rubric=("Blind 0-10: hazard/goal acquisition and hub hand-backs (2); near/far branch (2); bail cooldown logic (2); node-block throttle "
+          "(2 s, < 2 blocks) (2); mut None-safety where used (1); no unreachable or duplicate move calls (1)."))
+
+# ---------------------------------------------------------------- Docs
+q(id="D-01", tier="D", role="docs",
+  title="Header comment for EcholonBotLogic.EvaluateSquadTether",
+  source="Classes/EcholonBotLogic.uc:1031-1057",
+  base_class="n/a (comment only; optionally spliced above BQ_ copy to prove the file still compiles)",
+  prompt=("Write the header comment (UnrealScript `//` lines, at most 8) for this function: what it decides, what it returns, "
+          "its side effects and when callers should use it.\n<function>"),
+  context=["the function", "callers: PickMove P8 (EcholonBot.uc:188)", "EvaluateLeaderMove 1073, EvaluateFollowerMove 1082, MoveTowardGoal 1127, IsAnchorValid 1059 (signatures)",
+           "consts TRADER_ROAM_RADIUS_SQ, TRADER_REFORM_REMAINING (EcholonBotBase.uc:52-53)"],
+  expected=("Must state: returns true when it issued a move (caller stops), false to let the hub continue; trader-open roam branch "
+            "(more than 5 s left and farther than 3000 uu from the open trader -> walk back to it); otherwise needs a valid AssignedAnchor; "
+            "leaders vs followers delegate to EvaluateLeaderMove / EvaluateFollowerMove; returns false with no Pawn or mut."),
+  checks=["only comment lines", "<= 8 lines", "names only real symbols"],
+  rubric="Blind 0-5: return meaning (1), trader branch with both conditions (1), anchor check (1), leader/follower split (1), no false claims (1).")
+
+q(id="D-02", tier="D", role="docs",
+  title="Short doc: how the GoShopping state works (timers and retries)",
+  source="Classes/EcholonBot.uc:1445-1565",
+  base_class="n/a (no compile)",
+  prompt=("Write a short doc (6-10 lines, plain text) explaining how state GoShopping works for a developer who will change it. "
+          "Cover the timers.\n<state>"),
+  context=["the whole state (main version)", "constants TRADER_MAX_RETRIES, TRADER_GIVEUP_COOLDOWN (EcholonBotBase.uc:40-41)"],
+  expected=("Must cover: the repeating default Timer (0.4-0.65 s) polls whether the pawn overlaps the trader; on arrival it stops the "
+            "poll and schedules DoTrading as a one-shot named timer (1-3 s); PickStyle walks/paths to the trader and on path failure "
+            "stops the poll and retries via a one-shot DoTrading with growing delay, giving up after TRADER_MAX_RETRIES with "
+            "NextShoppingTime = now + TRADER_GIVEUP_COOLDOWN; DoTrading buys (ProcessPurchase), sets NextShoppingTime +60 s and "
+            "NextDoshShareTime +50 s, then taunts (1 in 3) or returns to the hub; NotifyBump is ignored while DoTrading is pending; EndState clears both timers."),
+  checks=["6-10 lines", "names only real symbols"],
+  rubric="Blind 0-5: default Timer role (1), DoTrading one-shot (1), retry/give-up path (1), DoTrading effects (1), no false claims (1).")
+
+# ---------------------------------------------------------------- notes
+GROUNDING = [
+    "PR #7 read from the local clone (git fetch origin; branch claude/project-thread-t6s2vg, commits b3e6af9 and f8e6a47). GitHub MCP was not needed.",
+    "'6 real bugs' in PR #7 cover 7 code sites (HealingSelf and HealOther EndState guards are one commit bullet). All 7 sites are in the bug-hunt key.",
+    "ap's full list of 25 findings (19 false alarms) is only on the PC (kit\\reports\\bughunt_candidates.md), not in the repo or project files. False-alarm bait uses the categories in THREAD_SUMMARY_M4_M6.md instead. Adding the 19 real false alarms as decoys would strengthen tier 4.",
+    "The invented variable (`KF` in CheckShouldSelfHeal) is known only from commit b2ab915's message; swift's exact broken code was never committed. T3-01 and R5 re-create it.",
+    "The C4 fix landed with the initial EcholonMut import (comment at EcholonMut.uc:580); there is no separate before/after commit, so R4 is a synthetic revert.",
+    "KFEditor error messages other than \"Missing '>' in 'class limitor'\" are drafts; capture real ones before the run.",
+    "Unconfirmed candidate bugs noticed while drafting (in main, not in any answer key, kept out of the clean decoys): Hunting.Timer (EcholonBot.uc:1019-1061) uses the foreach variable BestZed as the 'best' result and never stores the best one; DonatingMoney.DropMoney (1674) dereferences DonateHuman after the MoneyToss Sleep without a None check; VictoryDance Begin: (1889) reads KPawn after Sleep without a None check; HealingSelf/HealOther/HealRanged Begin: wait while Physics == PHYS_Walking (1113, 1211, 1328), which looks inverted; HealRanged.EndState (1307-1309) lacks the InvManager guard PR #7 added to the other two; GoShopping Begin: uses unbounded WaitForLanding() (1561) against W4; EcholonBotLogic.RequestReroute (440) reads SquadLeader.Pawn with no None check.",
+    "EnsureSquadOrderTable (EcholonMut.uc:1349) never grew the array (THREAD_SUMMARY); the fix is only on the unpushed playtest branch, so it is not used as a question. It would make a good extra tier 2 trap once pushed.",
+]
+DECISIONS = [
+    "27 question ids: T1 x5, T2 x5, T3 x5, T4 x5 (4 bug-hunt bundles + 1 review set of 10 diffs), T5 x5, docs x2. The review set is one id but 10 scored items, to give the reviewer role weight comparable to coder.",
+    "Each known bug is used once as a bug-hunt or review item. Some functions reappear in another role (FindNearestNavPoint: T2-02 coder and R4 reviewer; CheckShouldSelfHeal: T3-01 fixer and R5 reviewer; GoShopping: T4-01 bug hunt and D-02 docs). Each prompt is sent fresh, so no answer leaks between questions.",
+    "Main already contains PR #7's bugs (PR not merged), so those bundles show main as-is; only the 3 timer bugs had to be planted back (ec120f3 reversed).",
+    "final functions are compiled as renamed BQ_<Name> copies; state targets by redeclaring the state in the bench class (both need a one-time smoke compile).",
+    "The legacy slice is off by default for coder tiers (contract text only); switch on with legacy_ref if you want the real kit prompt.",
+    "T2-04 asks for a None re-check after latent waits that the merged reference lacks; scored as a bonus point so swift's reference doesn't define the ceiling.",
+    "Bug-hunt answers use anchor text rather than file line numbers so plants that shift lines don't break the key.",
+    "Reasoning budgets per tier: T1 2k, T2 4k, T3 2k, T4 4k, T5 8k, docs 2k (from the plan).",
+]
+
+ROLE_NAMES = {"coder": "Coder", "fixer": "Fixer", "reviewer": "Reviewer", "bughunter": "Bug hunter", "docs": "Docs"}
+TIER_NAMES = {1: "1 Easy", 2: "2 Traps", 3: "3 Fix", 4: "4 Bug/Review", 5: "5 Hard", "D": "Docs"}
+
+def short_src(s):
+    return s.split(";")[0].split(" (")[0].replace("Classes/", "")
+
+def md():
+    L = []
+    L.append("# EcholonBot model benchmark: question set (DRAFT for approval)\n")
+    L.append(f"Nothing here has been run. Ground truth: {REF}. 27 questions; the review set (T4-05) holds 10 scored diffs.\n")
+    L.append("| id | tier | role | what it tests | source |")
+    L.append("|---|---|---|---|---|")
+    for x in Q:
+        L.append(f"| {x['id']} | {TIER_NAMES[x['tier']]} | {ROLE_NAMES[x['role']]} | {x['title']} | {short_src(x['source'])} |")
+    L.append("")
+    L.append("Role counts: coder 15 (T1, T2, T5), fixer 5, bug hunter 4 bundles (10 keyed bugs + decoys), reviewer 10 diffs, docs 2.\n")
+    L.append("## Conventions (apply to every question)\n")
+    for k, v in CONVENTIONS.items():
+        L.append(f"- **{k}**: {v}")
+    L.append("")
+    L.append("## Grounding notes\n")
+    for g in GROUNDING:
+        L.append(f"- {g}")
+    L.append("\n## Decisions made in this draft\n")
+    for d in DECISIONS:
+        L.append(f"- {d}")
+    L.append("")
+    cur = None
+    for x in Q:
+        if x["tier"] != cur:
+            cur = x["tier"]
+            L.append(f"\n---\n\n## Tier {TIER_NAMES[cur]}\n")
+        L.append(f"### {x['id']}: {x['title']}\n")
+        L.append(f"- **Role**: {ROLE_NAMES[x['role']]} | **Base class**: `{x['base_class']}` | **Reasoning budget**: {x['reasoning_budget']}")
+        L.append(f"- **Source**: {x['source']}")
+        if x.get("legacy_ref"):
+            L.append(f"- **legacy_ref**: {x['legacy_ref']}")
+        if x.get("target"):
+            t = x["target"]
+            sig = f" `{t['signature']}`" if t.get("signature") else ""
+            L.append(f"- **Target**: {t['kind']} {t.get('state') or ''} {t['name']}{sig}; final={t['final']}")
+        L.append(f"- **Prompt**:\n\n```text\n{x['prompt']}\n```")
+        L.append("- **Context to include**: " + "; ".join(x["context"]))
+        if x.get("injection"):
+            inj = x["injection"]
+            L.append("- **Injected error**:")
+            if inj.get("note"):
+                L.append(f"  - note: {inj['note']}")
+            L.append(f"  - replace:\n\n```unrealscript\n{inj['anchor']}\n```\n  with:\n\n```unrealscript\n{inj['replace']}\n```")
+            if inj.get("also"):
+                L.append(f"  - also: {inj['also']}")
+            L.append(f"  - error line (draft): `{x['error_line_draft']}`")
+        if x.get("shown"):
+            L.append("- **Functions shown (EcholonBot.uc unless named)**: " + "; ".join(x["shown"]))
+        if x.get("plants") is not None and "plants" in x:
+            if x["plants"]:
+                L.append("- **Planted bugs** (applied to main):")
+                for p in x["plants"]:
+                    rep = p["replace"] if p["replace"] else "(delete the line)"
+                    L.append(f"  - `{p['anchor'].strip()}` -> `{rep.strip() if p['replace'] else rep}`")
+            else:
+                L.append("- **Planted bugs**: none; main is shown as-is (it predates the PR #7 fixes).")
+        if x.get("expected"):
+            L.append(f"- **Expected answer**: {x['expected']}")
+        if x.get("trap_checklist"):
+            L.append("- **Trap checklist**:")
+            for c in x["trap_checklist"]:
+                L.append(f"  - [ ] {c}")
+        if x.get("answer_key"):
+            L.append("- **Answer key**:")
+            L.append("")
+            L.append("| key | where | anchor | why | origin |")
+            L.append("|---|---|---|---|---|")
+            for a in x["answer_key"]:
+                anc = a["anchor"] if isinstance(a["anchor"], str) else " / ".join(a["anchor"])
+                anc = anc.replace("\n", " ").replace("|", "\\|")
+                anc = " ".join(anc.split())
+                L.append(f"| {a['key']} | {a['where']} | `{anc}` | {a['why']} | {a['origin']} |")
+            L.append("")
+            L.append("- **Neutral (scores 0 either way)**: " + "; ".join(x["neutral"]))
+        if x.get("review_items"):
+            L.append("- **Review items**:\n")
+            L.append("| item | verdict | where | source | reason |")
+            L.append("|---|---|---|---|---|")
+            for it in x["review_items"]:
+                L.append(f"| {it['id']} | {it['verdict']} | {it['where']} | {it['source']} | {it['why']} |")
+            L.append("")
+            for it in x["review_items"]:
+                L.append(f"**{it['id']}** ({it['verdict']})\n\n```diff\n{it['diff']}\n```\n")
+        L.append("- **Automatic checks**: " + "; ".join(x["checks"]))
+        if x.get("rubric"):
+            L.append(f"- **Rubric**: {x['rubric']}")
+        L.append("")
+    return "\n".join(L) + "\n"
+
+doc = {"version": "draft-1", "status": "draft, not run, awaiting approval", "ground_truth": REF,
+       "conventions": CONVENTIONS, "grounding_notes": GROUNDING, "decisions": DECISIONS, "questions": Q}
+(OUT / "questions-draft.md").write_text(md(), encoding="utf-8")
+(OUT / "questions-draft.json").write_text(json.dumps(doc, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+print(len(Q), "questions")
