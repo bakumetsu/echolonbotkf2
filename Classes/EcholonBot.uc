@@ -25,13 +25,11 @@ state PickNextMove
         // Priority 1: Match Ended
         if (bInTerminalState)
         {
-            HubPick("P1_MatchEnded", 'VictoryDance');
             GotoState('VictoryDance');
             return;
         }
         if (mut != None && mut.KF != None && mut.KF.MyKFGRI != None && mut.KF.MyKFGRI.bMatchIsOver)
         {
-            HubPick("P1_MatchEnded", 'VictoryDance');
             GotoState('VictoryDance');
             return;
         }
@@ -39,7 +37,6 @@ state PickNextMove
         // Priority 3: Critical Survival
         if (KPawn != None && CheckShouldSelfHeal())
         {
-            HubPick("P3_CriticalSurvival", 'HealingSelf');
             GotoState('HealingSelf');
             return;
         }
@@ -48,13 +45,12 @@ state PickNextMove
         if (bIsGroupLeader && KPawn != None && !bIsRetreating && ShouldTacticalRetreat())
         {
             bIsRetreating = true;
-            HubPick("P4_TacticalRetreat", 'TacticalRetreat');
             GotoState('TacticalRetreat');
             return;
         }
 
-        // Priority 4.5: Regroup (not during free trader time: squads regroup in the last seconds)
-        if (mut != None && !IsTraderFreeTime() && mut.GetSquadPhase(self) == mut.PHASE_REGROUP
+        // Priority 4.5: Regroup
+        if (mut != None && mut.GetSquadPhase(self) == mut.PHASE_REGROUP
             && !IsInState('FollowingLeader') && !IsInState('FollowingLeaderBasic'))
         {
             RegroupElapsed = WorldInfo.TimeSeconds - mut.GetSquadStartTime(self);
@@ -64,7 +60,6 @@ state PickNextMove
                     && KFGRI.bTraderIsOpen && NextShoppingTime < WorldInfo.TimeSeconds && KFGRI.OpenedTrader != None)
                 {
                     EchelonLog("REGROUP_SHOP bot=" $ Name $ " src=PickMove");
-                    HubPick("P4.5_Regroup", 'GoShopping');
                     GotoState('GoShopping');
                     return;
                 }
@@ -72,7 +67,6 @@ state PickNextMove
                     && GlobalZedCount > 0 && GlobalZedCount != 15 && GlobalZedCount <= 30)
                 {
                     EchelonLog("REGROUP_HUNT bot=" $ Name $ " zeds=" $ string(GlobalZedCount));
-                    HubPick("P4.5_Regroup", 'Hunting');
                     GotoState('Hunting');
                     return;
                 }
@@ -103,7 +97,6 @@ state PickNextMove
                                 EchelonLog("REGROUP_ATTACH bot=" $ Name $ " target=" $ string(RegroupTargetIdx + 1) $ " size=" $ string(RegroupMySize));
                                 if (!bIsGroupLeader && SquadLeader != None && SquadLeader.Pawn != None)
                                 {
-                                    HubPick("P4.5_Regroup", 'FollowingLeader');
                                     FollowStart(SquadLeader);
                                     return;
                                 }
@@ -111,7 +104,6 @@ state PickNextMove
                             else if (RegroupAttach != None && RegroupAttach.PlayerReplicationInfo != None)
                             {
                                 EchelonLog("REGROUP_ATTACH bot=" $ Name $ " human=" $ string(RegroupAttach.PlayerReplicationInfo.Name));
-                                HubPick("P4.5_Regroup", 'FollowingLeader');
                                 FollowStart(RegroupAttach);
                                 return;
                             }
@@ -122,7 +114,6 @@ state PickNextMove
                         && VSizeSq(RegroupHoldLeader.Pawn.Location - Pawn.Location) > REGROUP_HOLD_DIST_SQ)
                     {
                         EchelonLog("REGROUP_HOLD bot=" $ Name $ " toLeader");
-                        HubPick("P4.5_Regroup", 'FollowingLeader');
                         FollowStart(RegroupHoldLeader);
                         return;
                     }
@@ -152,7 +143,6 @@ state PickNextMove
             if (ObjectiveGoal != None && bHasAmmo && VSizeSq(ObjectiveGoal.Location - Pawn.Location) > SYG_DISTANCE_SQ
                 && WorldInfo.TimeSeconds >= ObjectiveBailUntil)
             {
-                HubPick("P5_SygEnforcement", 'DoObjective');
                 GotoState('DoObjective');
                 return;
             }
@@ -164,13 +154,11 @@ state PickNextMove
             LastTriageTime = WorldInfo.TimeSeconds;
             if (CheckMedicGunHeal())
             {
-                HubPick("P6_SquadMedic", 'HealRanged');
                 GotoState('HealRanged');
                 return;
             }
             if (CheckShouldHealMate())
             {
-                HubPick("P6_SquadMedic", 'HealOther');
                 GotoState('HealOther');
                 return;
             }
@@ -186,13 +174,11 @@ state PickNextMove
             }
             else if (LineOfSightTo(Enemy))
             {
-                HubPick("P7_CombatEngagement", 'FightEnemy');
                 GotoState('FightEnemy');
                 return;
             }
             else
             {
-                HubPick("P7_CombatEngagement", 'Hunting');
                 GotoState('Hunting');
                 return;
             }
@@ -201,14 +187,12 @@ state PickNextMove
         // Priority 8: Squad Tethering
         if (EvaluateSquadTether())
         {
-            HubPick("P8_SquadTethering", 'Tether');
             return;
         }
 
         // Priority 8.5: Low zed count
         if (Enemy == None && GlobalZedCount > 0 && GlobalZedCount < HUNT_ZED_THRESHOLD)
         {
-            HubPick("P8.5_LowZedCount", 'Hunting');
             GotoState('Hunting');
             return;
         }
@@ -216,21 +200,11 @@ state PickNextMove
         // Priority 9: Economy
         if (KFGRI.bTraderIsOpen && NextShoppingTime < WorldInfo.TimeSeconds && KFGRI.OpenedTrader != None)
         {
-            HubPick("P9_Economy", 'GoShopping');
             GotoState('GoShopping');
             return;
         }
 
-        // Priority 9.5: Trader roam (free trader time, already shopped)
-        if (IsTraderFreeTime())
-        {
-            HubPick("P9.5_TraderRoam", 'Roaming');
-            GotoState('Roaming');
-            return;
-        }
-
         // Priority 10: Camp
-        HubPick("P10_Camp", 'Camp');
         ExecuteCampState();
     }
 
@@ -282,11 +256,7 @@ state Roaming
     {
         local EcholonBot GroupLeader;
 
-        if (IsTraderFreeTime())
-        {
-            // Free trader roam: skip the stick-to-leader branches below and wander.
-        }
-        else if (PlayStyle == 0 && KPawn != None)
+        if (PlayStyle == 0 && KPawn != None)
         {
             if (mut != None)
             {
@@ -301,7 +271,7 @@ state Roaming
             {
                 if (VSizeSq(GroupLeader.Pawn.Location - Pawn.Location) > 360000.0)
                 {
-                    if (WalkReachable(GroupLeader.Pawn))
+                    if (ActorReachable(GroupLeader.Pawn))
                     {
                         MoveToX(GetPointNear(GroupLeader.Pawn, 600.0));
                         return;
@@ -339,7 +309,7 @@ state Roaming
                 {
                     if (VSizeSq(FollowingHuman.Location - Pawn.Location) > 360000.0)
                     {
-                        if (WalkReachable(FollowingHuman))
+                        if (ActorReachable(FollowingHuman))
                         {
                             MoveToX(GetPointNear(FollowingHuman, 600.0));
                             return;
@@ -373,7 +343,7 @@ state Roaming
             return;
         }
 
-        if (WalkReachable(RandGoal))
+        if (ActorReachable(RandGoal))
         {
             MoveTowardX(RandGoal);
             RandGoal = None;
@@ -402,7 +372,7 @@ state Roaming
 
     function DonateMoney(Pawn Other)
     {
-        if (WalkReachable(Other))
+        if (ActorReachable(Other))
         {
             DonateHuman = Other;
             GotoState('DonatingMoney');
@@ -499,7 +469,7 @@ state DoObjective extends Roaming
 
         if (VSizeSq(ObjectiveGoal.Location - Pawn.Location) > 90000.0)
         {
-            if (WalkReachable(ObjectiveGoal))
+            if (ActorReachable(ObjectiveGoal))
             {
                 IterGoalReachable = true;
                 MoveTowardX(ObjectiveGoal);
@@ -527,7 +497,6 @@ state DoObjective extends Roaming
                 return;
             }
             ObjectiveBailUntil = WorldInfo.TimeSeconds + OBJ_BAIL_COOLDOWN;
-            HubFail("objective_unreachable");
             if (mut != None && ObjectiveGoal != None
                 && WorldInfo.TimeSeconds - LastNodeBlockTime >= 2.0
                 && NodeBlockCount < 2)
@@ -547,7 +516,7 @@ state DoObjective extends Roaming
             MoveToX(Pawn.Location + (VRand() * 300.0));
             return;
         }
-        if (WalkReachable(RandGoal))
+        if (ActorReachable(RandGoal))
         {
             MoveTowardX(RandGoal);
             RandGoal = None;
@@ -694,7 +663,7 @@ state FightEnemy
             }
             if (ObjectiveGoal != None && VSizeSq(ObjectiveGoal.Location - Pawn.Location) > 640000.0)
             {
-                if (WalkReachable(ObjectiveGoal))
+                if (ActorReachable(ObjectiveGoal))
                 {
                     MoveTowardX(ObjectiveGoal);
                     return;
@@ -779,7 +748,7 @@ state FightEnemy
                 {
                     Pawn.Weapon.StartFire(0);
                 }
-                if (WalkReachable(Enemy))
+                if (ActorReachable(Enemy))
                 {
                     MoveTowardX(Enemy);
                 }
@@ -803,7 +772,7 @@ state FightEnemy
                 }
                 else
                 {
-                    ApplyCrouch(Rand(2) == 0);  // honours bAllowBotCrouch
+                    Pawn.ShouldCrouch(Rand(2) == 0);
                     SetTimer(0.5 + (FRand() * 1.5), false, 'FinishedMove');
                 }
             }
@@ -1548,7 +1517,7 @@ state GoShopping
             PickCombatStyle();
             return;
         }
-        if (WalkReachable(KFGRI.OpenedTrader))
+        if (ActorReachable(KFGRI.OpenedTrader))
         {
             TraderRetryCount = 0;
             MoveToX(KFGRI.OpenedTrader.Location);
@@ -1568,7 +1537,6 @@ state GoShopping
             {
                 TraderRetryCount = 0;
                 NextShoppingTime = WorldInfo.TimeSeconds + TRADER_GIVEUP_COOLDOWN;
-                HubFail("trader_unreachable");
                 EchelonLog("TRADER_GIVEUP bot=" $ Name $ " retries=" $ string(TRADER_MAX_RETRIES) $ " cooldown=" $ string(TRADER_GIVEUP_COOLDOWN));
                 PickCombatStyle();
                 return;
