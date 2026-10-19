@@ -102,6 +102,7 @@ var EFollowStatus FollowStatus;
 var array<ReachSpec> FollowSpecialSpecs;
 // Direct-steer only when the leader is within this height; above it, a ledge or balcony is likely in between.
 var float FollowDirectMaxZ;
+var bool bFollowSavedCanJump;
 
 function FollowStart(Controller NewLeaderCtrl)
 {
@@ -457,7 +458,7 @@ function bool FollowCheckReachable(bool bForceNow)
         return bFollowReachStable;
     }
 
-    IterReach = ActorReachable(FollowLeaderPawn);
+    IterReach = WalkReachable(FollowLeaderPawn);
     // ActorReachable may count a jump up to a ledge; this mover can't jump it, so make it path instead.
     if (IterReach && Abs(FollowLeaderPawn.Location.Z - Pawn.Location.Z) > FollowDirectMaxZ)
     {
@@ -502,6 +503,47 @@ function bool FollowCheckReachable(bool bForceNow)
 // of them, so the "shortest" route went straight up a wall or onto a balcony edge. The bot then ran
 // into the wall, hopped (stuck DoJump + NotifyJumpApex double jump) and re-planned the same edge
 // until it died. These helpers keep such edges out of every route this bot plans.
+
+// Plan as a walker: with bCanJump on, the engine counts jump-ups when it picks the start anchor and
+// checks reachability, then this mover (no jumps) walks into the ledge. Off only for the query, so
+// the bot can still drop off ledges while moving (MayFall reads bCanJump).
+function FollowPlanBegin()
+{
+    if (Pawn != None)
+    {
+        bFollowSavedCanJump = Pawn.bCanJump;
+        Pawn.bCanJump = false;
+    }
+}
+
+function FollowPlanEnd()
+{
+    if (Pawn != None)
+    {
+        Pawn.bCanJump = bFollowSavedCanJump;
+    }
+}
+
+// ActorReachable / PointReachable without counting jumps (see FollowPlanBegin).
+function bool WalkReachable(Actor Other)
+{
+    local bool bReach;
+
+    FollowPlanBegin();
+    bReach = ActorReachable(Other);
+    FollowPlanEnd();
+    return bReach;
+}
+
+function bool WalkPointReachable(vector Dest)
+{
+    local bool bReach;
+
+    FollowPlanBegin();
+    bReach = PointReachable(Dest);
+    FollowPlanEnd();
+    return bReach;
+}
 
 // True for edges a walking bot can follow by steering at the end node.
 function bool FollowIsWalkableSpec(ReachSpec Spec)
@@ -567,6 +609,7 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
                 IterBlocked.AddItem(FollowSpecialSpecs[IterIdx]);
             }
         }
+        FollowPlanBegin();
         if (Goal != None)
         {
             IterFirst = FindPathToward(Goal);
@@ -575,6 +618,7 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
         {
             IterFirst = FindPathTo(Dest);
         }
+        FollowPlanEnd();
         for (IterIdx = 0; IterIdx < IterBlocked.Length; IterIdx++)
         {
             IterBlocked[IterIdx].BlockedBy = None;
@@ -1084,11 +1128,11 @@ function bool FollowComputeYieldPoint()
     }
 
     IterDest = Pawn.Location + (IterSide * FollowYieldDist) + (IterAway * (FollowYieldDist * 0.5));
-    if (!PointReachable(IterDest))
+    if (!WalkPointReachable(IterDest))
     {
         IterSide = -IterSide;
         IterDest = Pawn.Location + (IterSide * FollowYieldDist) + (IterAway * (FollowYieldDist * 0.5));
-        if (!PointReachable(IterDest))
+        if (!WalkPointReachable(IterDest))
         {
             return false;
         }
@@ -1324,7 +1368,7 @@ Begin:
     {
         bFollowOrderAnchorActive = false;
     }
-    if (ActorReachable(FollowLeaderPawn) && Abs(FollowLeaderPawn.Location.Z - Pawn.Location.Z) <= FollowDirectMaxZ)
+    if (WalkReachable(FollowLeaderPawn) && Abs(FollowLeaderPawn.Location.Z - Pawn.Location.Z) <= FollowDirectMaxZ)
     {
         if (bFollowOrderAnchorActive)
         {

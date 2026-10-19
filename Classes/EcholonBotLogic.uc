@@ -75,7 +75,7 @@ final function bool CheckShouldHealMate()
         {
             continue;
         }
-        if (!ActorReachable(P))
+        if (!WalkReachable(P))
         {
             continue;
         }
@@ -463,6 +463,7 @@ function HealFail()
 {
     FailStreak++;
     HealRetryAfter = WorldInfo.TimeSeconds + FMin(4.0 * FailStreak, 20.0);
+    HubFail("heal");
     EchelonLog("HEAL_FAIL bot=" $ Name $ " target=" $ PendingHeal $ " streak=" $ string(FailStreak) $ " retryIn=" $ string(HealRetryAfter - WorldInfo.TimeSeconds));
     PendingHeal = None;
 }
@@ -742,6 +743,16 @@ function bool FollowCheckExit()
 {
     local int IterDistSq;
 
+    // Trader time: break formation so the bot can shop and roam (regroups in the last seconds).
+    if (IsTraderFreeTime())
+    {
+        FollowExitState = 'PickNextMove';
+        bFollowExitPending = true;
+        EchelonLog("FOLLOWGATE_EVAL bot=" $ Name $ " slot=" $ string(FollowSlotIndex) $ " result=TraderFree");
+        WdLastHubContactTime = WorldInfo.TimeSeconds;
+        return true;
+    }
+
     if (KFGRI != None
         && KFGRI.bTraderIsOpen
         && KFGRI.OpenedTrader != None
@@ -863,7 +874,7 @@ final function PickRetreatMove()
 
         Score *= (0.5 + FRand());
 
-        if ((Best == None || BestScore < Score) && ActorReachable(N))
+        if ((Best == None || BestScore < Score) && WalkReachable(N))
         {
             Best = N;
             BestScore = Score;
@@ -899,13 +910,13 @@ final function bool FindCollectable()
             I = KFPickupFactory_Item(P);
             if (I == None)
             {
-                if (ActorReachable(P))
+                if (WalkReachable(P))
                 {
                     break;
                 }
                 continue;
             }
-            if ((I.CurrentPickupIsArmor() && (KPawn != None)) && (KPawn.Armor < KPawn.MaxArmor) && ActorReachable(P))
+            if ((I.CurrentPickupIsArmor() && (KPawn != None)) && (KPawn.Armor < KPawn.MaxArmor) && WalkReachable(P))
             {
                 break;
             }

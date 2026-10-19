@@ -176,6 +176,12 @@ var int GlobalZedCount;
 var float LastGlobalZedCountTime;
 var float AuditStateEntryTime;
 var name AuditStateEntryName;
+// Priority hub audit (HubPick / HubFail / HubResolve): which hub priority sent the bot where,
+// and whether that step ended well. Read by kit/tools/hub_audit.py.
+var string HubPriority;
+var name HubNextState;
+var float HubPickTime;
+var string HubFailReason;
 var float AuditDwellTotal;
 var float AuditLastLog_STATE_EXIT;
 var float AuditLastLog_GOAL;
@@ -441,6 +447,9 @@ function Restart(bool bVehicleTransition)
     NextGrenadeTimer = 0.0;
     Pawn.PeripheralVision = -0.2;
     Pawn.JumpZ = FMax(Pawn.JumpZ, 750.0);
+    // Wall-jump fix: KFPawn hops by itself when it walks into a wall (bCanJumpOverWalls). Our movers
+    // steer with raw acceleration and can't clear the ledge, so the hop repeated until death.
+    Pawn.bCanJumpOverWalls = false;
 
     KPawn = KFPawn_Human(Pawn);
     KPawn.NumJumpsAllowed = 2;
@@ -2056,6 +2065,10 @@ function bool AuditRateLimit(string Msg)
 	local float IterNow;
 
 	IterNow = WorldInfo.TimeSeconds;
+	if (Left(Msg, 4) ~= "HUB_")
+	{
+		return true;  // hub audit lines are never throttled; hub_audit.py needs every one
+	}
 	if (Left(Msg, 10) ~= "STATE_EXIT")
 	{
 		if (IterNow - AuditLastLog_STATE_EXIT < 5.0)
@@ -2132,6 +2145,10 @@ function AuditStateExit(name NextStateName)
 {
 	local float IterDwell;
 
+	if (HubPriority != "" && AuditStateEntryName == HubNextState)
+	{
+		HubResolve(NextStateName);
+	}
 	if (WorldInfo != None)
 	{
 		IterDwell = WorldInfo.TimeSeconds - AuditStateEntryTime;
@@ -2647,6 +2664,10 @@ final function ApplySquadCrouchHold()
 	local bool bWant;
 
 	bWant = (SquadLeader != None) && SquadLeader.bSquadCrouchHold;
+	if (bWant && mut != None && !mut.bAllowBotCrouch)
+	{
+		bWant = false;
+	}
 	if (bWant != bHoldCrouching)
 	{
 		bHoldCrouching = bWant;
@@ -2888,7 +2909,7 @@ final function CloseToEffectiveRange()
     {
         MoveToX(Pawn.Location + (Normal2D(Enemy.Location - Pawn.Location) * 250.0), Enemy);
     }
-    else if (ActorReachable(Enemy))
+    else if (WalkReachable(Enemy))
     {
         MoveTowardX(Enemy, Enemy);
     }
@@ -3173,8 +3194,66 @@ final function RefreshSquadZedCache()
 	}
 }
 
+// The priority hub chose Priority and is sending the bot to NextState (or to a follow/move, with
+// NextState naming it). Closes the previous pick if it never reached a state exit.
+function HubPick(string Priority, name NextState)
+{
+	if (WorldInfo == None)
+	{
+		return;
+	}
+	if (HubPriority != "")
+	{
+		HubResolve('Superseded');
+	}
+	HubPriority = Priority;
+	HubNextState = NextState;
+	HubPickTime = WorldInfo.TimeSeconds;
+	HubFailReason = "";
+	EchelonLog("HUB_PICK bot=" $ Name $ " p=" $ Priority $ " next=" $ NextState);
+}
+
+// Marks the current hub step as failed; the first reason wins.
+function HubFail(string Reason)
+{
+	if (HubPriority != "" && HubFailReason == "")
+	{
+		HubFailReason = Reason;
+	}
+}
+
+function HubResolve(name ExitTo)
+{
+	local string Result;
+
+	if (HubPriority == "" || WorldInfo == None)
+	{
+		return;
+	}
+	Result = "ok";
+	if (HubFailReason != "")
+	{
+		Result = "fail:" $ HubFailReason;
+	}
+	EchelonLog("HUB_RESULT bot=" $ Name $ " p=" $ HubPriority $ " state=" $ HubNextState $ " exit=" $ ExitTo
+		$ " dwell=" $ string(WorldInfo.TimeSeconds - HubPickTime) $ " result=" $ Result);
+	HubPriority = "";
+	HubFailReason = "";
+}
+
+// Trader is open with more than TRADER_REFORM_REMAINING seconds left: squads break formation and
+// bots shop and roam freely; they regroup in the last seconds (playtest request, 2026-10-19).
+final function bool IsTraderFreeTime()
+{
+	return (KFGRI != None && KFGRI.bTraderIsOpen && KFGRI.GetTraderTimeRemaining() > TRADER_REFORM_REMAINING);
+}
+
 final function ApplyCrouch(bool bWant)
 {
+    if (bWant && mut != None && !mut.bAllowBotCrouch)
+    {
+        bWant = false;
+    }
     if (Pawn != None && Pawn.bWantsToCrouch != bWant)
     {
         Pawn.ShouldCrouch(bWant);
