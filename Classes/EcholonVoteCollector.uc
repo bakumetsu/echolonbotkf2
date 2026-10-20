@@ -5,6 +5,8 @@
 class EcholonVoteCollector extends KFVoteCollector within KFGameReplicationInfo;
 
 // Players who can vote: not spectators, not zed players, not bots.
+// Echolon bots clear PRI.bBot (EcholonBotBase.InitPlayerReplicationInfo), so bBot alone counts them
+// as humans; a human's PRI is owned by a PlayerController, a bot's by its AI controller.
 function int CountHumanVoters()
 {
 	local array<KFPlayerReplicationInfo> PRIs;
@@ -13,7 +15,7 @@ function int CountHumanVoters()
 	GetKFPRIArray(PRIs, , false);
 	for (i = 0; i < PRIs.Length; i++)
 	{
-		if (PRIs[i] != None && !PRIs[i].bBot)
+		if (PRIs[i] != None && !PRIs[i].bBot && PlayerController(PRIs[i].Owner) != None)
 		{
 			Count++;
 		}
