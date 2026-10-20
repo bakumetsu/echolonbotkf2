@@ -69,7 +69,7 @@ state PickNextMove
                     return;
                 }
                 if (RegroupElapsed < REGROUP_DURATION
-                    && GlobalZedCount > 0 && GlobalZedCount != 15 && GlobalZedCount <= 30)
+                    && GlobalZedCount > 0 && GlobalZedCount != 15 && GlobalZedCount <= 30 && AcquireHuntTarget())
                 {
                     EchelonLog("REGROUP_HUNT bot=" $ Name $ " zeds=" $ string(GlobalZedCount));
                     HubPick("P4.5_Regroup", 'Hunting');
@@ -206,7 +206,7 @@ state PickNextMove
         }
 
         // Priority 8.5: Low zed count
-        if (Enemy == None && GlobalZedCount > 0 && GlobalZedCount < HUNT_ZED_THRESHOLD)
+        if (Enemy == None && GlobalZedCount > 0 && GlobalZedCount < HUNT_ZED_THRESHOLD && AcquireHuntTarget())
         {
             HubPick("P8.5_LowZedCount", 'Hunting');
             GotoState('Hunting');
@@ -1029,6 +1029,7 @@ state Hunting
 
         if (Enemy == None || !Enemy.IsAliveAndWell())
         {
+            NextHuntTime = WorldInfo.TimeSeconds + 1.0;
             PickCombatStyle();
             return;
         }
@@ -1036,6 +1037,7 @@ state Hunting
         if (!BuildPathToward(Enemy))
         {
             Enemy = None;
+            NextHuntTime = WorldInfo.TimeSeconds + 1.0;
             PickCombatStyle();
         }
         else

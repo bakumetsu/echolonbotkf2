@@ -144,6 +144,7 @@ var transient float SerpentineTime;
 var transient float NextGrenadeTimer;
 var transient float EnemyEncounterTime;
 var transient float NextShoppingTime;
+var transient float NextHuntTime;
 var transient float ObjectiveBailUntil;
 var transient float LastNodeBlockTime;
 var int NodeBlockCount;
@@ -1763,6 +1764,36 @@ function PickCombatStyle()
     }
 
     GotoState('PickNextMove');
+}
+
+// Finds the nearest living enemy zed within hunt range and in line of sight and makes it the Enemy
+// (through SetEnemy, so its filters apply) when there is none. Hunting with no Enemy has nothing to chase and bounces straight back to
+// PickNextMove (zero-dwell loop), so every priority that sends a bot to Hunting must pass this first.
+// Hunting.PickStyle sets NextHuntTime when it has to bounce, which stops a re-pick for a moment.
+function bool AcquireHuntTarget()
+{
+    local KFPawn_Monster Zed, Best;
+    local float Dist, BestDist;
+
+    if (Pawn == None || WorldInfo.TimeSeconds < NextHuntTime)
+        return false;
+    BestDist = 999999999.0;
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', Zed, Pawn.Location, HUNT_SCAN_RADIUS)
+    {
+        if (!Zed.IsAliveAndWell() || Zed.bIsHeadless || Zed.GetTeamNum() == GetTeamNum() || !FastTrace(Zed.Location, Pawn.Location))
+            continue;
+        Dist = VSizeSq(Zed.Location - Pawn.Location);
+        if (Dist < BestDist)
+        {
+            BestDist = Dist;
+            Best = Zed;
+        }
+    }
+    if (Best == None)
+        return false;
+    if (Enemy != None && Enemy.IsAliveAndWell())
+        return true;
+    return SetEnemy(Best, true);
 }
 
 function ValidateAndNudgeSpawn()
