@@ -86,6 +86,15 @@ var() config float HealCylinderRadius;
 var() config float HealCylinderHeight;
 var() config float HealMinHealthPct;
 var() config bool bEnableFastTraceHealing;
+// Set bDisableAuditLog=True in the mutator's ini section to silence every [EcholonAudit] log line.
+// Off by default (logs on) so a missing ini key keeps the debug trail.
+var() config bool bDisableAuditLog;
+// Bots crouch (cover, squad holds, overwatch). Off unless set to True: crouching bots looked out
+// of place in playtests (2026-10-19).
+var() config bool bAllowBotCrouch;
+// Count bots as voters in the skip-trader vote (stock behaviour). Off by default: only human
+// players vote, and the vote passes when every human votes yes (EcholonVoteCollector).
+var() config bool bBotsCountInSkipTraderVote;
 var array<KFPawn_Human> RangedHealTargets;
 var array<float> RangedHealCooldownEnds;
 var transient array<string> AvailableBotNames;
@@ -95,7 +104,7 @@ var float LastAuditLogTime;
 
 function EchelonLog(string Msg)
 {
-    if (WorldInfo == None)
+    if (WorldInfo == None || bDisableAuditLog)
         return;
     if (Left(Msg, 6) ~= "ORDER_")
     {
@@ -212,6 +221,21 @@ function MatchStarting()
         SetTimer(1.0, true);
     }
     SetTimer(0.1, true, 'CheckWave');
+    InstallVoteCollector();
+}
+
+// Swap the skip-trader vote for one that only counts humans (see bBotsCountInSkipTraderVote).
+function InstallVoteCollector()
+{
+    local KFGameReplicationInfo KFGRI;
+
+    KFGRI = KFGameReplicationInfo(WorldInfo.GRI);
+    if (bBotsCountInSkipTraderVote || KFGRI == None || EcholonVoteCollector(KFGRI.VoteCollector) != None)
+    {
+        return;
+    }
+    KFGRI.VoteCollector = new(KFGRI) class'EcholonVoteCollector';
+    EchelonLog("VOTE_COLLECTOR installed: skip-trader vote counts humans only");
 }
 
 function Timer()
@@ -1352,7 +1376,12 @@ function EnsureSquadOrderTable()
 
     if (SquadOrders.Length == Fireteams.Length)
         return;
-    for (i = SquadOrders.Length; i < Fireteams.Length; i++)
+    // Playtest fix (legacy bug): writing SquadOrders[i].Member past the end does not grow a dynamic
+    // array, it logs "Attempt to assign variable through None" (1,818 times in one 5-round test), so
+    // the table stayed empty and every squad order read went out of bounds. Size it first.
+    i = SquadOrders.Length;
+    SquadOrders.Length = Fireteams.Length;
+    for (i = i; i < Fireteams.Length; i++)
     {
         SquadOrders[i].SquadID = i + 1;
         SquadOrders[i].Leader = None;
@@ -1856,7 +1885,9 @@ function int MoveSquadMembers(int FromIdx, int ToIdx)
     O.Phase = PHASE_IDLE;
     SquadOrders[FromIdx] = O;
 
-    for (MemberIdx = 0; MemberIdx < Fireteams[FromIdx].Members.Length; MemberIdx++)
+    // Bug hunt (legacy bug): ReassignBotToGroup removes M from this same Members array, so a forward
+    // loop skipped every second bot and left it in the dissolved squad with no leader. Walk backwards.
+    for (MemberIdx = Fireteams[FromIdx].Members.Length - 1; MemberIdx >= 0; MemberIdx--)
     {
         M = Fireteams[FromIdx].Members[MemberIdx];
         if (M == None)

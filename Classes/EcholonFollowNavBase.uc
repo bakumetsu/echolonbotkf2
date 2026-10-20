@@ -98,6 +98,12 @@ var EFollowAction FollowAction;
 var Actor FollowNode;
 var float FollowWaitTime;
 var EFollowStatus FollowStatus;
+// Special edges (leap, climb, mantle) this bot found on a planned route; kept out of later routes.
+var array<ReachSpec> FollowSpecialSpecs;
+// Direct-steer only when the leader is within this height; above it, a ledge or balcony is likely in between.
+var float FollowDirectMaxZ;
+var bool bFollowSavedCanJump;
+var int FollowPlanDepth;  // nesting guard so an inner Begin/End can't lose the saved bCanJump
 
 function FollowStart(Controller NewLeaderCtrl)
 {
@@ -453,7 +459,12 @@ function bool FollowCheckReachable(bool bForceNow)
         return bFollowReachStable;
     }
 
-    IterReach = ActorReachable(FollowLeaderPawn);
+    IterReach = WalkReachable(FollowLeaderPawn);
+    // ActorReachable may count a jump up to a ledge; this mover can't jump it, so make it path instead.
+    if (IterReach && Abs(FollowLeaderPawn.Location.Z - Pawn.Location.Z) > FollowDirectMaxZ)
+    {
+        IterReach = false;
+    }
 
     if (IterReach)
     {
@@ -486,6 +497,151 @@ function bool FollowCheckReachable(bool bForceNow)
     return bFollowReachStable;
 }
 
+// ---------------------------------------------------------------- wall-jump fix (2026-10-19)
+// Every EcholonBot mover steers with raw Pawn.Acceleration (Bible W2): it walks in a straight line
+// to the next route node and never runs a reach spec's special move. KF2 maps also carry zed-only
+// edges (leaps, wall and ceiling climbs, mantles), and the bot's boosted JumpZ makes A* accept some
+// of them, so the "shortest" route went straight up a wall or onto a balcony edge. The bot then ran
+// into the wall, hopped (stuck DoJump + NotifyJumpApex double jump) and re-planned the same edge
+// until it died. These helpers keep such edges out of every route this bot plans.
+
+// Plan as a walker: with bCanJump on, the engine counts jump-ups when it picks the start anchor and
+// checks reachability, then this mover (no jumps) walks into the ledge. Off only for the query, so
+// the bot can still drop off ledges while moving (MayFall reads bCanJump).
+function FollowPlanBegin()
+{
+    if (Pawn != None && FollowPlanDepth++ == 0)
+    {
+        bFollowSavedCanJump = Pawn.bCanJump;
+        Pawn.bCanJump = false;
+    }
+}
+
+function FollowPlanEnd()
+{
+    if (FollowPlanDepth > 0 && --FollowPlanDepth == 0 && Pawn != None)
+    {
+        Pawn.bCanJump = bFollowSavedCanJump;
+    }
+}
+
+// ActorReachable / PointReachable without counting jumps (see FollowPlanBegin).
+function bool WalkReachable(Actor Other)
+{
+    local bool bReach;
+
+    FollowPlanBegin();
+    bReach = ActorReachable(Other);
+    FollowPlanEnd();
+    return bReach;
+}
+
+function bool WalkPointReachable(vector Dest)
+{
+    local bool bReach;
+
+    FollowPlanBegin();
+    bReach = PointReachable(Dest);
+    FollowPlanEnd();
+    return bReach;
+}
+
+// True for edges a walking bot can follow by steering at the end node.
+function bool FollowIsWalkableSpec(ReachSpec Spec)
+{
+    if (Spec == None)
+    {
+        return true;
+    }
+    return !(Spec.IsA('KFLeapReachSpec') || Spec.IsA('FloorToWallReachSpec') || Spec.IsA('WallReachSpec')
+        || Spec.IsA('WallToFloorReachSpec') || Spec.IsA('MantleReachSpec') || Spec.IsA('CeilingReachSpec')
+        || Spec.IsA('FloorToCeilingReachSpec') || Spec.IsA('LadderReachSpec') || Spec.IsA('WallTransReachSpec'));
+}
+
+// First non-walkable edge on the route FindPathToward/FindPathTo just left in RouteCache, or None.
+function ReachSpec FollowFindSpecialEdge()
+{
+    local NavigationPoint IterPrev, IterNav;
+    local ReachSpec IterSpec;
+    local int IterIdx;
+
+    if (Pawn == None)
+    {
+        return None;
+    }
+    IterPrev = Pawn.Anchor;
+    for (IterIdx = 0; IterIdx < RouteCache.Length; IterIdx++)
+    {
+        IterNav = RouteCache[IterIdx];
+        if (IterNav == None)
+        {
+            break;
+        }
+        if (IterPrev != None && IterPrev != IterNav)
+        {
+            IterSpec = IterPrev.GetReachSpecTo(IterNav);
+            if (!FollowIsWalkableSpec(IterSpec))
+            {
+                return IterSpec;
+            }
+        }
+        IterPrev = IterNav;
+    }
+    return None;
+}
+
+// Path toward Goal (or to Dest when Goal is None) that avoids every special edge this bot has seen.
+// Known special edges are marked BlockedBy only for the duration of the search, so zeds keep them.
+function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
+{
+    local array<ReachSpec> IterBlocked;
+    local ReachSpec IterSpec;
+    local Actor IterFirst;
+    local int IterPass, IterIdx;
+
+    for (IterPass = 0; IterPass < 4; IterPass++)
+    {
+        IterBlocked.Length = 0;
+        for (IterIdx = 0; IterIdx < FollowSpecialSpecs.Length; IterIdx++)
+        {
+            if (FollowSpecialSpecs[IterIdx] != None && FollowSpecialSpecs[IterIdx].BlockedBy == None)
+            {
+                FollowSpecialSpecs[IterIdx].BlockedBy = Pawn;
+                IterBlocked.AddItem(FollowSpecialSpecs[IterIdx]);
+            }
+        }
+        FollowPlanBegin();
+        if (Goal != None)
+        {
+            IterFirst = FindPathToward(Goal);
+        }
+        else
+        {
+            IterFirst = FindPathTo(Dest);
+        }
+        FollowPlanEnd();
+        for (IterIdx = 0; IterIdx < IterBlocked.Length; IterIdx++)
+        {
+            IterBlocked[IterIdx].BlockedBy = None;
+        }
+        if (IterFirst == None)
+        {
+            return None;
+        }
+        IterSpec = FollowFindSpecialEdge();
+        if (IterSpec == None)
+        {
+            return IterFirst;
+        }
+        if (FollowSpecialSpecs.Find(IterSpec) == INDEX_NONE && FollowSpecialSpecs.Length < 64)
+        {
+            FollowSpecialSpecs.AddItem(IterSpec);
+        }
+        `log("[FollowNav]" @ string(Name) @ "route used " $ string(IterSpec.Class.Name) $ " " $ string(IterSpec.Start) $ " -> " $ string(IterSpec.GetEnd()) $ ", replanning without it");
+    }
+    return None;
+}
+
 function bool FollowBuildPath()
 {
     local float IterNow;
@@ -500,7 +656,7 @@ function bool FollowBuildPath()
 
     FollowNextPathTime = IterNow + FollowPathMinInterval + (FRand() * FollowPhaseJitter);
 
-    IterFirst = FindPathToward(FollowLeaderPawn);
+    IterFirst = FollowFindWalkablePath(FollowLeaderPawn, vect(0,0,0));
     if (IterFirst == None)
     {
         FollowPathFailBackoff = FClamp(FollowPathFailBackoff * 2.0, FollowPathFailBackoffMin, FollowPathFailBackoffMax);
@@ -973,11 +1129,11 @@ function bool FollowComputeYieldPoint()
     }
 
     IterDest = Pawn.Location + (IterSide * FollowYieldDist) + (IterAway * (FollowYieldDist * 0.5));
-    if (!PointReachable(IterDest))
+    if (!WalkPointReachable(IterDest))
     {
         IterSide = -IterSide;
         IterDest = Pawn.Location + (IterSide * FollowYieldDist) + (IterAway * (FollowYieldDist * 0.5));
-        if (!PointReachable(IterDest))
+        if (!WalkPointReachable(IterDest))
         {
             return false;
         }
@@ -1213,7 +1369,7 @@ Begin:
     {
         bFollowOrderAnchorActive = false;
     }
-    if (ActorReachable(FollowLeaderPawn))
+    if (WalkReachable(FollowLeaderPawn) && Abs(FollowLeaderPawn.Location.Z - Pawn.Location.Z) <= FollowDirectMaxZ)
     {
         if (bFollowOrderAnchorActive)
         {
@@ -1226,7 +1382,7 @@ Begin:
     }
     else
     {
-        FollowNode = FindPathToward(FollowLeaderPawn);
+        FollowNode = FollowFindWalkablePath(FollowLeaderPawn, vect(0,0,0));
         if (FollowNode != None)
         {
             Pawn.Acceleration = Normal(FollowNode.Location - Pawn.Location) * FMax(Pawn.GroundSpeed, 0.0001);
@@ -1254,6 +1410,7 @@ defaultproperties
     FollowReachIntervalDirect=0.25
     FollowReachIntervalPath=0.5
     FollowReachFailsToPath=2
+    FollowDirectMaxZ=72.0
     FollowMinLoopSleep=0.05
     FollowInterruptMinGap=0.15
     FollowPathMinInterval=0.75
