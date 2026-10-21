@@ -12,6 +12,11 @@ const PERIMETER_RADIUS = 220.0;
 const DEG_TO_RAD = 0.0174532925;
 const SYG_DISTANCE_SQ = 1000000.0;
 const BOSS_HEALTH_THRESHOLD = 5000;
+const THREAT_SIREN = 2.0;
+const THREAT_HUSK = 1.6;
+const THREAT_LARGE = 1.5;
+const THREAT_STALKER = 1.3;
+const THREAT_CRAWLER = 0.9;
 const RETREAT_ZED_RADIUS = 500.0;
 const RETREAT_ZED_TRIGGER_COUNT = 4;
 const RETREAT_ZED_CLEAR_COUNT = 2;
@@ -741,6 +746,28 @@ function bool SetEnemy(Pawn Other, optional bool bNoNotify)
     return true;
 }
 
+// Target priority multiplier by zed type: Sirens (scream damage) and Husks (fire) first, large zeds
+// (Fleshpound, Scrake) next, then Stalkers; Crawlers are the least urgent.
+final function float GetSpecialZedFactor(Pawn Other)
+{
+    local KFPawn_Monster M;
+
+    M = KFPawn_Monster(Other);
+    if (M == None)
+        return 1.0;
+    if (M.Class == class'KFPawn_ZedSiren')
+        return THREAT_SIREN;
+    if (M.Class == class'KFPawn_ZedHusk')
+        return THREAT_HUSK;
+    if (M.bLargeZed)
+        return THREAT_LARGE;
+    if (M.Class == class'KFPawn_ZedStalker')
+        return THREAT_STALKER;
+    if (M.Class == class'KFPawn_ZedCrawler')
+        return THREAT_CRAWLER;
+    return 1.0;
+}
+
 function float GetEnemyThreat(Pawn Other)
 {
     local float V;
@@ -750,6 +777,9 @@ function float GetEnemyThreat(Pawn Other)
     {
         V += 800.0;
     }
+    // Special zeds first: the factor scales the base score before the distance penalty, so a Siren or
+    // Fleshpound still wins over a closer Clot but a far one does not pull a bot across the room.
+    V *= GetSpecialZedFactor(Other);
     V -= (VSize(Other.Location - Pawn.Location) / 2.0);
     if (Other == Enemy)
     {

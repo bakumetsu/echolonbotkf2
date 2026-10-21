@@ -53,6 +53,7 @@ var Controller VIPController;
 var Controller AlphaCommander;
 var Pawn CachedBossPawn;
 var int LastPolledWaveNum;
+var bool bForceRelocate;
 var KFGameInfo_Survival KF;
 var Actor PrevObjective;
 var array<NavigationPoint> ValidPoints;
@@ -215,6 +216,8 @@ function MatchStarting()
         {
             AddBot();
         }
+        // Spread the squads over random ammo crates once the bots exist (see InitialRelocate).
+        SetTimer(3.0, false, 'InitialRelocate');
     }
     else
     {
@@ -293,6 +296,17 @@ function PollWaveStart()
         InitializePlatoon();
         RelocateBotsToAmmoCrates();
     }
+}
+
+// One time at match start: form the squads and move each to a random ammo crate. The wave start relocation
+// only moves bots that have not picked a move yet (bJustSpawned), and by wave 1 every bot has, so without
+// this the bots always started together at the player start.
+function InitialRelocate()
+{
+    InitializePlatoon();
+    bForceRelocate = true;
+    RelocateBotsToAmmoCrates();
+    bForceRelocate = false;
 }
 
 function InitializePlatoon()
@@ -2797,7 +2811,7 @@ function RelocateBotsToAmmoCrates()
             Bot = Fireteams[GroupIdx].Members[i];
             if (Bot == None || Bot.Pawn == None)
                 continue;
-            if (!Bot.bJustSpawned)
+            if (!Bot.bJustSpawned && !bForceRelocate)
                 continue;
 
             if (Bot.bIsGroupLeader)
