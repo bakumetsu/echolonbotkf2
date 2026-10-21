@@ -1,0 +1,15 @@
+name: docs check
+
+on:
+  pull_request:
+    branches: [playtest, main]
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Code changes come with docs
+        run: sh .githooks/check-docs.sh "origin/${{ github.base_ref }}..HEAD"

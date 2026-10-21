@@ -21,6 +21,15 @@ The build follows the Steam guide [KF2 SDK: compiling a mod](https://steamcommun
 
 The compiled package lands in `KFGame\Unpublished\BrewedPC\Script\EcholonBot.u`, and settings go in `KFEcholonBot.ini`.
 
+## Docs before every push
+
+Every push that changes `Classes/` also updates the docs (`docs/ARCHITECTURE.md` or this README). If a change needs no doc update, add a line `Docs: none (<reason>)` to the last commit message.
+
+Two checks enforce it:
+
+- **Pre-push hook:** turn it on once per clone with `git config core.hooksPath .githooks`. It refuses such a push; `git push --no-verify` skips it once.
+- **GitHub check:** `.github/workflows/docs-check.yml` runs the same script, `.githooks/check-docs.sh`, on pull requests into `playtest` and `main`.
+
 ## Status
 
 The skeleton and Milestone 1 (mutator boot, spawning, perks, utilities) come next. Milestones M2 to M6 fill in navigation, the bot base, squad orders, combat systems and the bot states.
