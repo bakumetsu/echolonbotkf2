@@ -216,8 +216,9 @@ function MatchStarting()
         {
             AddBot();
         }
-        // Spread the squads over random ammo crates once the bots exist (see InitialRelocate).
-        SetTimer(3.0, false, 'InitialRelocate');
+        // Spread the squads over random ammo crates right away, in the same tick the bots are created
+        // (see InitialRelocate).
+        InitialRelocate();
     }
     else
     {
