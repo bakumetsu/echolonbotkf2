@@ -86,8 +86,10 @@ Single-writer rules: only the mutator changes ranks, fireteams, squad orders and
 
 ### Debugging hints
 
-- Audit lines start with `[EcholonAudit]`; the mutator's start with `[EcholonAudit] [Mut]`; follow-locomotion lines start with `[FollowNav]`. Look them up in the `KFGame/Logs` log file.
-- Audit lines are rate-limited (one per category per 5 s), so a missing line does not prove nothing happened.
+- Every bot log line goes through `EchelonLog` and reads `[EcholonAudit] EcholonBot_3(Widow) KEY name=value ...`. The tag comes from `LogTag()` in `EcholonFollowNavBase`: `EcholonBot_N` plus the in-game name without the `[rank]` tag, spaces as `_`. The mutator's lines start with `[EcholonAudit] [Mut]`. Look them up in the `KFGame/Logs` log file.
+- Naming convention for new logs: call `EchelonLog("<SYSTEM>_<EVENT> name=value ...")`. The key is uppercase and its prefix names the system (`NAV_`, `HUB_`, `TETHER_`, `REGROUP_`). Do not repeat the bot name in the message. `kit/tools/log_reader.py` reads the source, so new keys need no update there. The `TRADER_ROAM*` lines are the exception: they use a plain `log` with `LogTag()`.
+- Follow-locomotion lines are `NAV_*` keys: `NAV_STUCK` (with `node=`) and the per-tick movement lines `NAV_ACCEL_NODE`, `NAV_ACCEL_LEADER`, `NAV_ACCEL_ESCAPE`, `NAV_ACCEL_YIELD`. Entering the hub logs `HUB_ENTER from=<state>`; a spawn fix logs `SPAWN_NUDGE status=nudging|settling`.
+- Audit lines are rate-limited (see `AuditRateLimit`), so a missing line does not prove nothing happened.
 - Before assuming a function runs, search for its callers: several functions on main have no caller (listed in the sections as "no caller on main").
 - Some code carries `// @STUB(Mx)` comments left over from the build kit. They do not mean the code is missing.
 
@@ -179,7 +181,7 @@ flowchart TD
     N --> M
 ```
 
-The mutator and the only "hub" in the mod. It spawns the bots, organises them into fireteams, hands out squad orders for the hold-zone objective, and applies a few game-rule tweaks. It extends `KFMutator`, has `config(EcholonBot)` and no states (all timing is done with timers). Log lines go through `EchelonLog` with the tag `[EcholonAudit] [Mut]`; messages starting `ORDER_` are rate limited to one per 5 s.
+The mutator and the only "hub" in the mod. It spawns the bots, organises them into fireteams, hands out squad orders for the hold-zone objective, and applies a few game-rule tweaks. It extends `KFMutator`, has `config(EcholonBot)` and no states (all timing is done with timers). Log lines go through `EchelonLog` with the tag `[EcholonAudit] [Mut]` (a failed bot spawn logs `SPAWN_FAIL`); messages starting `ORDER_` are rate limited to one per 5 s.
 
 ### Config (saved in the ini, versioned by `CUR_CONFIGVER = 3`)
 
@@ -381,7 +383,7 @@ This class has **no states**. It extends `EcholonFollowNavBase`, adds ~160 funct
 
 ### Squad behaviours
 
-Roles by rank (`EBotRank`: `GRUNT`, `SQUAD_LEADER`, `LIEUTENANT`, `CAPTAIN`). `ArmRankTimers` starts the loops for the current rank with a random start delay: leader `StartSLLoop` then `SLDecisionLoop` (0.5 s loop); lieutenant `StartLTLoop` then `LTDispatchLoop` (1 s loop, only writes a log line on main); captain `StartCaptainLoop` (empty on main). Grunts get random gate offsets (`SeedGruntGates`). `ClearRankTimers` cancels all of them.
+Roles by rank (`EBotRank`: `GRUNT`, `SQUAD_LEADER`, `LIEUTENANT`, `CAPTAIN`). `ArmRankTimers` starts the loops for the current rank with a random start delay: leader `StartSLLoop` then `SLDecisionLoop` (0.5 s loop); lieutenant `StartLTLoop` then `LTDispatchLoop` (1 s loop, only writes an `LT_DISPATCH_LOOP` log line on main); captain `StartCaptainLoop` (empty on main). Grunts get random gate offsets (`SeedGruntGates`). `ClearRankTimers` cancels all of them.
 
 `SLDecisionLoop` (leader, every 0.5 s, suspended when dead, in `BreakLose`, `IsRagdolled` or `Dead`) runs in this order: `ScanRoomForFormation`, `RefreshSquadZedCache` (zeds within 300 units, up to 16), `SLGrenadeCheck`, `CheckWeaponReequip`, `UpdateOverwatchTimer`, `CheckOverwatchStall`, `UpdatePanicBroadcast`, `HandleReloadDrift`, `UpdateWedgeMode`, `UpdateHoldAreaDrift`; then, if `ShouldTacticalRetreat()` (4 or more zeds within 500 units, any large zed or siren within 300, or the same count reduced by wave momentum `1 + 0.15 x wave`), it issues `CMD_TacticalRetreat` 300 units behind it if that direction is clear (and under 20 zeds visible there), else `HoldAndCrouch`.
 
@@ -395,7 +397,7 @@ Roles by rank (`EBotRank`: `GRUNT`, `SQUAD_LEADER`, `LIEUTENANT`, `CAPTAIN`). `A
 
 ### Audit and debug
 
-`EchelonLog` writes `[EcholonAudit] <bot> ...`, rate limited to one line per 5 s per category (`STATE_EXIT`, `GOAL`, `FOLLOWGATE_EVAL`, everything else). `AuditStateEntry`/`AuditStateExit` time how long a bot dwells in each state and log exits that lasted 3 s or more and a per-minute total. `AuditGoalLog` logs set/clear of the objective goal. The `Wd*` fields and `AUDIT_*` constants belong to the watchdog in EcholonBotLogic.
+`EchelonLog` here overrides the unthrottled base version in `EcholonFollowNavBase` and adds the rate limits in `AuditRateLimit`. Lines read `[EcholonAudit] <LogTag> KEY ...`. Limits: one line per 5 s per category (`STATE_EXIT`, `GOAL`, `FOLLOWGATE_EVAL`, everything else); `NAV_ACCEL_*` at most one line per second per bot; `HUB_*`, other `NAV_*` and `SPAWN_NUDGE` are never throttled. `AuditStateEntry`/`AuditStateExit` time how long a bot dwells in each state and log exits that lasted 3 s or more and a per-minute total. `AuditGoalLog` logs set/clear of the objective goal. The `Wd*` fields and `AUDIT_*` constants belong to the watchdog in EcholonBotLogic.
 
 ### Diagram: how formation is chosen and used
 
@@ -462,7 +464,7 @@ All checks need a living pawn, a mutator, and `HealRetryAfter` (the failure back
 5. Close-quarters bash, rescue target, cover crouch, reload drift, wedge target in that priority; each can return early with its own destination.
 6. Otherwise: target = leader position + slot offset (`ComputeSlotOffset`), pulled in or out by `PanicVarianceMultiplier / wave momentum`, plus a 10 unit breathing wobble; the height step is limited by `ApplyZStep` (ignores height jumps over 300, softens 200 to 300). If the line to that spot is blocked three times in a row (`ValidateOffsetTarget`), it asks the leader to reroute and walks to the leader instead. Then `MoveToX(target)`.
 
-`GruntDecisionTimer` (1.5 s loop on grunts) sets `bEngageActive` when a zed is visible within 800 units (it only logs the change on main; nothing else in the code reads it).
+`GruntDecisionTimer` (1.5 s loop on grunts) sets `bEngageActive` when a zed is visible within 800 units (it only logs the change as `GRUNT_ENGAGE` on main; nothing else in the code reads it).
 
 ### Idle watchdog (`IdleWatchdogTimer`, `IdleWatchdog`)
 
@@ -488,7 +490,7 @@ A bot counts as "not idle" (and the escalation resets) when it is in a legitimat
 - `PawnDied`: fires kismet death events, aborts latent actions, releases the pawn, clears rank timers, goes to `Dead`. `ActivatePlayerDiedSequenceEvents` triggers `KFSeqEvent_PlayerDied`.
 - `NotifyKilled`: when a boss dies, set `bBossKillVictory` and go to `VictoryDance`.
 - `ReplicatedEvent`: ragdoll start goes to `IsRagdolled`, ragdoll end goes to `VictoryDance` or `PickNextMove`.
-- `PickRetreatMove`: picks the reachable nav point within 1200 units (at least 80 away) that is farthest from the enemy relative to the bot, randomised; else steps back 500 units from the enemy. `FindCollectable`: a visible pickup factory within 800 units that is reachable, or an armor pickup when armor is not full. `GetPointNear`: random walkable point near a pawn (used by `PickNextMove` to idle near the group leader or a followed human). `NotifyJumpApex`: double jump. `GetAIInfo`: debug string for `mutate AI`. `FinishObjective`: clears the bot's objective goal state (called by the mutator at objective end). `ProcessOverwatchPhase` (captains, 5 s loop): just flips the captain's own `bOverwatchPhase` flag (HOLD or ADVANCE) and logs it; no captain-level behaviour reads it on main.
+- `PickRetreatMove`: picks the reachable nav point within 1200 units (at least 80 away) that is farthest from the enemy relative to the bot, randomised; else steps back 500 units from the enemy. `FindCollectable`: a visible pickup factory within 800 units that is reachable, or an armor pickup when armor is not full. `GetPointNear`: random walkable point near a pawn (used by `PickNextMove` to idle near the group leader or a followed human). `NotifyJumpApex`: double jump. `GetAIInfo`: debug string for `mutate AI`. `FinishObjective`: clears the bot's objective goal state (called by the mutator at objective end). `ProcessOverwatchPhase` (captains, 5 s loop): just flips the captain's own `bOverwatchPhase` flag (HOLD or ADVANCE) and logs it as `OVERWATCH_PHASE`; no captain-level behaviour reads it on main.
 
 ### Diagram: watchdog escalation
 

@@ -2500,7 +2500,7 @@ final function RestartBot(EcholonBot NewPlayer, optional NavigationPoint StartSp
 
     if(NewPlayer.Pawn == None)
     {
-        EchelonLog("failed to spawn player at " $ string(StartSpot));
+        EchelonLog("SPAWN_FAIL start=" $ string(StartSpot));
         NewPlayer.GotoState('Dead');
     }
     else

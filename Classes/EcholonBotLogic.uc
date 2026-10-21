@@ -464,7 +464,7 @@ function HealFail()
     FailStreak++;
     HealRetryAfter = WorldInfo.TimeSeconds + FMin(4.0 * FailStreak, 20.0);
     HubFail("heal");
-    EchelonLog("HEAL_FAIL bot=" $ Name $ " target=" $ PendingHeal $ " streak=" $ string(FailStreak) $ " retryIn=" $ string(HealRetryAfter - WorldInfo.TimeSeconds));
+    EchelonLog("HEAL_FAIL target=" $ PendingHeal $ " streak=" $ string(FailStreak) $ " retryIn=" $ string(HealRetryAfter - WorldInfo.TimeSeconds));
     PendingHeal = None;
 }
 
@@ -544,7 +544,7 @@ function GruntDecisionTimer()
         if (!bEngageActive)
         {
             bEngageActive = true;
-            EchelonLog("GruntDecisionTimer: bEngageActive=true (enemy at " $ string(int(BestDist)) $ "u)");
+            EchelonLog("GRUNT_ENGAGE dist=" $ string(int(BestDist)));
         }
     }
     else
@@ -616,7 +616,7 @@ function IdleWatchdog()
         WdLastStepTime = 0.0;
         WdProgressGoalD2 = 0.0;
         WdIdleStartLoc = Pawn.Location;
-        EchelonLog("WD_IDLE bot=" $ Name $ " state=" $ IterState $ " intentAge=" $ string(IterSinceIntent) $ " hubAge=" $ string(IterSinceHub));
+        EchelonLog("WD_IDLE state=" $ IterState $ " intentAge=" $ string(IterSinceIntent) $ " hubAge=" $ string(IterSinceHub));
         return;
     }
 
@@ -668,7 +668,7 @@ function IdleWatchdog()
         if (mut != None && mut.HasSquadGoal(EcholonBot(self)))
         {
             mut.ReissueSquadOrder(EcholonBot(self));
-            EchelonLog("WD_FIRE bot=" $ Name $ " step=1 reissue state=" $ IterState $ " delta=" $ string(IterStuckDelta));
+            EchelonLog("WD_FIRE step=1 reissue state=" $ IterState $ " delta=" $ string(IterStuckDelta));
             WdEscStep++;
         }
         else
@@ -693,7 +693,7 @@ function IdleWatchdog()
                 {
                     mut.ReassignBotToGroup(EcholonBot(self), IterAttachBot.GroupID - 1);
                 }
-                EchelonLog("WD_FIRE bot=" $ Name $ " step=2 attach leader=" $ string(IterAttachCtrl.Name));
+                EchelonLog("WD_FIRE step=2 attach leader=" $ string(IterAttachCtrl.Name));
                 FollowStart(IterAttachCtrl);
                 bWdEscalating = false;
                 WdEscStep = 1;
@@ -709,7 +709,7 @@ function IdleWatchdog()
     }
     else
     {
-        EchelonLog("WD_FIRE bot=" $ Name $ " step=3 fresh-pick state=" $ IterState $ " delta=" $ string(IterStuckDelta));
+        EchelonLog("WD_FIRE step=3 fresh-pick state=" $ IterState $ " delta=" $ string(IterStuckDelta));
         GotoState('PickNextMove');
         bWdEscalating = false;
         WdEscStep = 1;
@@ -735,7 +735,7 @@ function ProcessOverwatchPhase()
         else
             PhaseStr = "ADVANCE";
 
-        EchelonLog("Overwatch phase toggled: " $ PhaseStr);
+        EchelonLog("OVERWATCH_PHASE phase=" $ PhaseStr);
     }
 }
 
@@ -748,7 +748,7 @@ function bool FollowCheckExit()
     {
         FollowExitState = 'PickNextMove';
         bFollowExitPending = true;
-        EchelonLog("FOLLOWGATE_EVAL bot=" $ Name $ " slot=" $ string(FollowSlotIndex) $ " result=TraderFree");
+        EchelonLog("FOLLOWGATE_EVAL slot=" $ string(FollowSlotIndex) $ " result=TraderFree");
         WdLastHubContactTime = WorldInfo.TimeSeconds;
         return true;
     }
@@ -760,7 +760,7 @@ function bool FollowCheckExit()
     {
         FollowExitState = 'GoShopping';
         bFollowExitPending = true;
-        EchelonLog("FOLLOWGATE_EVAL bot=" $ Name $ " slot=" $ string(FollowSlotIndex) $ " result=GoShopping");
+        EchelonLog("FOLLOWGATE_EVAL slot=" $ string(FollowSlotIndex) $ " result=GoShopping");
         WdLastHubContactTime = WorldInfo.TimeSeconds;
         return true;
     }
@@ -775,7 +775,7 @@ function bool FollowCheckExit()
         {
             FollowExitState = 'DoObjective';
             bFollowExitPending = true;
-            EchelonLog("FOLLOWGATE_EVAL bot=" $ Name $ " slot=" $ string(FollowSlotIndex) $ " result=DoObjective distSq=" $ string(IterDistSq));
+            EchelonLog("FOLLOWGATE_EVAL slot=" $ string(FollowSlotIndex) $ " result=DoObjective distSq=" $ string(IterDistSq));
             WdLastHubContactTime = WorldInfo.TimeSeconds;
             return true;
         }
@@ -1130,7 +1130,7 @@ function bool EvaluateFollowerMove()
     if (bEnableAdvancedLocomotion)
     {
         FollowStart(Leader);
-        `log("[FollowNav] EcholonBot: FollowStart issued; leaderGroup=" $ string(Leader.GroupID) $ " slot=" $ string(FollowSlotIndex) $ "/" $ string(FollowSlotCount));
+        EchelonLog("NAV_FOLLOW_START group=" $ string(Leader.GroupID) $ " slot=" $ string(FollowSlotIndex) $ "/" $ string(FollowSlotCount));
         return true;
     }
 

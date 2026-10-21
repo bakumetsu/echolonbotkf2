@@ -105,6 +105,43 @@ var float FollowDirectMaxZ;
 var bool bFollowSavedCanJump;
 var int FollowPlanDepth;  // nesting guard so an inner Begin/End can't lose the saved bCanJump
 
+
+// Log id for this bot: "EcholonBot_3(Widow)", the in-game name without its rank tag. kit/tools/log_reader.py reads it.
+function string LogTag()
+{
+    local string N;
+    local int BracketsEnd;
+
+    if (PlayerReplicationInfo == None || PlayerReplicationInfo.PlayerName == "")
+    {
+        return string(Name);
+    }
+    N = PlayerReplicationInfo.PlayerName;
+    if (Left(N, 1) == "[")
+    {
+        BracketsEnd = InStr(N, "]");
+        if (BracketsEnd >= 0)
+        {
+            N = Mid(N, BracketsEnd + 1);
+        }
+    }
+    if (Left(N, 1) == " ")
+    {
+        N = Mid(N, 1);
+    }
+    if (Left(N, 4) == "Bot_")
+    {
+        N = Mid(N, 4);
+    }
+    return string(Name) $ "(" $ Repl(N, " ", "_") $ ")";
+}
+
+// Every mod log line goes through here as "KEY name=value ..."; EcholonBotBase overrides it with rate limits.
+function EchelonLog(string Msg)
+{
+    `log("[EcholonAudit] " $ LogTag() $ " " $ Msg);
+}
+
 function FollowStart(Controller NewLeaderCtrl)
 {
     FollowSetLeader(NewLeaderCtrl);
@@ -307,7 +344,7 @@ function FollowRequestDispatch()
     }
     FollowNextInterruptTime = IterNow + FollowInterruptMinGap;
     bFollowDispatchPending = false;
-    `log("[FollowNav]" @ string(Name) @ "watchdog interrupt -> Dispatch");
+    EchelonLog("NAV_WATCHDOG_DISPATCH");
     GotoState('FollowingLeader', 'Dispatch');
 }
 
@@ -637,7 +674,7 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
         {
             FollowSpecialSpecs.AddItem(IterSpec);
         }
-        `log("[FollowNav]" @ string(Name) @ "route used " $ string(IterSpec.Class.Name) $ " " $ string(IterSpec.Start) $ " -> " $ string(IterSpec.GetEnd()) $ ", replanning without it");
+        EchelonLog("NAV_REPLAN spec=" $ string(IterSpec.Class.Name) $ " from=" $ string(IterSpec.Start) $ " to=" $ string(IterSpec.GetEnd()));
     }
     return None;
 }
@@ -662,7 +699,7 @@ function bool FollowBuildPath()
         FollowPathFailBackoff = FClamp(FollowPathFailBackoff * 2.0, FollowPathFailBackoffMin, FollowPathFailBackoffMax);
         FollowNextPathTime = IterNow + FMax(FollowPathMinInterval, FollowPathFailBackoff);
         FollowRetries++;
-        `log("[FollowNav]" @ string(Name) @ "FindPathToward returned None, retries=" $ string(FollowRetries));
+        EchelonLog("NAV_PATH_NONE retries=" $ string(FollowRetries));
         return false;
     }
 
@@ -681,7 +718,7 @@ function bool FollowBuildPath()
     bFollowRouteStale = false;
     FollowLastLeaderPathLoc = FollowLeaderPawn.Location;
     FollowLastPawnTargetPathLoc = FollowLeaderPawn.Location;
-    `log("[FollowNav]" @ string(Name) @ "A* OK " $ string(FollowRoute.Length) @ "nodes to " $ string(FollowLeaderPawn));
+    EchelonLog("NAV_PATH_OK nodes=" $ string(FollowRoute.Length) $ " to=" $ string(FollowLeaderPawn));
     return true;
 }
 
@@ -901,7 +938,7 @@ function FollowOnStuck(Name IterCause)
     }
 
     FollowRetries++;
-    `log("[FollowNav]" @ string(Name) @ " stuck cause=" $ string(IterCause) @ " retries=" $ string(FollowRetries));
+    EchelonLog("NAV_STUCK cause=" $ string(IterCause) $ " retries=" $ string(FollowRetries) $ " node=" $ string(FollowNode));
 
     FollowRepathPauseUntil = IterNow + 0.25 + FRand() + FollowSlotPhase();
     bFollowRouteStale = true;
@@ -1002,7 +1039,7 @@ function FollowSetWallEscape(vector HitNormal)
     FollowEscapeNormal.Z = HitNormal.Z / NormLen;
     bFollowEscaping = true;
     FollowEscapeUntil = Now + FollowEscapeDuration;
-    `log("[FollowNav] wall-escape set: nx=" $ string(FollowEscapeNormal.X) $ " ny=" $ string(FollowEscapeNormal.Y) $ " for=" $ string(FollowEscapeDuration) $ "s (slot=" $ string(FollowSlotIndex) $ ")");
+    EchelonLog("NAV_WALL_ESCAPE nx=" $ string(FollowEscapeNormal.X) $ " ny=" $ string(FollowEscapeNormal.Y) $ " for=" $ string(FollowEscapeDuration) $ " slot=" $ string(FollowSlotIndex));
 }
 
 function bool FollowIsFriendly(Pawn IterOther)
@@ -1089,7 +1126,7 @@ function FollowHandleMoveUnreachable(vector AttemptedDest, Actor AttemptedTarget
         return;
     }
 
-    `log("[FollowNav]" @ string(Name) @ "MoveUnreachable -> forcing path, target=" $ string(AttemptedTarget));
+    EchelonLog("NAV_UNREACHABLE target=" $ string(AttemptedTarget));
     FollowForcePathUntil = IterNow + FollowForcePathDuration;
     FollowNextPathTime = FMax(FollowNextPathTime, IterNow + FollowSlotPhase());
     bFollowRouteStale = true;
@@ -1154,12 +1191,12 @@ function FollowSetStatus(EFollowStatus NewStatus)
 
 function FollowNotifyHub(EFollowStatus NewStatus)
 {
-    `log("[FollowNav]" @ string(Name) @ "status=" $ string(int(NewStatus)));
+    EchelonLog("NAV_STATUS status=" $ string(int(NewStatus)));
 }
 
 function FollowOnGaveUp()
 {
-    `log("[FollowNav]" @ string(Name) @ "gave up following; Hub should decide");
+    EchelonLog("NAV_GIVEUP");
 }
 
 event bool NotifyHitWall(vector HitNormal, Actor Wall)
@@ -1203,7 +1240,7 @@ state FollowingLeader
             Pawn.Acceleration = vect(0.0, 0.0, 0.0);
         }
         FollowScheduleWatchdog();
-        `log("[FollowNav]" @ string(Name) @ "Enter FollowingLeader from " $ string(PreviousStateName));
+        EchelonLog("NAV_FOLLOW_ENTER from=" $ string(PreviousStateName));
     }
 
     event EndState(Name NextStateName)
@@ -1213,7 +1250,7 @@ state FollowingLeader
         bFollowMoveActive = false;
         bFollowDirectActive = false;
         bFollowYielding = false;
-        `log("[FollowNav]" @ string(Name) @ "Exit FollowingLeader to " $ string(NextStateName));
+        EchelonLog("NAV_FOLLOW_EXIT to=" $ string(NextStateName));
     }
 
 Begin:
@@ -1283,7 +1320,7 @@ DirectMove:
     }
     else
     {
-        `log("[FollowNav]" @ string(Name) @ "Accel leader " $ string(FollowLeaderPawn) @ " radius=" $ string(FollowGetArrivalRadius()));
+        EchelonLog("NAV_ACCEL_LEADER pawn=" $ string(FollowLeaderPawn) $ " radius=" $ string(FollowGetArrivalRadius()));
         Pawn.Acceleration = Normal(FollowLeaderPawn.Location - Pawn.Location) * FMax(Pawn.GroundSpeed, 0.0001f);
     }
     Sleep(FollowMinLoopSleep);
@@ -1297,7 +1334,7 @@ PathMove:
         Goto('Dispatch');
     }
     FollowOnMoveBegin(false);
-    `log("[FollowNav]" @ string(Name) @ "Accel node " $ string(FollowNode));
+    EchelonLog("NAV_ACCEL_NODE node=" $ string(FollowNode));
     Pawn.Acceleration = Normal(FollowNode.Location - Pawn.Location) * FMax(Pawn.GroundSpeed, 0.0001f);
     Sleep(FollowMinLoopSleep);
     Goto('Dispatch');
@@ -1307,7 +1344,7 @@ EscapeStep:
     {
         Pawn.Acceleration = FollowEscapeNormal * FMax(Pawn.GroundSpeed, 0.0001f);
     }
-    `log("[FollowNav]" @ string(Name) @ "Accel escape off wall nx=" $ string(FollowEscapeNormal.X) $ " ny=" $ string(FollowEscapeNormal.Y));
+    EchelonLog("NAV_ACCEL_ESCAPE nx=" $ string(FollowEscapeNormal.X) $ " ny=" $ string(FollowEscapeNormal.Y));
     Sleep(FollowMinLoopSleep);
     Goto('Dispatch');
 
@@ -1317,7 +1354,7 @@ YieldStep:
     {
         bFollowYielding = true;
         FollowYieldEndTime = WorldInfo.TimeSeconds + FollowYieldTimeout;
-        `log("[FollowNav]" @ string(Name) @ "Accel yield " $ string(FollowYieldPoint.X) $ "," $ string(FollowYieldPoint.Y) $ "," $ string(FollowYieldPoint.Z));
+        EchelonLog("NAV_ACCEL_YIELD at=" $ string(FollowYieldPoint.X) $ "," $ string(FollowYieldPoint.Y) $ "," $ string(FollowYieldPoint.Z));
         Pawn.Acceleration = Normal(FollowYieldPoint - Pawn.Location) * FMax(Pawn.GroundSpeed, 0.0001f);
         bFollowYielding = false;
     }
