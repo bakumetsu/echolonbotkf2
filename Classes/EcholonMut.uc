@@ -21,6 +21,8 @@ const REGROUP_DURATION = 5.0;
 const REGROUP_HARD_TIMEOUT = 6.0;
 const REGROUP_SCAN_RADIUS = 5000.0;
 const WAVE_POLL_INTERVAL = 1.0;
+const RELOCATE_MAX_PER_CRATE = 3;
+const RELOCATE_HUMAN_RADIUS_SQ = 90000.0;
 
 struct FireteamData { var array<EcholonBot> Members; var EcholonBot Leader; var NavigationPoint Anchor; };
 
@@ -53,6 +55,8 @@ var Controller VIPController;
 var Controller AlphaCommander;
 var Pawn CachedBossPawn;
 var int LastPolledWaveNum;
+var bool bForceRelocate;
+var bool bInitialRelocated;
 var KFGameInfo_Survival KF;
 var Actor PrevObjective;
 var array<NavigationPoint> ValidPoints;
@@ -215,6 +219,9 @@ function MatchStarting()
         {
             AddBot();
         }
+        // Spread the squads over random ammo crates right away, in the same tick the bots are created
+        // (see InitialRelocate).
+        InitialRelocate();
     }
     else
     {
@@ -293,6 +300,21 @@ function PollWaveStart()
         InitializePlatoon();
         RelocateBotsToAmmoCrates();
     }
+}
+
+// One time at match start, in the same tick the bots are created: put every bot alone on a random ammo
+// crate (see RelocateBotsToAmmoCrates). Squads are not formed here, so the bots have to find their squad
+// leader by themselves (tests the tether and the pathfinding to the leader). The wave start relocation
+// only moves bots that have not picked a move yet (bJustSpawned), so by wave 1 it never applied.
+function InitialRelocate()
+{
+    // MatchStarting ran twice in the playtest logs (two SPAWN_SPREAD batches in the same tick): once only.
+    if (bInitialRelocated)
+        return;
+    bInitialRelocated = true;
+    bForceRelocate = true;
+    RelocateBotsToAmmoCrates();
+    bForceRelocate = false;
 }
 
 function InitializePlatoon()
@@ -2755,18 +2777,22 @@ function SetupSquadSpawns(int NumSquads)
     HideAllPickups();
 }
 
+// Puts each bot (all of them at match start, later only bots that just spawned) alone on a random ammo
+// crate. At most RELOCATE_MAX_PER_CRATE people share a crate, humans standing there included; when every
+// crate is full the least crowded one is used. The spot is a random point 60-120 units from the crate that
+// the crate can see (not behind a wall), the crate itself as the fallback.
 function RelocateBotsToAmmoCrates()
 {
-    local int i, j, NumFactories, GroupIdx;
+    local int i, j, Tries, NumFactories, Pick, Best;
     local array<KFPickupFactory> AmmoFactories;
-    local KFPickupFactory Temp;
+    local array<int> Occupancy;
+    local KFPawn_Human H;
     local EcholonBot Bot;
-    local vector AnchorPos;
+    local vector AnchorPos, Spot;
 
     if (ActiveBots.Length == 0)
         return;
 
-    AmmoFactories.Length = 0;
     for (i = 0; i < KF.AllPickupFactories.Length; i++)
     {
         if (KFPickupFactory_Ammo(KF.AllPickupFactories[i]) != None)
@@ -2778,37 +2804,61 @@ function RelocateBotsToAmmoCrates()
     if (NumFactories == 0)
         return;
 
-    for (i = 0; i < NumFactories; i++)
+    // Humans already standing at a crate (the player start can be next to one) take places first.
+    Occupancy.Length = NumFactories;
+    foreach WorldInfo.AllPawns(class'KFPawn_Human', H)
     {
-        j = i + Rand(NumFactories - i);
-        Temp = AmmoFactories[i];
-        AmmoFactories[i] = AmmoFactories[j];
-        AmmoFactories[j] = Temp;
-    }
-
-    for (GroupIdx = 0; GroupIdx < Fireteams.Length; GroupIdx++)
-    {
-        if (GroupIdx >= NumFactories)
-            break;
-        AnchorPos = AmmoFactories[GroupIdx].Location;
-
-        for (i = 0; i < Fireteams[GroupIdx].Members.Length; i++)
+        if (H.IsHumanControlled() && H.IsAliveAndWell())
         {
-            Bot = Fireteams[GroupIdx].Members[i];
-            if (Bot == None || Bot.Pawn == None)
-                continue;
-            if (!Bot.bJustSpawned)
-                continue;
-
-            if (Bot.bIsGroupLeader)
+            for (i = 0; i < NumFactories; i++)
             {
-                Bot.Pawn.SetLocation(AnchorPos);
-            }
-            else
-            {
-                Bot.Pawn.SetLocation(PickSquadSpawnPoint(AnchorPos, 90.0, 150.0));
+                if (VSizeSq(H.Location - AmmoFactories[i].Location) < RELOCATE_HUMAN_RADIUS_SQ)
+                    Occupancy[i]++;
             }
         }
+    }
+
+    for (j = 0; j < ActiveBots.Length; j++)
+    {
+        Bot = ActiveBots[j];
+        if (Bot == None || Bot.Pawn == None)
+            continue;
+        if (!Bot.bJustSpawned && !bForceRelocate)
+            continue;
+
+        // Random crate with a free place; the least crowded one when all are full.
+        Pick = -1;
+        for (Tries = 0; Tries < 12 && Pick < 0; Tries++)
+        {
+            i = Rand(NumFactories);
+            if (Occupancy[i] < RELOCATE_MAX_PER_CRATE)
+                Pick = i;
+        }
+        if (Pick < 0)
+        {
+            Best = 999;
+            for (i = 0; i < NumFactories; i++)
+            {
+                if (Occupancy[i] < Best)
+                {
+                    Best = Occupancy[i];
+                    Pick = i;
+                }
+            }
+        }
+        Occupancy[Pick]++;
+
+        AnchorPos = AmmoFactories[Pick].Location;
+        Spot = AnchorPos;
+        for (Tries = 0; Tries < 6; Tries++)
+        {
+            Spot = PickSquadSpawnPoint(AnchorPos, 60.0, 120.0);
+            if (FastTrace(Spot + vect(0, 0, 40), AnchorPos + vect(0, 0, 40)))
+                break;
+            Spot = AnchorPos;
+        }
+        Bot.Pawn.SetLocation(Spot);
+        EchelonLog("SPAWN_SPREAD bot=" $ Bot.Name $ " crate=" $ string(Pick) $ " occupancy=" $ string(Occupancy[Pick]));
     }
 }
 

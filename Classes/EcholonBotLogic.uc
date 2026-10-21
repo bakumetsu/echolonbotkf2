@@ -279,7 +279,7 @@ final function bool ShouldNadeEnemies()
 
 function CheckGrabbed()
 {
-    if ( (KPawn != None && KPawn.Health > 0 && KPawn.IsDoingSpecialMove(31)) && KPawn.InteractionPawn != None )
+    if ( (KPawn != None && KPawn.Health > 0 && KPawn.IsDoingSpecialMove(SM_GrappleVictim)) && KPawn.InteractionPawn != None )
     {
         GotoState('BreakLose');
         return;
@@ -298,7 +298,7 @@ function UpdateGruntOffset()
     local vector bOff;
     local Controller VIP;
 
-    if (((KPawn != None) && KPawn.Health > 0) && KPawn.IsDoingSpecialMove(31) && KPawn.InteractionPawn != None)
+    if (((KPawn != None) && KPawn.Health > 0) && KPawn.IsDoingSpecialMove(SM_GrappleVictim) && KPawn.InteractionPawn != None)
     {
         GotoState('BreakLose');
         return;
@@ -1051,8 +1051,10 @@ function bool EvaluateSquadTether()
         && KFGRI.GetTraderTimeRemaining() > TRADER_REFORM_REMAINING)
     {
         TDiff = Pawn.Location - KFGRI.OpenedTrader.Location;
-        if (TDiff.X * TDiff.X + TDiff.Y * TDiff.Y + TDiff.Z * TDiff.Z > TRADER_ROAM_RADIUS_SQ)
+        if (TDiff.X * TDiff.X + TDiff.Y * TDiff.Y > TRADER_TETHER_RADIUS_SQ || Abs(TDiff.Z) > TRADER_TETHER_HEIGHT)
         {
+            // Drop the roam goal, or Roaming walks straight back out to it (ping-pong at the ring).
+            RandGoal = None;
             MoveTowardGoal(KFGRI.OpenedTrader, vect(0, 0, 0), true);
             return true;
         }

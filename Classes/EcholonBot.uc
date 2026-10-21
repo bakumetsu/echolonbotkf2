@@ -69,7 +69,7 @@ state PickNextMove
                     return;
                 }
                 if (RegroupElapsed < REGROUP_DURATION
-                    && GlobalZedCount > 0 && GlobalZedCount != 15 && GlobalZedCount <= 30)
+                    && GlobalZedCount > 0 && GlobalZedCount != 15 && GlobalZedCount <= 30 && AcquireHuntTarget())
                 {
                     EchelonLog("REGROUP_HUNT bot=" $ Name $ " zeds=" $ string(GlobalZedCount));
                     HubPick("P4.5_Regroup", 'Hunting');
@@ -206,7 +206,7 @@ state PickNextMove
         }
 
         // Priority 8.5: Low zed count
-        if (Enemy == None && GlobalZedCount > 0 && GlobalZedCount < HUNT_ZED_THRESHOLD)
+        if (Enemy == None && GlobalZedCount > 0 && GlobalZedCount < HUNT_ZED_THRESHOLD && AcquireHuntTarget())
         {
             HubPick("P8.5_LowZedCount", 'Hunting');
             GotoState('Hunting');
@@ -252,7 +252,6 @@ state Roaming
 
         if (KPawn != None)
         {
-            KPawn.SetSprinting(!bIsGroupLeader);
 
             if (KFGRI != None && KFGRI.bTraderIsOpen && Pawn.Weapon != None && !Pawn.Weapon.bMeleeWeapon)
             {
@@ -272,10 +271,6 @@ state Roaming
     {
         AuditStateExit(NextStateName);
 
-        if (KPawn != None)
-        {
-            KPawn.SetSprinting(false);
-        }
     }
 
     function PickStyle()
@@ -285,6 +280,11 @@ state Roaming
         if (IsTraderFreeTime())
         {
             // Free trader roam: skip the stick-to-leader branches below and wander.
+            // A goal kept from before the trader opened can be anywhere on the map: drop it.
+            if (RandGoal != None && !IsTraderRoamGoal(RandGoal))
+            {
+                RandGoal = None;
+            }
         }
         else if (PlayStyle == 0 && KPawn != None)
         {
@@ -430,10 +430,6 @@ state Camp
     {
         AuditStateEntry();
         AbortMove();
-        if (KPawn != None)
-        {
-            KPawn.SetSprinting(false);
-        }
     }
 
     event EndState(name NextStateName)
@@ -848,10 +844,6 @@ state TacticalRetreat
         AuditStateEntry();
         AbortMove();
         bIsRetreating = true;
-        if (KPawn != None)
-        {
-            KPawn.SetSprinting(true);
-        }
         SetTimer(ZED_COUNT_INTERVAL, true, 'CheckRetreatStatus');
     }
 
@@ -860,10 +852,6 @@ state TacticalRetreat
         AuditStateExit(NextStateName);
         ClearTimer('CheckRetreatStatus');
         bIsRetreating = false;
-        if (KPawn != None)
-        {
-            KPawn.SetSprinting(false);
-        }
     }
 
     function CheckRetreatStatus()
@@ -939,7 +927,7 @@ state BreakLose
             Pawn.StopFiring();
         }
         OnBreakLoseComplete();
-        if (((mut != None) && mut.bDebugGrapple) && (Pawn != None) && (Pawn.IsAliveAndWell() && ((KPawn == None) || !KPawn.IsDoingSpecialMove(31))))
+        if (((mut != None) && mut.bDebugGrapple) && (Pawn != None) && (Pawn.IsAliveAndWell() && ((KPawn == None) || !KPawn.IsDoingSpecialMove(SM_GrappleVictim))))
         {
             mut.DebugMessage(GetHumanReadableName() $ " broke free after " $ string(BreakFreeAttempts) $ " attempt(s), " $ string(int(WorldInfo.TimeSeconds - GrabStartTime)) $ "s.");
         }
@@ -947,11 +935,27 @@ state BreakLose
 
     function Timer()
     {
-        local int NearbyZeds;
+        local KFPawn Grabber;
 
-        if( (KPawn != None) && (KPawn.Health > 0) && KPawn.IsDoingSpecialMove(31) && (KPawn.InteractionPawn != None) )
+        if( (KPawn != None) && (KPawn.Health > 0) && KPawn.IsDoingSpecialMove(SM_GrappleVictim) && (KPawn.InteractionPawn != None) )
         {
-            Focus = KPawn.InteractionPawn;
+            Grabber = KPawn.InteractionPawn;
+            Focus = Grabber;
+
+            // Hard cap: whatever the zed count, never stay grabbed past FailsafeActivationDelay.
+            // ForceBreakGrapple only ends the special moves; it deals no damage.
+            if( (mut != None) && !bGrappleFailsafeTriggered && (WorldInfo.TimeSeconds - GrabStartTime) >= mut.FailsafeActivationDelay )
+            {
+                bGrappleFailsafeTriggered = true;
+                ForceBreakGrapple();
+                return;
+            }
+
+            // Surrounded: shoot the grabber (real hit). No clear shot or no usable weapon: bash below.
+            if( IsGrabSurrounded(Grabber) && TryShootGrabber(Grabber) )
+            {
+                return;
+            }
 
             if( WorldInfo.TimeSeconds >= NextEscapeAttempt )
             {
@@ -961,16 +965,6 @@ state BreakLose
                 if( (mut != None) && mut.bDebugGrapple )
                 {
                     mut.DebugMessage( GetHumanReadableName() $ " struggling free (attempt " $ string(BreakFreeAttempts) $ ")" );
-                }
-            }
-
-            if( (mut != None) && !bGrappleFailsafeTriggered && (WorldInfo.TimeSeconds - GrabStartTime) >= mut.FailsafeActivationDelay )
-            {
-                NearbyZeds = CountNearbyZeds(600.0);
-                if( NearbyZeds <= mut.MaxZedsForFailsafe )
-                {
-                    bGrappleFailsafeTriggered = true;
-                    ForceBreakGrapple();
                 }
             }
         }
@@ -988,10 +982,6 @@ state Hunting
     {
         AuditStateEntry();
         AbortMove();
-        if (KPawn != None)
-        {
-            KPawn.SetSprinting(true);
-        }
         SetTimer(0.25, true);
     }
 
@@ -999,10 +989,6 @@ state Hunting
     {
         AuditStateExit(NextStateName);
         SetTimer(0.0, false);
-        if (KPawn != None)
-        {
-            KPawn.SetSprinting(false);
-        }
     }
 
     function PickStyle()
@@ -1029,6 +1015,7 @@ state Hunting
 
         if (Enemy == None || !Enemy.IsAliveAndWell())
         {
+            NextHuntTime = WorldInfo.TimeSeconds + 1.0;
             PickCombatStyle();
             return;
         }
@@ -1036,6 +1023,7 @@ state Hunting
         if (!BuildPathToward(Enemy))
         {
             Enemy = None;
+            NextHuntTime = WorldInfo.TimeSeconds + 1.0;
             PickCombatStyle();
         }
         else
@@ -1517,10 +1505,6 @@ state GoShopping
     {
         AuditStateEntry();
         AbortMove();
-        if (KPawn != None)
-        {
-            KPawn.SetSprinting(true);
-        }
         SetTimer(0.4 + FRand() * 0.25, true);  // default 'Timer': this state's Timer() walks to the trader
         TraderRetryCount = 0;
     }
@@ -1530,10 +1514,6 @@ state GoShopping
         AuditStateExit(NextStateName);
         ClearTimer('DoTrading');
         SetTimer(0.0, false);
-        if (KPawn != None)
-        {
-            KPawn.SetSprinting(false);
-        }
     }
 
     function EnemyChanged()
@@ -1642,7 +1622,6 @@ state GetItem
     {
         AuditStateEntry();
         AbortMove();
-        KPawn.SetSprinting(Enemy == None);
         if ((Enemy != None) && LineOfSightTo(Enemy))
         {
             SetTimer(0.1 + FRand() * 0.15, true);  // default 'Timer', as legacy
@@ -1653,10 +1632,6 @@ state GetItem
     {
         AuditStateExit(NextStateName);
         ClearTimer('Timer');
-        if (KPawn != None)
-        {
-            KPawn.SetSprinting(false);
-        }
         if (Pawn != None)
         {
             Pawn.StopFiring();

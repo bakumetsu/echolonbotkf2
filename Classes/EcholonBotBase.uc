@@ -12,6 +12,11 @@ const PERIMETER_RADIUS = 220.0;
 const DEG_TO_RAD = 0.0174532925;
 const SYG_DISTANCE_SQ = 1000000.0;
 const BOSS_HEALTH_THRESHOLD = 5000;
+const THREAT_SIREN = 2.0;
+const THREAT_HUSK = 1.6;
+const THREAT_LARGE = 1.5;
+const THREAT_STALKER = 1.3;
+const THREAT_CRAWLER = 0.9;
 const RETREAT_ZED_RADIUS = 500.0;
 const RETREAT_ZED_TRIGGER_COUNT = 4;
 const RETREAT_ZED_CLEAR_COUNT = 2;
@@ -92,6 +97,20 @@ const BREATH_OMEGA = 0.3;
 const DRIFT_RATE = 0.8333333;
 const DRIFT_MIN_DIST_SQ = 10000.0;
 const DRIFT_MAX_TOTAL = 300.0;
+const TRADER_ROAM_HEIGHT_BAND = 350.0;
+const TRADER_TETHER_RADIUS_SQ = 10890000.0;
+const TRADER_TETHER_HEIGHT = 500.0;
+const TRADER_ROAM_PICK_TRIES = 6;
+const TRADER_ROAM_ROUTE_SLACK = 1.6;
+const TRADER_ROAM_ROUTE_EXTRA = 500.0;
+const SHOT_PROBE_INTERVAL = 0.15;
+const GRAB_SURROUND_RADIUS = 600.0;
+const GRAB_SURROUND_COUNT = 3;
+const SPRINT_TICK_INTERVAL = 0.25;
+const SPRINT_MIN_SPEED_SQ = 10000.0;
+const SPRINT_ENEMY_RADIUS_SQ = 2250000.0;
+const SPRINT_CATCHUP_START_SQ = 810000.0;
+const SPRINT_CATCHUP_STOP_SQ = 250000.0;
 
 enum EBotRank { GRUNT, SQUAD_LEADER, LIEUTENANT, CAPTAIN, };
 
@@ -144,6 +163,7 @@ var transient float SerpentineTime;
 var transient float NextGrenadeTimer;
 var transient float EnemyEncounterTime;
 var transient float NextShoppingTime;
+var transient float NextHuntTime;
 var transient float ObjectiveBailUntil;
 var transient float LastNodeBlockTime;
 var int NodeBlockCount;
@@ -159,6 +179,9 @@ var transient bool bGrappleFailsafeTriggered;
 var transient KFPickupFactory LastFactory;
 var transient Vector PrevMovePos;
 var NavigationPoint RandGoal;
+var transient array<NavigationPoint> TraderRoamNodes;
+var transient NavigationPoint TraderRoamHome;
+var transient Actor TraderRoamNodesFor;
 var NavigationPoint ObjectiveGoal;
 var NavigationPoint LastFailedMove;
 var NavigationPoint TempBlockPath;
@@ -229,6 +252,10 @@ var transient float LastFormationScanTime;
 var transient float NextFireLineCheck;
 var transient bool bFireLineClear;
 var transient Actor FireLineTarget;
+var transient float NextShotProbeTime;
+var transient Actor ShotProbeTarget;
+var transient name ShotProbeBone;
+var transient bool bShotProbeClear;
 var transient bool bOffsetCached;
 var transient Vector CachedLocalOffset;
 var transient int CachedOffsetEpoch;
@@ -460,6 +487,7 @@ function Restart(bool bVehicleTransition)
     }
 
     SetTimer(0.2 + (FRand() * 0.1), true, 'CheckGrabbed');
+    SetTimer(SPRINT_TICK_INTERVAL + (FRand() * 0.05), true, 'SprintTick');
     KFInvManager = KFInventoryManager(Pawn.InvManager);
 
     if (KFInvManager != None)
@@ -718,6 +746,28 @@ function bool SetEnemy(Pawn Other, optional bool bNoNotify)
     return true;
 }
 
+// Target priority multiplier by zed type: Sirens (scream damage) and Husks (fire) first, large zeds
+// (Fleshpound, Scrake) next, then Stalkers; Crawlers are the least urgent.
+final function float GetSpecialZedFactor(Pawn Other)
+{
+    local KFPawn_Monster M;
+
+    M = KFPawn_Monster(Other);
+    if (M == None)
+        return 1.0;
+    if (M.Class == class'KFPawn_ZedSiren')
+        return THREAT_SIREN;
+    if (M.Class == class'KFPawn_ZedHusk')
+        return THREAT_HUSK;
+    if (M.bLargeZed)
+        return THREAT_LARGE;
+    if (M.Class == class'KFPawn_ZedStalker')
+        return THREAT_STALKER;
+    if (M.Class == class'KFPawn_ZedCrawler')
+        return THREAT_CRAWLER;
+    return 1.0;
+}
+
 function float GetEnemyThreat(Pawn Other)
 {
     local float V;
@@ -727,6 +777,9 @@ function float GetEnemyThreat(Pawn Other)
     {
         V += 800.0;
     }
+    // Special zeds first: the factor scales the base score before the distance penalty, so a Siren or
+    // Fleshpound still wins over a closer Clot but a far one does not pull a bot across the room.
+    V *= GetSpecialZedFactor(Other);
     V -= (VSize(Other.Location - Pawn.Location) / 2.0);
     if (Other == Enemy)
     {
@@ -741,7 +794,12 @@ function bool FireWeaponAt(Actor inActor)
 
 	bOutOfEffectiveRange = false;
 
-	if ((InheritedEnemy != None) && (inActor == InheritedEnemy) && !HasOwnFireLine(inActor))
+	if ((inActor == None) || (Pawn == None))
+	{
+		return false;
+	}
+	// Shot-point probe before the IsFiring early return, so a burst stops when the target goes behind cover.
+	if (!ProbeShotPoint(inActor))
 	{
 		Pawn.StopFiring();
 		return false;
@@ -750,11 +808,15 @@ function bool FireWeaponAt(Actor inActor)
 	{
 		return true;
 	}
-	if ((inActor == None) || NeedToTurn(inActor.Location) || !Pawn.CanAttack(inActor))
+	if (NeedToTurn(inActor.Location) || !Pawn.CanAttack(inActor))
 	{
 		return false;
 	}
 	Target = inActor;
+	if (KPawn != None && KPawn.bIsSprinting)
+	{
+		KPawn.SetSprinting(false);
+	}
 	W = KFWeapon(Pawn.Weapon);
 	if (W != None)
 	{
@@ -829,11 +891,10 @@ final function TryBreakFree()
     }
 }
 
+// Scripted bash hit on the grabber: a flat 25, because the bot's alt-fire bash does not reliably connect
+// during the grab. The old random 200-damage roll is gone; a real shot is the strong option (TryShootGrabber).
 final function SimulateBashHit(KFPawn TargetZed, KFWeapon W)
 {
-    local float RngRoll;
-    local int BashDamage;
-
     if (TargetZed == None || !TargetZed.IsAliveAndWell())
     {
         return;
@@ -844,17 +905,7 @@ final function SimulateBashHit(KFPawn TargetZed, KFWeapon W)
         return;
     }
 
-    RngRoll = FRand();
-    if (RngRoll < 0.30)
-    {
-        BashDamage = 200;
-    }
-    else
-    {
-        BashDamage = 25;
-    }
-
-    TargetZed.TakeDamage(BashDamage, self, TargetZed.Location, vect(0.0, 0.0, 0.0), Class'Engine.DamageType');
+    TargetZed.TakeDamage(25, self, TargetZed.Location, vect(0.0, 0.0, 0.0), Class'Engine.DamageType');
 }
 
 function EnemyChanged()
@@ -886,7 +937,12 @@ function Rotator GetAdjustedAimFor(Weapon W, Vector StartFireLoc)
         }
     }
 
-    if((W != None) && (KFPawn(Target) != None))
+    // Aim at the bone the shot-point probe found clear; the head when this target was not probed clear.
+    if((W != None) && (KFPawn(Target) != None) && (Target == ShotProbeTarget) && bShotProbeClear && (ShotProbeBone != ''))
+    {
+        TargetPos = KFPawn(Target).Mesh.GetBoneLocation(ShotProbeBone);
+    }
+    else if((W != None) && (KFPawn(Target) != None) && !((Target == ShotProbeTarget) && bShotProbeClear))
     {
         TargetPos = KFPawn(Target).Mesh.GetBoneLocation(KFPawn(Target).HeadBoneName);
     }
@@ -1400,7 +1456,14 @@ final function bool BuildRandomPath()
         }
     }
 
-    RandGoal = FindRandomDest();
+    if (IsTraderFreeTime() && KFGRI.OpenedTrader != None && Pawn != None)
+    {
+        RandGoal = PickTraderRoamGoal();
+    }
+    else
+    {
+        RandGoal = FindRandomDest();
+    }
 
     I = DoorPaths.Length - 1;
     while (I >= 0)
@@ -1422,6 +1485,105 @@ final function bool BuildRandomPath()
     }
 
     return RandGoal != None;
+}
+
+// Lists the path nodes a bot may roam to in free trader time: within TRADER_ROAM_RADIUS of the trader
+// horizontally and within TRADER_ROAM_HEIGHT_BAND of its height (same floor), never crawler wall nodes or
+// unlinked nodes. Built once per trader (nav nodes never move). TraderRoamHome is the node closest to the
+// trader, the fallback goal.
+final function BuildTraderRoamNodes(Actor Trader)
+{
+    local NavigationPoint N;
+    local vector D;
+    local float DistSq, BestSq;
+
+    TraderRoamNodes.Length = 0;
+    TraderRoamHome = None;
+    TraderRoamNodesFor = Trader;
+    BestSq = 999999999.0;
+    foreach WorldInfo.AllNavigationPoints(class'NavigationPoint', N)
+    {
+        if (N.bWallNode || N.PathList.Length == 0)
+            continue;
+        D = N.Location - Trader.Location;
+        if (Abs(D.Z) > TRADER_ROAM_HEIGHT_BAND)
+            continue;
+        DistSq = VSizeSq2D(D);
+        if (DistSq > TRADER_ROAM_RADIUS_SQ)
+            continue;
+        TraderRoamNodes.AddItem(N);
+        if (DistSq < BestSq)
+        {
+            BestSq = DistSq;
+            TraderRoamHome = N;
+        }
+    }
+    `log("[EcholonAudit] TRADER_ROAM_LIST bot=" $ Name $ " nodes=" $ string(TraderRoamNodes.Length) $ " trader=" $ string(Trader.Name));
+}
+
+// True when N is a roam goal of the trader that is open now (a goal kept from before the trader opened can
+// be anywhere on the map, and Roaming drops it).
+final function bool IsTraderRoamGoal(NavigationPoint N)
+{
+    if (N == None || KFGRI == None || KFGRI.OpenedTrader == None || KFGRI.OpenedTrader != TraderRoamNodesFor)
+        return false;
+    return (N == TraderRoamHome) || (TraderRoamNodes.Find(N) != INDEX_NONE);
+}
+
+// True when another bot is already roaming to N, so bots spread out instead of bunching on one node.
+final function bool IsRoamGoalTaken(NavigationPoint N)
+{
+    local int J;
+
+    if (mut == None)
+        return false;
+    for (J = 0; J < mut.ActiveBots.Length; J++)
+    {
+        if (mut.ActiveBots[J] != None && mut.ActiveBots[J] != self && mut.ActiveBots[J].RandGoal == N)
+            return true;
+    }
+    return false;
+}
+
+// Free trader time roam goal (replaces the map-wide FindRandomDest). Tries a few random nodes from
+// TraderRoamNodes, skipping blocked nodes, nodes another bot uses, and nodes whose route is far longer than
+// the straight line (a node on another level that only looks close). Falls back to TraderRoamHome.
+final function NavigationPoint PickTraderRoamGoal()
+{
+    local Actor Trader, NextHop;
+    local NavigationPoint N;
+    local int Tries;
+    local float Straight;
+
+    Trader = KFGRI.OpenedTrader;
+    if (Trader != TraderRoamNodesFor)
+        BuildTraderRoamNodes(Trader);
+    if (TraderRoamNodes.Length == 0)
+    {
+        `log("[EcholonAudit] TRADER_ROAM_EMPTY bot=" $ Name);
+        return None;
+    }
+    for (Tries = 0; Tries < TRADER_ROAM_PICK_TRIES; Tries++)
+    {
+        N = TraderRoamNodes[Rand(TraderRoamNodes.Length)];
+        if (N == None || N.bBlocked || IsRoamGoalTaken(N))
+            continue;
+        Straight = VSize(N.Location - Pawn.Location);
+        RouteDist = 0.0;
+        NextHop = FindPathToward(N);
+        if (NextHop == None)
+            continue;
+        // NextHop == N means directly reachable: no route to judge.
+        if (NextHop != N && RouteDist > (Straight * TRADER_ROAM_ROUTE_SLACK) + TRADER_ROAM_ROUTE_EXTRA)
+            continue;
+        `log("[EcholonAudit] TRADER_ROAM bot=" $ Name $ " goal=" $ string(N.Name)
+            $ " dist2d=" $ string(int(VSize2D(N.Location - Trader.Location)))
+            $ " dz=" $ string(int(N.Location.Z - Trader.Location.Z))
+            $ " route=" $ string(int(RouteDist)) $ " straight=" $ string(int(Straight)));
+        return N;
+    }
+    `log("[EcholonAudit] TRADER_ROAM_FALLBACK bot=" $ Name $ " tries=" $ string(TRADER_ROAM_PICK_TRIES));
+    return TraderRoamHome;
 }
 
 function StopAdjusting()
@@ -1765,6 +1927,36 @@ function PickCombatStyle()
     GotoState('PickNextMove');
 }
 
+// Finds the nearest living enemy zed within hunt range and in line of sight and makes it the Enemy
+// (through SetEnemy, so its filters apply) when there is none. Hunting with no Enemy has nothing to chase and bounces straight back to
+// PickNextMove (zero-dwell loop), so every priority that sends a bot to Hunting must pass this first.
+// Hunting.PickStyle sets NextHuntTime when it has to bounce, which stops a re-pick for a moment.
+function bool AcquireHuntTarget()
+{
+    local KFPawn_Monster Zed, Best;
+    local float Dist, BestDist;
+
+    if (Pawn == None || WorldInfo.TimeSeconds < NextHuntTime)
+        return false;
+    BestDist = 999999999.0;
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', Zed, Pawn.Location, HUNT_SCAN_RADIUS)
+    {
+        if (!Zed.IsAliveAndWell() || Zed.bIsHeadless || Zed.GetTeamNum() == GetTeamNum() || !FastTrace(Zed.Location, Pawn.Location))
+            continue;
+        Dist = VSizeSq(Zed.Location - Pawn.Location);
+        if (Dist < BestDist)
+        {
+            BestDist = Dist;
+            Best = Zed;
+        }
+    }
+    if (Best == None)
+        return false;
+    if (Enemy != None && Enemy.IsAliveAndWell())
+        return true;
+    return SetEnemy(Best, true);
+}
+
 function ValidateAndNudgeSpawn()
 {
     local vector NudgeLoc;
@@ -1983,17 +2175,66 @@ final function ForceBreakGrapple()
 
     if (mut != None && mut.bDebugGrapple)
     {
-        mut.DebugMessage(GetHumanReadableName() $ " grapple failsafe triggered after " $ string(int(WorldInfo.TimeSeconds - GrabStartTime)) $ "s - forcing a break free.");
+        mut.DebugMessage(GetHumanReadableName() $ " grapple failsafe triggered after " $ string(int(WorldInfo.TimeSeconds - GrabStartTime)) $ "s - ending the grab (hard cap).");
     }
 
     if (GrabbingZed != None)
     {
-        GrabbingZed.TakeDamage(150, self, GrabbingZed.Location, vect(0, 0, 0), Class'Engine.DamageType');
         GrabbingZed.EndSpecialMove();
     }
 
     KPawn.EndSpecialMove();
     KPawn.InteractionPawn = None;
+}
+
+// Grabbed and surrounded: besides the grabber, GRAB_SURROUND_COUNT or more visible living zeds within
+// GRAB_SURROUND_RADIUS, or at least 2 with one of them behind the bot (more than 90 degrees from the grabber).
+final function bool IsGrabSurrounded(Pawn Grabber)
+{
+    local KFPawn_Monster Z;
+    local vector ToGrabber, ToZed;
+    local int Others;
+    local bool bFlanked;
+
+    if (Pawn == None || Grabber == None)
+        return false;
+    ToGrabber = Grabber.Location - Pawn.Location;
+    ToGrabber.Z = 0.0;
+    ToGrabber = Normal(ToGrabber);
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', Z, Pawn.Location, GRAB_SURROUND_RADIUS)
+    {
+        if (Z == Grabber || !Z.IsAliveAndWell() || Z.bIsHeadless || Z.GetTeamNum() == GetTeamNum()
+            || !FastTrace(Z.Location, Pawn.Location))
+        {
+            continue;
+        }
+        Others++;
+        ToZed = Z.Location - Pawn.Location;
+        ToZed.Z = 0.0;
+        if ((Normal(ToZed) Dot ToGrabber) < 0.0)
+            bFlanked = true;
+    }
+    return (Others >= GRAB_SURROUND_COUNT) || (Others >= 2 && bFlanked);
+}
+
+// Surrounded while grabbed: shoot the grabber with the current weapon for a real hit (any enemy hit ends an
+// AI grab). Uses the shot-point probe so the bot never fires into a wall. Returns false when it can't shoot
+// (no weapon, medic gun, no ammo, no clear point) so the caller falls back to the bash.
+final function bool TryShootGrabber(KFPawn Grabber)
+{
+    local KFWeapon W;
+
+    if (Pawn == None || Grabber == None)
+        return false;
+    W = KFWeapon(Pawn.Weapon);
+    if (W == None || W == MedicGun || !W.HasAmmo(BOTFM_PRIMARY))
+        return false;
+    if (!ProbeShotPoint(Grabber))
+        return false;
+    Target = Grabber;
+    if (!Pawn.IsFiring())
+        W.StartFire(BOTFM_PRIMARY);
+    return true;
 }
 
 function bool IsBotAlive()
@@ -2529,19 +2770,83 @@ final function bool SyncLineFocus()
 	return false;
 }
 
+// Kept for its callers (FightEnemy and the line-formation blocked-shooter report); now the shot-point probe.
 final function bool HasOwnFireLine(Actor T)
 {
+    return ProbeShotPoint(T);
+}
+
+// Picks the first point of T that a bullet from the eyes would reach: head, torso, pelvis, then the pivot.
+// Clear means the first thing the trace hits is nothing, T, or another zed (it takes the bullet instead).
+// World geometry, doors and teammates block. Cached SHOT_PROBE_INTERVAL per target; the chosen bone is
+// read again on every aim call (GetAdjustedAimFor) because bones move.
+final function bool ProbeShotPoint(Actor T)
+{
+    local KFPawn KP;
+    local KFPawn_Monster KM;
+    local vector EyeLoc;
+    local rotator EyeRot;
+    local name Bone;
+    local int I;
+
     if ((T == None) || (Pawn == None))
-    {
         return false;
-    }
-    if ((T != FireLineTarget) || (WorldInfo.TimeSeconds >= NextFireLineCheck))
+    if ((T == ShotProbeTarget) && (WorldInfo.TimeSeconds < NextShotProbeTime))
+        return bShotProbeClear;
+
+    ShotProbeTarget = T;
+    NextShotProbeTime = WorldInfo.TimeSeconds + SHOT_PROBE_INTERVAL;
+    ShotProbeBone = '';
+    bShotProbeClear = false;
+
+    Pawn.GetActorEyesViewPoint(EyeLoc, EyeRot);
+    KP = KFPawn(T);
+    KM = KFPawn_Monster(T);
+
+    if ((KP != None) && (KP.Mesh != None))
     {
-        FireLineTarget = T;
-        NextFireLineCheck = WorldInfo.TimeSeconds + 0.5;
-        bFireLineClear = FastTrace(T.Location, Pawn.Location + (vect(0.0, 0.0, 1.0) * Pawn.BaseEyeHeight));
+        for (I = 0; I < 3; I++)
+        {
+            if (I == 0)
+            {
+                if ((KM != None) && KM.bIsHeadless)
+                    continue;
+                Bone = KP.HeadBoneName;
+            }
+            else if (I == 1)
+            {
+                Bone = KP.TorsoBoneName;
+            }
+            else
+            {
+                Bone = KP.PelvisBoneName;
+            }
+            if ((Bone == '') || (KP.Mesh.MatchRefBone(Bone) == INDEX_NONE))
+                continue;
+            if (IsShotPathClear(T, EyeLoc, KP.Mesh.GetBoneLocation(Bone)))
+            {
+                ShotProbeBone = Bone;
+                bShotProbeClear = true;
+                return true;
+            }
+        }
     }
-    return bFireLineClear;
+
+    bShotProbeClear = IsShotPathClear(T, EyeLoc, T.Location);
+    return bShotProbeClear;
+}
+
+// One bullet-style trace (same flags as Weapon.CalcWeaponFire). Clear when nothing, T or any zed is hit first.
+final function bool IsShotPathClear(Actor T, vector StartLoc, vector EndLoc)
+{
+    local vector HitLoc, HitNorm;
+    local TraceHitInfo HitInfo;
+    local Actor HitActor;
+
+    HitActor = Pawn.Trace(HitLoc, HitNorm, EndLoc, StartLoc, true, vect(0.0, 0.0, 0.0), HitInfo, TRACEFLAG_Bullet);
+    if ((HitActor == None) || (HitActor == T))
+        return true;
+    return (KFPawn_Monster(HitActor) != None);
 }
 
 final function bool ValidateOffsetTarget(Vector OffsetTarget)
@@ -3246,6 +3551,65 @@ function HubResolve(name ExitTo)
 final function bool IsTraderFreeTime()
 {
 	return (KFGRI != None && KFGRI.bTraderIsOpen && KFGRI.GetTraderTimeRemaining() > TRADER_REFORM_REMAINING);
+}
+
+// Single owner of the sprint flag (replaces the per-state SetSprinting calls). Named timer, 0.25 s.
+// Edge-triggered: SetSprinting plays panting dialog and lowers the weapon, so call it only on a change.
+function SprintTick()
+{
+    local bool bWant;
+
+    if (Pawn == None || KPawn == None || KPawn.Health <= 0)
+        return;
+    bWant = WantsSprint();
+    if (bWant != KPawn.bIsSprinting)
+        KPawn.SetSprinting(bWant);
+}
+
+// Whether the bot should sprint right now; see SprintTick. Retreat and shopping always sprint, free trader
+// time sprints everyone, otherwise no sprint with a visible enemy within 1500 units.
+final function bool WantsSprint()
+{
+    local name S;
+    local vector V;
+    local float LeaderDistSq;
+
+    if (KPawn.bIsCrouched || !KPawn.bAllowSprinting || KPawn.IsFiring() || IsReloading())
+        return false;
+    V = KPawn.Velocity;
+    V.Z = 0.0;
+    if (VSizeSq(V) < SPRINT_MIN_SPEED_SQ)
+        return false;
+
+    S = GetStateName();
+    if (S == 'TacticalRetreat' || S == 'GoShopping')
+        return true;
+    if (IsTraderFreeTime() && (S == 'Roaming' || S == 'DoObjective' || S == 'FollowingLeader'
+        || S == 'FollowingLeaderBasic' || S == 'PickNextMove'))
+    {
+        return true;
+    }
+    if (Enemy != None && Enemy.IsAliveAndWell() && VSizeSq(Enemy.Location - Pawn.Location) < SPRINT_ENEMY_RADIUS_SQ
+        && LineOfSightTo(Enemy))
+    {
+        return false;
+    }
+    if (S == 'Hunting' || S == 'GetItem')
+        return true;
+    if (S == 'Roaming' || S == 'DoObjective')
+        return !bIsGroupLeader;
+    if (S == 'FollowingLeader' || S == 'FollowingLeaderBasic')
+    {
+        if (FollowLeaderPawn == None)
+            return false;
+        LeaderDistSq = VSizeSq(FollowLeaderPawn.Location - Pawn.Location);
+        if (KPawn.bIsSprinting)
+            return LeaderDistSq > SPRINT_CATCHUP_STOP_SQ;
+        return LeaderDistSq > SPRINT_CATCHUP_START_SQ;
+    }
+    if (S == 'PickNextMove')
+        return KPawn.bIsSprinting;
+    return false;
 }
 
 final function ApplyCrouch(bool bWant)
