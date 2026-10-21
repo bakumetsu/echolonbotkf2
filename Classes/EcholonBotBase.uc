@@ -104,6 +104,11 @@ const TRADER_ROAM_PICK_TRIES = 6;
 const TRADER_ROAM_ROUTE_SLACK = 1.6;
 const TRADER_ROAM_ROUTE_EXTRA = 500.0;
 const SHOT_PROBE_INTERVAL = 0.15;
+const AIM_INTERP_SPEED = 8.0;
+const AIM_FIRE_CONE_DOT = 0.985;
+const AIM_REACT_MIN = 0.08;
+const AIM_REACT_RANGE = 0.17;
+const AIM_RESET_GAP = 1.0;
 const GRAB_SURROUND_RADIUS = 600.0;
 const GRAB_SURROUND_COUNT = 3;
 const SPRINT_TICK_INTERVAL = 0.25;
@@ -256,6 +261,11 @@ var transient float NextShotProbeTime;
 var transient Actor ShotProbeTarget;
 var transient name ShotProbeBone;
 var transient bool bShotProbeClear;
+var transient rotator AimRot;
+var transient float LastAimTime;
+var transient float AimReadyTime;
+var transient bool bAimInit;
+var transient Actor AimLastTarget;
 var transient bool bOffsetCached;
 var transient Vector CachedLocalOffset;
 var transient int CachedOffsetEpoch;
@@ -804,6 +814,14 @@ function bool FireWeaponAt(Actor inActor)
 		Pawn.StopFiring();
 		return false;
 	}
+	// Keep the aim on the target we are shooting now, also while a burst is running: Target used to be set
+	// only when a burst started, so the next zed was ignored until the burst stopped.
+	Target = inActor;
+	if (inActor != AimLastTarget)
+	{
+		AimLastTarget = inActor;
+		AimReadyTime = WorldInfo.TimeSeconds + AIM_REACT_MIN + (FRand() * AIM_REACT_RANGE);
+	}
 	if (Pawn.IsFiring())
 	{
 		return true;
@@ -812,7 +830,6 @@ function bool FireWeaponAt(Actor inActor)
 	{
 		return false;
 	}
-	Target = inActor;
 	if (KPawn != None && KPawn.bIsSprinting)
 	{
 		KPawn.SetSprinting(false);
@@ -841,6 +858,10 @@ function bool FireWeaponAt(Actor inActor)
 			if (!IsInEffectiveRange(inActor))
 			{
 				bOutOfEffectiveRange = true;
+				return false;
+			}
+			if (!AimReadyToFire(inActor, W))
+			{
 				return false;
 			}
 			W.StartFire(BOTFM_PRIMARY);
@@ -924,10 +945,67 @@ exec function SwitchToBestWeapon(optional bool bForceNewWeapon, optional bool ch
 	}
 }
 
+// Where the bot wants to hit T: the bone the shot-point probe found clear, else the head, else the pivot.
+final function vector GetAimTargetPos(Actor T, Weapon W)
+{
+    if((W != None) && (KFPawn(T) != None) && (T == ShotProbeTarget) && bShotProbeClear && (ShotProbeBone != ''))
+    {
+        return KFPawn(T).Mesh.GetBoneLocation(ShotProbeBone);
+    }
+    if((W != None) && (KFPawn(T) != None) && !((T == ShotProbeTarget) && bShotProbeClear))
+    {
+        return KFPawn(T).Mesh.GetBoneLocation(KFPawn(T).HeadBoneName);
+    }
+    return T.Location;
+}
+
+// Eased aim: the aim direction turns toward the wanted direction at a limited speed instead of snapping
+// to it, like a player moving a mouse. It starts from where the bot is looking after a pause.
+final function rotator StepAim(vector StartLoc, vector TargetPos)
+{
+    local rotator Want;
+    local float Dt;
+
+    Want = Rotator(TargetPos - StartLoc);
+    if (Pawn == None)
+        return Want;
+    Dt = WorldInfo.TimeSeconds - LastAimTime;
+    if (!bAimInit || Dt > AIM_RESET_GAP)
+    {
+        AimRot = Pawn.Rotation;
+        bAimInit = true;
+    }
+    else if (Dt > 0.0)
+    {
+        AimRot = RInterpTo(AimRot, Want, FMin(Dt, 0.25), AIM_INTERP_SPEED);
+    }
+    LastAimTime = WorldInfo.TimeSeconds;
+    return AimRot;
+}
+
+// True when a new burst at T may start: the reaction delay after switching target has passed and the eased
+// aim is within about 10 degrees of the target. Also steps the aim, so it keeps turning between shots.
+final function bool AimReadyToFire(Actor T, Weapon W)
+{
+    local vector EyeLoc, TargetPos;
+    local rotator EyeRot, Cur;
+
+    Pawn.GetActorEyesViewPoint(EyeLoc, EyeRot);
+    TargetPos = GetAimTargetPos(T, W);
+    Cur = StepAim(EyeLoc, TargetPos);
+    if (WorldInfo.TimeSeconds < AimReadyTime)
+        return false;
+    return (Normal(vector(Cur)) Dot Normal(TargetPos - EyeLoc)) >= AIM_FIRE_CONE_DOT;
+}
+
 function Rotator GetAdjustedAimFor(Weapon W, Vector StartFireLoc)
 {
-    local Vector TargetPos;
-
+    // A dead target must not keep the aim: a burst that never stopped kept shooting at the corpse for
+    // 1-2 seconds before the bot looked at the next zed.
+    if((Pawn(Target) != None) && !Pawn(Target).IsAliveAndWell())
+    {
+        Target = Enemy;
+    }
     if(Target == None)
     {
         Target = Enemy;
@@ -937,21 +1015,7 @@ function Rotator GetAdjustedAimFor(Weapon W, Vector StartFireLoc)
         }
     }
 
-    // Aim at the bone the shot-point probe found clear; the head when this target was not probed clear.
-    if((W != None) && (KFPawn(Target) != None) && (Target == ShotProbeTarget) && bShotProbeClear && (ShotProbeBone != ''))
-    {
-        TargetPos = KFPawn(Target).Mesh.GetBoneLocation(ShotProbeBone);
-    }
-    else if((W != None) && (KFPawn(Target) != None) && !((Target == ShotProbeTarget) && bShotProbeClear))
-    {
-        TargetPos = KFPawn(Target).Mesh.GetBoneLocation(KFPawn(Target).HeadBoneName);
-    }
-    else
-    {
-        TargetPos = Target.Location;
-    }
-
-    return Rotator(TargetPos - StartFireLoc);
+    return StepAim(StartFireLoc, GetAimTargetPos(Target, W));
 }
 
 simulated function GetPlayerViewPoint(out Vector out_Location, out Rotator out_Rotation)
