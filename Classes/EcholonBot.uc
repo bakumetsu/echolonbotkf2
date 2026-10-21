@@ -135,9 +135,17 @@ state PickNextMove
             }
         }
 
-        // Priority 5: SYG Enforcement
-        if (mut.bObjectiveActive)
+        // Priority 5: SYG Enforcement (also the mutator's hunt order when few zeds are left, see UpdateHuntOrders)
+        if (!mut.bObjectiveActive && ObjectiveGoal != None && !mut.bHuntOrderActive)
         {
+            ObjectiveGoal = None;
+        }
+        if (mut.bObjectiveActive || mut.bHuntOrderActive)
+        {
+            if (mut.bHuntOrderActive && !mut.bObjectiveActive)
+            {
+                ObjectiveGoal = mut.GetBotObjective(self);
+            }
             bHasAmmo = (Pawn != None) && (Pawn.Weapon != None)
                 && (KFWeapon(Pawn.Weapon).GetTotalAmmoAmount(0) > 0);
             if (ObjectiveGoal == None)

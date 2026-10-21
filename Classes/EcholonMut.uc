@@ -11,6 +11,9 @@ const VANGUARD_OFFSET = 2000.0;
 const REARGUARD_OFFSET = 2000.0;
 const CHOKEPOINT_LATERAL_OFFSET = 1000.0;
 const NAV_SEARCH_RADIUS = 1500.0;
+const HUNT_ORDER_MAX_ZEDS = 15;
+const HUNT_ORDER_MIN_DIST_SQ = 1440000.0;
+const HUNT_ORDER_INTERVAL = 1.0;
 const MACRO_WAYPOINT_INTERVAL = 3.0;
 const OBJ_BAIL_COOLDOWN = 8.0;
 const PHASE_IDLE = 0;
@@ -65,6 +68,8 @@ var int MaxEmoteCount;
 var float NextVictoryDance;
 var bool bNewWave;
 var bool bObjectiveActive;
+var bool bHuntOrderActive;
+var float LastHuntOrderTime;
 var transient bool bTraderListInit;
 var array<PromotionRequest> PendingPromotions;
 var array<CachedHumanInfo> CachedHumans;
@@ -1276,7 +1281,86 @@ function CheckWave()
         }
     }
 
+    UpdateHuntOrders();
     EvaluateSquadPhase();
+}
+
+// Hunt order: when only a few zeds are left (alive plus still to spawn) and the map has no objective, each
+// squad leader is ordered toward the nearest leftover zed, and the whole squad follows (the bots reach it
+// through the objective pipeline: P5 / DoObjective / follow). Bots used to wait until a leftover zed came
+// within 1500 units, because Hunting only works on zeds a bot already sees.
+function UpdateHuntOrders()
+{
+    local KFGameReplicationInfo GRI;
+    local KFPawn_Monster Z, BestZ;
+    local EcholonBot L;
+    local NavigationPoint GP;
+    local float D, BestD;
+    local int Alive, i;
+    local bool bWant;
+
+    if (WorldInfo.TimeSeconds - LastHuntOrderTime < HUNT_ORDER_INTERVAL)
+        return;
+    LastHuntOrderTime = WorldInfo.TimeSeconds;
+
+    GRI = KFGameReplicationInfo(WorldInfo.GRI);
+    bWant = false;
+    if (GRI != None && !bObjectiveActive && NumGroups > 0 && GRI.bMatchHasBegun && !GRI.bMatchIsOver
+        && !GRI.bTraderIsOpen && !GRI.IsBossWave() && GRI.AIRemaining <= HUNT_ORDER_MAX_ZEDS)
+    {
+        foreach WorldInfo.AllPawns(class'KFPawn_Monster', Z)
+        {
+            if (Z.IsAliveAndWell())
+                Alive++;
+        }
+        bWant = (Alive > 0);
+    }
+
+    if (!bWant)
+    {
+        if (bHuntOrderActive)
+        {
+            bHuntOrderActive = false;
+            for (i = 0; i < SquadOrders.Length; i++)
+                SquadOrders[i].GoalNav = None;
+            EchelonLog("HUNT_ORDER_END");
+        }
+        return;
+    }
+
+    EnsureSquadOrderTable();
+    if (!bHuntOrderActive)
+        EchelonLog("HUNT_ORDER_START zeds=" $ string(Alive) $ " remaining=" $ string(GRI.AIRemaining));
+    bHuntOrderActive = true;
+
+    for (i = 0; i < Fireteams.Length && i < SquadOrders.Length; i++)
+    {
+        L = Fireteams[i].Leader;
+        SquadOrders[i].GoalNav = None;
+        if (L == None || L.Pawn == None || !L.Pawn.IsAliveAndWell())
+            continue;
+        BestZ = None;
+        BestD = 999999999.0;
+        foreach WorldInfo.AllPawns(class'KFPawn_Monster', Z)
+        {
+            if (!Z.IsAliveAndWell())
+                continue;
+            D = VSizeSq(Z.Location - L.Pawn.Location);
+            if (D < BestD)
+            {
+                BestD = D;
+                BestZ = Z;
+            }
+        }
+        // Closer than this the normal combat states already see the zed.
+        if (BestZ == None || BestD < HUNT_ORDER_MIN_DIST_SQ)
+            continue;
+        GP = FindNearestNavPoint(BestZ.Location, NAV_SEARCH_RADIUS);
+        if (GP == None)
+            continue;
+        SquadOrders[i].Leader = L;
+        SquadOrders[i].GoalNav = GP;
+    }
 }
 
 final function SetHoldObjective(Volume V)
@@ -1939,6 +2023,17 @@ final function NavigationPoint GetBotObjective(EcholonBot B)
 
     if (!bObjectiveActive)
     {
+        // Hunt order (no map objective): the squad's goal is the node nearest the leftover zed.
+        if (!bHuntOrderActive || B == None)
+        {
+            return None;
+        }
+        EnsureSquadOrderTable();
+        GroupIdx = B.GroupID - 1;
+        if (GroupIdx >= 0 && GroupIdx < SquadOrders.Length)
+        {
+            return SquadOrders[GroupIdx].GoalNav;
+        }
         return None;
     }
     if (B == None || B.Pawn == None)
