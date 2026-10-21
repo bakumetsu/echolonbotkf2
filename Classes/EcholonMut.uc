@@ -56,6 +56,7 @@ var Controller AlphaCommander;
 var Pawn CachedBossPawn;
 var int LastPolledWaveNum;
 var bool bForceRelocate;
+var bool bInitialRelocated;
 var KFGameInfo_Survival KF;
 var Actor PrevObjective;
 var array<NavigationPoint> ValidPoints;
@@ -307,6 +308,10 @@ function PollWaveStart()
 // only moves bots that have not picked a move yet (bJustSpawned), so by wave 1 it never applied.
 function InitialRelocate()
 {
+    // MatchStarting ran twice in the playtest logs (two SPAWN_SPREAD batches in the same tick): once only.
+    if (bInitialRelocated)
+        return;
+    bInitialRelocated = true;
     bForceRelocate = true;
     RelocateBotsToAmmoCrates();
     bForceRelocate = false;
