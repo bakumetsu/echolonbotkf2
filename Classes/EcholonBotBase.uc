@@ -1488,7 +1488,7 @@ final function BuildTraderRoamNodes(Actor Trader)
             TraderRoamHome = N;
         }
     }
-    EchelonLog("TRADER_ROAM_LIST bot=" $ Name $ " nodes=" $ string(TraderRoamNodes.Length));
+    `log("[EcholonAudit] TRADER_ROAM_LIST bot=" $ Name $ " nodes=" $ string(TraderRoamNodes.Length) $ " trader=" $ string(Trader.Name));
 }
 
 // True when N is a roam goal of the trader that is open now (a goal kept from before the trader opened can
@@ -1529,7 +1529,10 @@ final function NavigationPoint PickTraderRoamGoal()
     if (Trader != TraderRoamNodesFor)
         BuildTraderRoamNodes(Trader);
     if (TraderRoamNodes.Length == 0)
+    {
+        `log("[EcholonAudit] TRADER_ROAM_EMPTY bot=" $ Name);
         return None;
+    }
     for (Tries = 0; Tries < TRADER_ROAM_PICK_TRIES; Tries++)
     {
         N = TraderRoamNodes[Rand(TraderRoamNodes.Length)];
@@ -1543,13 +1546,13 @@ final function NavigationPoint PickTraderRoamGoal()
         // NextHop == N means directly reachable: no route to judge.
         if (NextHop != N && RouteDist > (Straight * TRADER_ROAM_ROUTE_SLACK) + TRADER_ROAM_ROUTE_EXTRA)
             continue;
-        EchelonLog("TRADER_ROAM bot=" $ Name $ " goal=" $ string(N.Name)
+        `log("[EcholonAudit] TRADER_ROAM bot=" $ Name $ " goal=" $ string(N.Name)
             $ " dist2d=" $ string(int(VSize2D(N.Location - Trader.Location)))
             $ " dz=" $ string(int(N.Location.Z - Trader.Location.Z))
             $ " route=" $ string(int(RouteDist)) $ " straight=" $ string(int(Straight)));
         return N;
     }
-    EchelonLog("TRADER_ROAM_FALLBACK bot=" $ Name $ " tries=" $ string(TRADER_ROAM_PICK_TRIES));
+    `log("[EcholonAudit] TRADER_ROAM_FALLBACK bot=" $ Name $ " tries=" $ string(TRADER_ROAM_PICK_TRIES));
     return TraderRoamHome;
 }
 
@@ -3526,7 +3529,7 @@ function SprintTick()
 {
     local bool bWant;
 
-    if (KPawn == None || KPawn.Health <= 0)
+    if (Pawn == None || KPawn == None || KPawn.Health <= 0)
         return;
     bWant = WantsSprint();
     if (bWant != KPawn.bIsSprinting)
