@@ -270,7 +270,7 @@ Squads: `MIN_GROUPS` 2, `MAX_GROUPS` 4, `BOTS_PER_GROUP_TARGET` 3, `VIP_ESCORT_M
 - `ReassignBotToGroup`, `GetGroupLeader`, `GetGroupSize`, `GetFollowerIndex`, `GetFollowerBySlot` are the lookup/move helpers.
 - `BroadcastSpottedEnemy(group, pawn)`: gives that enemy to every group member without a live enemy (except the leader) via `SetEnemy`.
 - `InitialRelocate` (once, in the match-start tick right after the bots are created; guarded by `bInitialRelocated` because `MatchStarting` can fire twice): sets `bForceRelocate` and calls `RelocateBotsToAmmoCrates`, so every bot starts alone on an ammo crate and has to find its squad leader by itself.
-- `RelocateBotsToAmmoCrates` (also right after `InitializePlatoon` on each wave, where it only moves bots still `bJustSpawned`): puts each bot on a random ammo pickup factory with fewer than `RELOCATE_MAX_PER_CRATE` (3) people, counting living humans within 300 units of a crate first; when every crate is full it takes the least crowded one. Each spot comes from `PickRelocateSpot` (8 tries on an 80 to 160 unit ring; `RelocateSpotOk` needs floor within 96 units below, a clear pawn cylinder, and a nav point within 400 units that is visible and on the same floor; else the nearest `PathNode`). Logs `SPAWN_SPOT`/`SPAWN_SPOT_REJECT` too. Logs `SPAWN_SPREAD bot= crate= occupancy=`. `SetupSquadSpawns`/`SpawnSquadAt`/`SpawnBotWithRank` (leader + 3 grunts per squad) exist but have no caller on main.
+- `RelocateBotsToAmmoCrates` (also right after `InitializePlatoon` on each wave, where it only moves bots still `bJustSpawned`): puts each bot on a random ammo pickup factory with fewer than `RELOCATE_MAX_PER_CRATE` (3) people, counting living humans within 300 units of a crate first; when every crate is full it takes the least crowded one. Each spot comes from `PickRelocateSpot` (8 tries on an 80 to 160 unit ring; `RelocateSpotOk` needs floor within 160 units below, a clear pawn cylinder, and a nav point within 400 units that is visible and on the same floor; else the nearest `PathNode`). Logs `SPAWN_SPOT`/`SPAWN_SPOT_REJECT` too. Logs `SPAWN_SPREAD bot= crate= occupancy=`. `SetupSquadSpawns`/`SpawnSquadAt`/`SpawnBotWithRank` (leader + 3 grunts per squad) exist but have no caller on main.
 
 ### Wave and objective (`CheckWave`, 0.1 s)
 
@@ -336,12 +336,19 @@ Latent labels, each ending in `Goto('Dispatch')` after a short `Sleep`:
 | `WaitStep` | sleep `FollowWaitTime` clamped to `[FollowMinLoopSleep, 1.0]` |
 | `HoldStep` | zero acceleration, same sleep (arrived) |
 | `DirectMove` | `FollowOnMoveBegin(true)`, accelerate straight at the order anchor or the leader at full ground speed, sleep `FollowMinLoopSleep` (0.05 s) |
-| `PathMove` | take the next route node (`FollowGetNextNode`), `FollowOnMoveBegin(false)`, accelerate at the node |
+| `PathMove` | take the next route node (`FollowGetNextNode`), `FollowOnMoveBegin(false)`, accelerate along `FollowFeelDir(FollowSteerPoint(FollowNode))` (see "Path steering") |
 | `EscapeStep` | accelerate along the stored wall normal |
 | `YieldStep` | clears the yield flag, computes a side-step point (`FollowComputeYieldPoint`), accelerates toward it, sleeps `FollowYieldHold` |
 | `GiveUpStep` | status `FS_Blocked`, `FollowOnGaveUp`, sleep `FollowGiveUpHold` (2 s), reset retries |
 
 `FollowDecide` order of checks: no pawn, leader not valid, or order anchor lookup; `FollowRetries >= 10` gives `FA_GiveUp`; an active wall escape gives `FA_Escape` until it expires; arrived gives `FA_Hold` (status `FS_Arrived`); a pending yield gives `FA_Yield`; a repath pause gives `FA_Wait`; otherwise status `FS_Following`, and `FA_Direct` if the leader is reachable and no forced-path window is open, else build a route (`FollowBuildPath`, `FindPathToward`, cached `RouteCache` up to 24 nodes) and return `FA_Path`.
+
+### Path steering
+
+- `FollowSteerPoint(node)` is a lookahead: it returns the furthest of the next `FollowLookahead` (3) route nodes that passes `FollowWalkClear` (a knee-height extent trace plus floor traces, floor within `FollowFloorDrop` 80) over walkable edges, so the bot cuts corners instead of stopping at every node.
+- `FollowFeelDir(point)` adds a push (`FollowFeelerPush` 0.6) away from a wall hit by feelers at +-`FollowFeelerAngle` (35 degrees).
+- `FollowGetNextNode` counts a node as reached via `FollowPassedNode` (pawn is past the node along the edge and the next node is in a clear line) or when within max(`CollisionRadius`, `FollowArriveRadius` 48).
+- `FollowIsWalkableSpec` rejects edges whose `CollisionRadius` is smaller than the pawn's.
 
 ### State `FollowingLeaderBasic`
 
