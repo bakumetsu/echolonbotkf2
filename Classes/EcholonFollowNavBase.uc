@@ -100,6 +100,7 @@ var float FollowWaitTime;
 var EFollowStatus FollowStatus;
 var EcholonNavMeter NavMeter;      // shared nav cost counter, set by EcholonMut.RegisterBot
 var EcholonNavBudget NavBudget;    // shared per-frame nav budget, set by EcholonMut.RegisterBot
+var EcholonNavScan NavScan;        // start-of-match link scan result (bad links), set by EcholonMut.RegisterBot
 var vector FollowSteerCachePoint;  // last steer point computed
 var Actor FollowSteerCacheNode;    // the route node that point was computed for
 var float FollowSteerCacheTime;    // when it was computed
@@ -886,6 +887,25 @@ function ReachSpec FollowFindSpecialEdge()
     return None;
 }
 
+// Blocks, for one search, every link the start-of-match scan found bad (blocked, no floor, zed-only).
+function FollowScanEdgesBlock(out array<ReachSpec> OutBlocked)
+{
+    local int I;
+
+    if (NavScan == None || Pawn == None)
+    {
+        return;
+    }
+    for (I = 0; I < NavScan.BadSpecs.Length; I++)
+    {
+        if (NavScan.BadSpecs[I] != None && NavScan.BadSpecs[I].BlockedBy == None)
+        {
+            NavScan.BadSpecs[I].BlockedBy = Pawn;
+            OutBlocked.AddItem(NavScan.BadSpecs[I]);
+        }
+    }
+}
+
 // Path toward Goal (or to Dest when Goal is None) that avoids every special edge this bot has seen.
 // Known special edges are marked BlockedBy only for the duration of the search, so zeds keep them.
 function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
@@ -894,8 +914,10 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
     local ReachSpec IterSpec;
     local Actor IterFirst;
     local int IterPass, IterIdx, IterMinStrikes;
+    local bool IterStrict;
 
     IterMinStrikes = 1;
+    IterStrict = true;
     for (IterPass = 0; IterPass < 4; IterPass++)
     {
         IterBlocked.Length = 0;
@@ -909,6 +931,11 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
         }
         FollowBadEdgesBlock(IterMinStrikes, IterBlocked);
         FollowSquadEdgesBlock(IterMinStrikes, IterBlocked);
+        if (IterStrict)
+        {
+            FollowScanEdgesBlock(IterBlocked);
+            class'Path_AvoidClosedDoors'.static.AvoidClosedDoors(Pawn, true);
+        }
         FollowPlanBegin();
         NavCountSearch();
         if (Goal != None)
@@ -920,12 +947,20 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
             IterFirst = FindPathTo(Dest);
         }
         FollowPlanEnd();
+        Pawn.ClearConstraints();
         for (IterIdx = 0; IterIdx < IterBlocked.Length; IterIdx++)
         {
             IterBlocked[IterIdx].BlockedBy = None;
         }
         if (IterFirst == None)
         {
+            if (IterStrict)
+            {
+                EchelonLog("NAV_PATH_RELAX rules=scan_doors");
+                IterStrict = false;
+                IterPass--;
+                continue;
+            }
             if (IterMinStrikes == 1 && FollowBadSpecs.Length > 0)
             {
                 EchelonLog("NAV_PATH_RELAX bad=" $ string(FollowBadSpecs.Length));
