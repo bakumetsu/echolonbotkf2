@@ -329,7 +329,7 @@ state Roaming
                     else
                     {
                         Focus = None;
-                        SetFocalPoint(Pawn.Location + (VRand() * 1000.0));
+                        LookModeSweep();
                     }
                     return;
                 }
@@ -367,7 +367,7 @@ state Roaming
                         else
                         {
                             Focus = None;
-                            SetFocalPoint(Pawn.Location + (VRand() * 1000.0));
+                            LookModeSweep();
                         }
                         return;
                     }
@@ -456,7 +456,7 @@ Begin:
         WaitForLanding(2.0);
     }
     Focus = None;
-    SetFocalPoint(Pawn.Location + (VRand() * 1000.0));
+    LookModeSweep();
     Sleep(1.0 + FRand());
     PickCombatStyle();
     Stop;
@@ -519,7 +519,7 @@ state DoObjective extends Roaming
         else
         {
             Focus = None;
-            SetFocalPoint(Pawn.Location + (VRand() * 1000.0));
+            LookModeSweep();
             return;
         }
 
