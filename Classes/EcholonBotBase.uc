@@ -276,6 +276,12 @@ var transient bool bShotProbeClear;
 var transient rotator AimRot;
 var transient float LastAimTime;
 var transient float AimReadyTime;
+var float HeadlessAvoidUntil;      // movers blend HeadlessAvoidDir in until this game time
+var vector HeadlessAvoidDir;       // unit horizontal direction away from the headless zed
+var bool bHeadlessStep;            // true while this function drives Pawn.Acceleration itself
+var float HeadlessLogTime;         // throttle for HEADLESS_AVOID logs (1 s)
+var float HeadlessAvoidDist;       // detect radius in uu
+var float HeadlessKeepDist;        // minimum safe distance in uu
 var float RetreatStartTime; // when the current retreat began (0 = none)
 var vector RetreatStartLoc; // where it began
 var float RetreatCooldownUntil; // no new retreat before this time (2 s after one ends)
@@ -531,6 +537,7 @@ function Restart(bool bVehicleTransition)
 
     SetTimer(0.2 + (FRand() * 0.1), true, 'CheckGrabbed');
     SetTimer(SPRINT_TICK_INTERVAL + (FRand() * 0.05), true, 'SprintTick');
+    SetTimer(0.25 + (FRand() * 0.05), true, 'HeadlessAvoidTick');
     KFInvManager = KFInventoryManager(Pawn.InvManager);
 
     if (KFInvManager != None)
@@ -1153,7 +1160,7 @@ final function StrafeTowardPoint(Vector Dest)
             X = Normal(X - (Y * 0.5));
         }
     }
-    X = NavGridSteer(X);
+    X = HeadlessAvoidAdjust(NavGridSteer(X));
     Pawn.Acceleration = X * 2000.0;
 }
 
@@ -1191,7 +1198,7 @@ final function ProcessMoveTo()
         }
         else
         {
-            Pawn.Acceleration = NavGridSteer(Normal2D(DestinationPosition.Position - Pawn.Location)) * 2000.0;
+            Pawn.Acceleration = HeadlessAvoidAdjust(NavGridSteer(Normal2D(DestinationPosition.Position - Pawn.Location))) * 2000.0;
         }
     }
 }
@@ -1217,7 +1224,7 @@ final function ProcessMoveToward()
         }
         else
         {
-            Pawn.Acceleration = NavGridSteer(Normal2D(MoveTarget.Location - Pawn.Location)) * 2000.0;
+            Pawn.Acceleration = HeadlessAvoidAdjust(NavGridSteer(Normal2D(MoveTarget.Location - Pawn.Location))) * 2000.0;
         }
     }
 }
@@ -2640,7 +2647,8 @@ function bool AuditRateLimit(string Msg)
 		AuditLastLog_NAVACCEL = IterNow;
 		return true;
 	}
-	if (Left(Msg, 4) ~= "NAV_" || Left(Msg, 11) ~= "SPAWN_NUDGE")
+	if (Left(Msg, 4) ~= "NAV_" || Left(Msg, 11) ~= "SPAWN_NUDGE" || Left(Msg, 8) ~= "RETREAT_" || Left(Msg, 7) ~= "COMBAT_"
+		|| Left(Msg, 9) ~= "HEADLESS_" || Left(Msg, 5) ~= "LOOK_")
 	{
 		return true;  // were plain `log lines before; kept unthrottled
 	}
@@ -3902,6 +3910,112 @@ final function bool IsTraderFreeTime()
 	return (KFGRI != None && KFGRI.bTraderIsOpen && KFGRI.GetTraderTimeRemaining() > TRADER_REFORM_REMAINING);
 }
 
+// ---------------------------------------------------------------- keep 2 m from headless zeds (C3)
+// Steers away from a headless zed that is closing in (it still deals damage); called every 0.25 s by a timer.
+function HeadlessAvoidTick()
+{
+    local KFPawn_Monster Z, NearestZ;
+    local float NearestDist, Dist, Angle, Rad, CX, SY;
+    local vector Away, Dir;
+    local int i;
+    local bool bFound;
+
+    if (Pawn == None || Pawn.Health <= 0)
+    {
+        return;
+    }
+    NearestZ = None;
+    NearestDist = HeadlessAvoidDist;
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', Z, Pawn.Location, HeadlessAvoidDist)
+    {
+        if (Z != None && Z.IsAliveAndWell() && Z.bIsHeadless)
+        {
+            Dist = VSize(Z.Location - Pawn.Location);
+            if (Dist < NearestDist && ((Z.Velocity dot (Pawn.Location - Z.Location)) > 0 || Dist < HeadlessKeepDist))
+            {
+                NearestDist = Dist;
+                NearestZ = Z;
+            }
+        }
+    }
+    if (NearestZ == None)
+    {
+        HeadlessAvoidUntil = 0;
+        if (bHeadlessStep)
+        {
+            bHeadlessStep = false;
+            if (MoveFlags == 0 && !(IsInState('FollowingLeader') && bFollowMoveActive))
+            {
+                Pawn.Acceleration = vect(0,0,0);
+            }
+        }
+        return;
+    }
+    if (VSize(Pawn.Location - NearestZ.Location) < 0.1)
+    {
+        Away = RandDir2D();
+    }
+    else
+    {
+        Away = Normal2D(Pawn.Location - NearestZ.Location);
+    }
+    Dir = vect(0,0,0);
+    bFound = false;
+    for (i = 0; i < 5; i++)
+    {
+        switch (i)
+        {
+            case 0: Angle = 0; break;
+            case 1: Angle = 60; break;
+            case 2: Angle = -60; break;
+            case 3: Angle = 100; break;
+            case 4: Angle = -100; break;
+            default: Angle = 0; break;
+        }
+        Rad = Angle * 0.0174533;
+        CX = Cos(Rad);
+        SY = Sin(Rad);
+        Dir.X = Away.X * CX - Away.Y * SY;
+        Dir.Y = Away.X * SY + Away.Y * CX;
+        Dir.Z = 0;
+        if (NavGridRayClear(Dir, Pawn.Location.Z - Pawn.GetCollisionHeight(), WorldInfo.TimeSeconds, 4, true) >= 3)
+        {
+            bFound = true;
+            break;
+        }
+    }
+    if (!bFound)
+    {
+        return;
+    }
+    HeadlessAvoidDir = Dir;
+    HeadlessAvoidUntil = WorldInfo.TimeSeconds + 0.4;
+    if (WorldInfo.TimeSeconds - HeadlessLogTime > 1.0)
+    {
+        HeadlessLogTime = WorldInfo.TimeSeconds;
+        EchelonLog("HEADLESS_AVOID dist=" $ string(int(VSize(NearestZ.Location - Pawn.Location))));
+    }
+    if (MoveFlags == 0 && !(IsInState('FollowingLeader') && bFollowMoveActive))
+    {
+        bHeadlessStep = true;
+        Pawn.Acceleration = Dir * Pawn.GroundSpeed;
+    }
+}
+
+// HeadlessAvoidAdjust: blends HeadlessAvoidDir into a mover direction while the avoid window is active
+function vector HeadlessAvoidAdjust(vector Dir)
+{
+    local vector Result;
+
+    if (WorldInfo.TimeSeconds >= HeadlessAvoidUntil)
+    {
+        return Dir;
+    }
+    Result = Normal2D(HeadlessAvoidDir * 2.0 + Dir);
+    Result.Z = Dir.Z;
+    return Result;
+}
+
 // Overridden in EcholonBotLogic (retreat that shoots); the base class only needs the name for SprintTick.
 function RetreatFireTick()
 {
@@ -5022,6 +5136,8 @@ function UpdateHoldAreaDrift()
 
 defaultproperties
 {
+    HeadlessAvoidDist=150.0
+    HeadlessKeepDist=100.0
     RetreatMaxDist=750.0
     RetreatMinStay=1.5
     RetreatFireInterval=0.2

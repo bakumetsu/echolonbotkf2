@@ -401,6 +401,12 @@ function vector FollowSeparationPush(vector Dir)
     return Normal(Result);
 }
 
+// Overridden in EcholonBotBase (keeps away from headless zeds); the follow mover only needs the name.
+function vector HeadlessAvoidAdjust(vector Dir)
+{
+    return Dir;
+}
+
 // ---------------------------------------------------------------- floor is lava grid (N10)
 // Evaluate one tile with up to 6 traces and store the result in NavGrid.
 function int NavGridEval(int TX, int TY, float RefZ, float Now)
@@ -2558,7 +2564,7 @@ PathMove:
     }
     FollowOnMoveBegin(false);
     EchelonLog("NAV_ACCEL_NODE node=" $ string(FollowNode));
-    Pawn.Acceleration = FollowSeparationPush(NavGridSteer(FollowSteerDirBudgeted(FollowNode))) * FMax(Pawn.GroundSpeed, 0.0001f);
+    Pawn.Acceleration = FollowSeparationPush(HeadlessAvoidAdjust(NavGridSteer(FollowSteerDirBudgeted(FollowNode)))) * FMax(Pawn.GroundSpeed, 0.0001f);
     FollowApplySpeedCap();
     Sleep(FollowMinLoopSleep);
     Goto('Dispatch');
