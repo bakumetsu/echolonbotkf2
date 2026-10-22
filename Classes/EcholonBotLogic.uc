@@ -848,54 +848,351 @@ final function ActivatePlayerDiedSequenceEvents()
     }
 }
 
-final function PickRetreatMove()
+// ---------------------------------------------------------------- retreat that shoots (C2)
+// Escape direction: 8 headings scored by zeds in a 45 degree cone, walkable tiles (lava grid) and dead ends;
+// the fire timer shoots the zed blocking the way (never a headless one or a calm Fleshpound during its window).
+// Returns true when the retreat cooldown has elapsed.
+function bool RetreatMayStart()
 {
-    local NavigationPoint N, Best;
-    local float Score, BestScore;
+    return (WorldInfo.TimeSeconds >= RetreatCooldownUntil);
+}
 
-    Best = None;
-    BestScore = 0.0;
+// Initialises a new tactical retreat.
+function RetreatBegin(float Score, int Zeds, vector Dir)
+{
+    RetreatStartTime = WorldInfo.TimeSeconds;
+    RetreatStartLoc = Pawn.Location;
+    bRetreatSprint = false;
+    RetreatNoFire = None;
+    RetreatTarget = None;
+    EchelonLog("RETREAT_START dir=" $ string(int(Dir.X * 100.0)) $ "," $ string(int(Dir.Y * 100.0)) $ " score=" $ string(int(Score)) $ " zeds=" $ string(Zeds));
+}
 
-    foreach WorldInfo.RadiusNavigationPoints(class'NavigationPoint', N, Pawn.Location, 1200.0)
+// Ends the current retreat and sets a 2 s cooldown.
+function RetreatEnd(string Reason)
+{
+    if (RetreatStartTime == 0.0)
     {
-        if (VSizeSq2D(N.Location - Pawn.Location) < 6400.0)
+        return;
+    }
+    RetreatCooldownUntil = WorldInfo.TimeSeconds + 2.0;
+    RetreatStartTime = 0.0;
+    bRetreatSprint = false;
+    RetreatNoFire = None;
+    RetreatTarget = None;
+    EchelonLog("RETREAT_END reason=" $ Reason);
+}
+
+// True when the bot has retreated farther than RetreatMaxDist from the start.
+function bool RetreatTooFar()
+{
+    return (VSize2D(Pawn.Location - RetreatStartLoc) > RetreatMaxDist);
+}
+
+// Counts living non-headless zeds within Range whose direction from pawn dots Dir >= 0.92.
+function int RetreatZedsInCone(vector Dir, float Range)
+{
+    local int Count;
+    local KFPawn_Monster Z;
+    local vector DirZ;
+
+    Count = 0;
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', Z, Pawn.Location, Range)
+    {
+        if (Z != None && Z.IsAliveAndWell() && !Z.bIsHeadless)
         {
-            continue;
+            DirZ = Normal(Z.Location - Pawn.Location);
+            if (DirZ.X * Dir.X + DirZ.Y * Dir.Y >= 0.92)
+            {
+                Count++;
+            }
+        }
+    }
+    return Count;
+}
+
+// Evaluates 8 escape directions and returns the best one with score and zed count.
+function vector RetreatPickDir(out float BestScore, out int BestZeds)
+{
+    local float Yaw;
+    local float Angle;
+    local vector Dir;
+    local float Score;
+    local int Zeds;
+    local int ClearTiles;
+    local float Best;
+    local int BestZ;
+    local vector BestDir;
+    local vector Point;
+    local NavigationPoint N;
+    local float NodeDist;
+    local int PathCount;
+    local bool bFoundNode;
+    local int I;
+
+    Yaw = Pawn.Rotation.Yaw * 0.0000958738;
+    Best = -9999.0;
+    BestZ = 0;
+    BestDir = vect(1.0, 0.0, 0.0);
+    bRetreatSurrounded = false;
+
+    for (I = 0; I < 8; I++)
+    {
+        Angle = float(I) * 0.785398;
+        Dir.X = Cos(Yaw + Angle);
+        Dir.Y = Sin(Yaw + Angle);
+        Dir.Z = 0.0;
+        Zeds = RetreatZedsInCone(Dir, 1000.0);
+        ClearTiles = NavGridRayClear(Dir, Pawn.Location.Z - Pawn.GetCollisionHeight(), WorldInfo.TimeSeconds, 10, true);
+        Score = 100.0 - 25.0 * float(Zeds) + 6.0 * float(ClearTiles);
+
+        Point = Pawn.Location + Dir * 400.0;
+        bFoundNode = false;
+        NodeDist = 999999.0;
+        PathCount = 99;
+        foreach WorldInfo.RadiusNavigationPoints(class'NavigationPoint', N, Point, 200.0)
+        {
+            if (N != None)
+            {
+                if (VSize(N.Location - Point) < NodeDist)
+                {
+                    NodeDist = VSize(N.Location - Point);
+                    PathCount = N.PathList.Length;
+                    bFoundNode = true;
+                }
+            }
+        }
+        if (!bFoundNode || PathCount < 2)
+        {
+            Score -= 40.0;
         }
 
-        if (Enemy != None)
+        if (Score > Best)
         {
-            Score = VSizeSq(N.Location - Enemy.Location) - VSizeSq(N.Location - Pawn.Location);
-        }
-        else
-        {
-            Score = VSizeSq(N.Location - Pawn.Location);
-        }
-
-        Score *= (0.5 + FRand());
-
-        if ((Best == None || BestScore < Score) && NavAllowReach() && WalkReachable(N))
-        {
-            Best = N;
-            BestScore = Score;
+            Best = Score;
+            BestZ = Zeds;
+            BestDir = Dir;
         }
     }
 
-    if (Best == None)
+    if (Best < 20.0)
     {
-        if (Enemy == None)
+        bRetreatSurrounded = true;
+    }
+    BestScore = Best;
+    BestZeds = BestZ;
+    return BestDir;
+}
+
+// Picks the zed to shoot, preferring one blocking the escape direction.
+function Pawn RetreatPickTarget(vector EscapeDir)
+{
+    local KFPawn_Monster Z;
+    local vector DirZ;
+    local float Dist;
+    local float BestBlockDist;
+    local float BestNearDist;
+    local Pawn BlockTarget;
+    local Pawn NearTarget;
+
+    BlockTarget = None;
+    NearTarget = None;
+    BestBlockDist = 999999.0;
+    BestNearDist = 999999.0;
+
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', Z, Pawn.Location, 1200.0)
+    {
+        if (Z != None && Z.IsAliveAndWell() && !Z.bIsHeadless && Z != RetreatNoFire)
         {
-            MoveToX(Pawn.Location + (RandDir2D() * 400.0), None, true, 'Retreat1');
-        }
-        else
-        {
-            MoveToX(((Normal(Pawn.Location - Enemy.Location) * 500.0) + Pawn.Location) + (RandDir2D() * 200.0), Enemy, true, 'Retreat2');
+            DirZ = Normal(Z.Location - Pawn.Location);
+            Dist = VSize(Z.Location - Pawn.Location);
+            if (DirZ.X * EscapeDir.X + DirZ.Y * EscapeDir.Y >= 0.9 && Dist < BestBlockDist)
+            {
+                BestBlockDist = Dist;
+                BlockTarget = Z;
+            }
+            if (Dist < BestNearDist)
+            {
+                BestNearDist = Dist;
+                NearTarget = Z;
+            }
         }
     }
-    else
+
+    if (BlockTarget != None)
     {
-        MoveTowardX(Best, Enemy, true, 'Retreat3');
+        return BlockTarget;
     }
+    return NearTarget;
+}
+
+// Maintains Fleshpound tracking arrays and updates calm/sprint state.
+function RetreatHeavyCheck()
+{
+    local KFPawn_Monster Z;
+    local bool bAnyScrakeRage;
+
+    RetreatHeavyUpdateFPs();
+    RetreatHeavyCheckTransitions();
+
+    if (RetreatNoFire != None)
+    {
+        if (WorldInfo.TimeSeconds > RetreatCalmUntil || VSize(RetreatNoFire.Location - Pawn.Location) > 750.0)
+        {
+            bRetreatSprint = false;
+            RetreatNoFire = None;
+        }
+    }
+
+    bAnyScrakeRage = false;
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', Z, Pawn.Location, 500.0)
+    {
+        if (Z != None && Z.IsA('KFPawn_ZedScrake') && Z.IsEnraged())
+        {
+            bAnyScrakeRage = true;
+        }
+    }
+    if (bAnyScrakeRage)
+    {
+        bRetreatSprint = true;
+    }
+}
+
+// Adds new Fleshpounds to tracking and removes dead or far ones.
+function RetreatHeavyUpdateFPs()
+{
+    local KFPawn_Monster Z;
+    local int I;
+    local int Found;
+
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', Z, Pawn.Location, 1250.0)
+    {
+        if (Z != None && Z.IsA('KFPawn_ZedFleshpound') && Z.IsAliveAndWell())
+        {
+            Found = RetreatFPs.Find(Z);
+            if (Found < 0)
+            {
+                RetreatFPs.AddItem(Z);
+                RetreatFPRaged.AddItem(Z.IsEnraged());
+            }
+        }
+    }
+
+    for (I = RetreatFPs.Length - 1; I >= 0; I--)
+    {
+        if (RetreatFPs[I] == None || !RetreatFPs[I].IsAliveAndWell() || VSize(RetreatFPs[I].Location - Pawn.Location) > 1500.0)
+        {
+            if (RetreatNoFire == RetreatFPs[I])
+            {
+                RetreatNoFire = None;
+                bRetreatSprint = false;
+            }
+            RetreatFPs.Remove(I, 1);
+            RetreatFPRaged.Remove(I, 1);
+        }
+    }
+}
+
+// Checks rage transitions on tracked Fleshpounds and updates calm/sprint state.
+function RetreatHeavyCheckTransitions()
+{
+    local int I;
+    local KFPawn_Monster FP;
+    local bool bNowRaged;
+
+    for (I = 0; I < RetreatFPs.Length; I++)
+    {
+        FP = KFPawn_Monster(RetreatFPs[I]);
+        if (FP != None && FP.IsAliveAndWell())
+        {
+            bNowRaged = FP.IsEnraged();
+            if (bNowRaged && !RetreatFPRaged[I])
+            {
+                RetreatNoFire = None;
+                bRetreatSprint = false;
+            }
+            else if (!bNowRaged && RetreatFPRaged[I])
+            {
+                RetreatNoFire = FP;
+                RetreatCalmUntil = WorldInfo.TimeSeconds + 9.0;
+                bRetreatSprint = true;
+                EchelonLog("RETREAT_FP_CALM window=9");
+            }
+            RetreatFPRaged[I] = bNowRaged;
+        }
+    }
+}
+
+// Timer-safe: shoots the retreat target and updates heavy-zed state.
+function RetreatFireTick()
+{
+    local vector EscapeDir;
+
+    if (Pawn == None || Pawn.Health <= 0)
+    {
+        return;
+    }
+
+    RetreatHeavyCheck();
+
+    EscapeDir = RetreatDir;
+    if (VSizeSq(EscapeDir) < 0.25)
+    {
+        EscapeDir = -vector(Pawn.Rotation);
+        EscapeDir.Z = 0.0;
+        EscapeDir = Normal(EscapeDir);
+    }
+
+    RetreatTarget = RetreatPickTarget(EscapeDir);
+    if (RetreatTarget == None)
+    {
+        Pawn.StopFiring();
+        return;
+    }
+
+    Focus = RetreatTarget;
+    if (FireWeaponAt(RetreatTarget))
+    {
+        if (WorldInfo.TimeSeconds - RetreatLogTime >= 1.0)
+        {
+            EchelonLog("RETREAT_SHOT target=" $ string(RetreatTarget.Class.Name));
+            RetreatLogTime = WorldInfo.TimeSeconds;
+        }
+    }
+}
+
+// Decides the retreat move: pick direction, begin or continue, or stop if surrounded.
+function PickRetreatMove()
+{
+    local vector Dir;
+    local float Score;
+    local int Zeds;
+
+    if (RetreatStartTime != 0.0 && RetreatTooFar())
+    {
+        RetreatEnd("too_far");
+        bIsRetreating = false;
+        PickCombatStyle();
+        return;
+    }
+
+    Dir = RetreatPickDir(Score, Zeds);
+    RetreatDir = Dir;
+
+    if (RetreatStartTime == 0.0)
+    {
+        RetreatBegin(Score, Zeds, Dir);
+    }
+
+    if (bRetreatSurrounded)
+    {
+        AbortMove();
+        Pawn.Acceleration = vect(0.0, 0.0, 0.0);
+        EchelonLog("RETREAT_SURROUNDED");
+        return;
+    }
+
+    MoveToX(Pawn.Location + Dir * 400.0, RetreatTarget, false, 'RetreatMove');
 }
 
 final function bool FindCollectable()

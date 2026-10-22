@@ -45,7 +45,7 @@ state PickNextMove
         }
 
         // Priority 4: Tactical Retreat
-        if (bIsGroupLeader && KPawn != None && !bIsRetreating && ShouldTacticalRetreat())
+        if (bIsGroupLeader && KPawn != None && !bIsRetreating && RetreatMayStart() && ShouldTacticalRetreat())
         {
             bIsRetreating = true;
             HubPick("P4_TacticalRetreat", 'TacticalRetreat');
@@ -896,35 +896,49 @@ Begin:
 // @STUB(M6) @SYS-BOT-COMBAT legacy:KF2Bot.TacticalRetreat
 state TacticalRetreat
 {
+    // Enters TacticalRetreat: aborts movement, starts both timers.
     event BeginState(name PreviousStateName)
     {
         AuditStateEntry();
         AbortMove();
         bIsRetreating = true;
         SetTimer(ZED_COUNT_INTERVAL, true, 'CheckRetreatStatus');
+        SetTimer(RetreatFireInterval, true, 'RetreatFireTick');
     }
 
+    // Leaves TacticalRetreat: clears timers and ends the retreat.
     event EndState(name NextStateName)
     {
         AuditStateExit(NextStateName);
         ClearTimer('CheckRetreatStatus');
+        ClearTimer('RetreatFireTick');
+        RetreatEnd("state_end");
         bIsRetreating = false;
     }
 
+    // Periodic check: ends retreat when the area is clear and min-stay has elapsed.
     function CheckRetreatStatus()
     {
         if (Pawn == None || Pawn.Health <= 0)
         {
             return;
         }
-
         if (CountNearbyZeds(RETREAT_ZED_RADIUS) < RETREAT_ZED_CLEAR_COUNT && !HeavyZedWithin(RETREAT_HEAVY_RADIUS))
         {
-            bIsRetreating = false;
-            PickCombatStyle();
+            if (WorldInfo.TimeSeconds - RetreatStartTime >= RetreatMinStay || RetreatStartTime == 0.0)
+            {
+                RetreatEnd("clear");
+                bIsRetreating = false;
+                PickCombatStyle();
+            }
+        }
+        if (bRetreatSurrounded)
+        {
+            PickRetreatMove();
         }
     }
 
+    // Called when a move finishes during retreat; re-issues the retreat move.
     function FinishedMove()
     {
         if (bIsRetreating)
