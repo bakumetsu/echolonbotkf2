@@ -133,6 +133,7 @@ var transient int PlaytestBotsOverride;      // bot count override for this matc
 var transient int PlaytestWavesDone;         // waves ended so far
 var transient float PlaytestWaveStart;       // TimeSeconds when the current wave began
 var transient bool bPlaytestLastTrader;      // bTraderIsOpen at the previous tick (edge detection)
+var transient float PlaytestZeroSince;          // when the last living bot was first seen dead (0 = bots alive)
 var transient bool bPlaytestDone;            // PLAYTEST_DONE logged, the game is about to quit
 var transient bool bPlaytestReadyLogged;     // PLAYTEST_READY logged once
 
@@ -452,6 +453,18 @@ final function PlaytestCheckWaveEnd()
 
     Over = KF.MyKFGRI.bMatchIsOver;
     Trader = KF.MyKFGRI.bTraderIsOpen;
+
+    // A human spectator does not count as a survivor, so the engine may never flag the match over after the
+    // bots die (the defeat menu just stays). Treat 5 s with no living bot in a running wave as the wipe.
+    if (!Over && !Trader && ActiveBots.Length > 0 && PlaytestCountBotsAlive() == 0)
+    {
+        if (PlaytestZeroSince == 0.0)
+            PlaytestZeroSince = WorldInfo.TimeSeconds;
+        else if (WorldInfo.TimeSeconds - PlaytestZeroSince > 5.0)
+            Over = true;
+    }
+    else
+        PlaytestZeroSince = 0.0;
 
     if (PlaytestWaveStart == 0.0)
         PlaytestWaveStart = WorldInfo.TimeSeconds;
