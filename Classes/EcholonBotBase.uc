@@ -1176,7 +1176,7 @@ final function StrafeTowardPoint(Vector Dest)
             X = Normal(X - (Y * 0.5));
         }
     }
-    X = HeadlessAvoidAdjust(NavGridSteer(X));
+    X = HeadlessAvoidAdjust(NavGridSteer(X, VSize2D(Dest - Pawn.Location)));
     Pawn.Acceleration = X * 2000.0;
 }
 
@@ -1214,7 +1214,7 @@ final function ProcessMoveTo()
         }
         else
         {
-            Pawn.Acceleration = HeadlessAvoidAdjust(NavGridSteer(Normal2D(DestinationPosition.Position - Pawn.Location))) * 2000.0;
+            Pawn.Acceleration = HeadlessAvoidAdjust(NavGridSteer(Normal2D(DestinationPosition.Position - Pawn.Location), VSize2D(DestinationPosition.Position - Pawn.Location))) * 2000.0;
         }
     }
 }
@@ -1240,7 +1240,7 @@ final function ProcessMoveToward()
         }
         else
         {
-            Pawn.Acceleration = HeadlessAvoidAdjust(NavGridSteer(Normal2D(MoveTarget.Location - Pawn.Location))) * 2000.0;
+            Pawn.Acceleration = HeadlessAvoidAdjust(NavGridSteer(Normal2D(MoveTarget.Location - Pawn.Location), VSize2D(MoveTarget.Location - Pawn.Location))) * 2000.0;
         }
     }
 }
@@ -1561,6 +1561,7 @@ final function NavProgressCheck()
     if (NavLevel < 1 && NavStall >= 0.75)
     {
         NavLevel = 1;
+        NavGridArmedUntil = IterNow + 4.0;
         if (!bFollow)
         {
             if (NavLastGood != None)
