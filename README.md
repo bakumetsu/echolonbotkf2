@@ -22,7 +22,7 @@ The build follows the Steam guide [KF2 SDK: compiling a mod](https://steamcommun
 
 The compiled package lands in `KFGame\Unpublished\BrewedPC\Script\EcholonBot.u`, and settings go in `KFEcholonBot.ini`.
 
-Navigation settings in that file: `NavGridSquads` (default 0; 0 = the floor-is-lava grid steers every squad, N = only squad N, -1 = off) and `bNavGridDebug` (default false; logs an ASCII map of the grid). At match start the bots scan every path link and block bad ones; nav cost is counted and shared per frame, and the logs show it as `NAV_COST`, `NAV_SCAN` and `NAV_GRID_*` lines.
+Navigation settings in that file: `NavGridSquads` (default 0; 0 = the floor-is-lava grid may steer every squad, but only for a few seconds after a bot stalls; N = only squad N, -1 = off) and `bNavGridDebug` (default false; logs an ASCII map of the grid). At match start the bots scan every path link and block bad ones; nav cost is counted and shared per frame, and the logs show it as `NAV_COST`, `NAV_SCAN` and `NAV_GRID_*` lines.
 
 ## Playtest mode
 
