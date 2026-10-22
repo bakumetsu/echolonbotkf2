@@ -874,7 +874,7 @@ final function PickRetreatMove()
 
         Score *= (0.5 + FRand());
 
-        if ((Best == None || BestScore < Score) && WalkReachable(N))
+        if ((Best == None || BestScore < Score) && NavAllowReach() && WalkReachable(N))
         {
             Best = N;
             BestScore = Score;

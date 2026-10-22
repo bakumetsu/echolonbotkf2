@@ -38,6 +38,8 @@ struct PromotionRequest { var EcholonBot DeadOfficer; var EcholonBot Replacement
 struct CachedHumanInfo { var KFPawn_Human HumanPawn; var vector Loc; var vector Vel; };
 
 var transient array<EcholonWeaponInfo> TraderList;
+var transient EcholonNavMeter NavMeter;       // nav cost counter, shared by all bots (N6)
+var transient EcholonNavBudget NavBudget;     // per-frame nav budget, shared by all bots (N7)
 var config int ConfigVer;
 var config string _Separator1;
 var() config byte NumBots;
@@ -224,6 +226,42 @@ function PostBeginPlay()
 
     SetTimer(WAVE_POLL_INTERVAL, true, 'PollWaveStart');
     SetTimer(3.0, true, 'CacheHumans');
+    NavMeter = new class'EcholonBot.EcholonNavMeter';
+    NavBudget = new class'EcholonBot.EcholonNavBudget';
+    SetTimer(15.0, false, 'NavBenchmarkRun');
+}
+
+// One-time: let the first living bot measure the unit cost of a trace, a route search and a reach check.
+function NavBenchmarkRun()
+{
+    local int I;
+
+    for (I = 0; I < ActiveBots.Length; I++)
+    {
+        if (ActiveBots[I] != None && ActiveBots[I].Pawn != None)
+        {
+            ActiveBots[I].NavBenchmark();
+            EchelonLog(NavMeter.UnitCostMessage());
+            return;
+        }
+    }
+    SetTimer(10.0, false, 'NavBenchmarkRun');
+}
+
+// Closes the nav meter's frame and logs its report every 30 s (N6).
+event Tick(float DeltaTime)
+{
+    local string NavReport;
+
+    super.Tick(DeltaTime);
+    if (NavMeter != None)
+    {
+        NavReport = NavMeter.EndFrame(WorldInfo.TimeSeconds);
+        if (NavReport != "")
+        {
+            EchelonLog(NavReport $ " " $ NavBudget.TakeDeniedCounts());
+        }
+    }
 }
 
 function AddMutator(Mutator M)
@@ -614,6 +652,8 @@ function RegisterBot(EcholonBot NewBot)
     if (ActiveBots.Find(NewBot) == INDEX_NONE)
         ActiveBots.AddItem(NewBot);
     NewBot.mut = self;
+    NewBot.NavMeter = NavMeter;
+    NewBot.NavBudget = NavBudget;
     NewBot.WdLastHubContactTime = WorldInfo.TimeSeconds;
 }
 

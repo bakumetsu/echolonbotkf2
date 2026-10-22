@@ -1783,6 +1783,7 @@ final function NavigationPoint PickTraderRoamGoal()
             continue;
         Straight = VSize(N.Location - Pawn.Location);
         RouteDist = 0.0;
+        NavCountSearch();
         NextHop = FindPathToward(N);
         if (NextHop == None)
             continue;

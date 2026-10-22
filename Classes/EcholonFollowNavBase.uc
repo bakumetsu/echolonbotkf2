@@ -98,6 +98,12 @@ var EFollowAction FollowAction;
 var Actor FollowNode;
 var float FollowWaitTime;
 var EFollowStatus FollowStatus;
+var EcholonNavMeter NavMeter;      // shared nav cost counter, set by EcholonMut.RegisterBot
+var EcholonNavBudget NavBudget;    // shared per-frame nav budget, set by EcholonMut.RegisterBot
+var vector FollowSteerCachePoint;  // last steer point computed
+var Actor FollowSteerCacheNode;    // the route node that point was computed for
+var float FollowSteerCacheTime;    // when it was computed
+var float FollowSteerCacheMaxAge;  // how long a cached steer point may be reused when the budget is out
 // Special edges (leap, climb, mantle) this bot found on a planned route; kept out of later routes.
 var array<ReachSpec> FollowSpecialSpecs;
 // Direct-steer only when the leader is within this height; above it, a ledge or balcony is likely in between.
@@ -265,6 +271,219 @@ function FollowWatchdogBegin()
 function bool FollowCheckExit()
 {
     return false;
+}
+
+// ---------------------------------------------------------------- nav budget (N7)
+// True when a route search is permitted this frame.
+
+function bool NavAllowSearch()
+{
+    if (NavBudget == None)
+    {
+        return true;
+    }
+    return NavBudget.TakeSearch(WorldInfo.TimeSeconds);
+}
+
+// True when a reachability check is permitted this frame.
+function bool NavAllowReach()
+{
+    if (NavBudget == None || NavMeter == None)
+    {
+        return true;
+    }
+    return NavBudget.TakeUs(class'EcholonNavBudget'.const.NAV_PRIO_STEER, NavMeter.UnitReachUs, WorldInfo.TimeSeconds);
+}
+
+// Budgeted follow-steer direction; caches the steer point and falls back to a
+// direct horizontal vector when feeler traces are denied.
+function vector FollowSteerDirBudgeted(Actor Current)
+{
+    local vector P;
+    local vector Dir;
+    local float Now;
+    local bool bCacheUsable;
+
+    Now = WorldInfo.TimeSeconds;
+
+    // Obtain the steer point.
+    if (NavBudget == None || NavMeter == None)
+    {
+        P = FollowSteerPoint(Current);
+    }
+    else
+    {
+        bCacheUsable = (FollowSteerCacheNode == Current && Now - FollowSteerCacheTime <= FollowSteerCacheMaxAge);
+
+        if (NavBudget.TakeUs(class'EcholonNavBudget'.const.NAV_PRIO_STEER, 9.0 * NavMeter.UnitTraceUs, Now) || !bCacheUsable)
+        {
+            P = FollowSteerPoint(Current);
+            FollowSteerCachePoint = P;
+            FollowSteerCacheNode = Current;
+            FollowSteerCacheTime = Now;
+        }
+        else
+        {
+            P = FollowSteerCachePoint;
+        }
+    }
+
+    // Feelers: prefer real traces; fall back to a cheap horizontal direction.
+    if (NavBudget == None || NavMeter == None || NavBudget.TakeUs(class'EcholonNavBudget'.const.NAV_PRIO_STEER, 2.0 * NavMeter.UnitTraceUs, Now))
+    {
+        return FollowFeelDir(P);
+    }
+
+    Dir = P - Pawn.Location;
+    Dir.Z = 0.0;
+    if (VSize(Dir) > 0.0)
+    {
+        return Normal(Dir);
+    }
+    return Normal(P - Pawn.Location);
+}
+
+// ---------------------------------------------------------------- nav cost counting (N6)
+// The engine's Clock/UnClock return 0 in the retail game, so nav cost is estimated: each trace, route
+// search and reachability check is counted per frame in the shared EcholonNavMeter, which multiplies
+// the counts by unit costs measured once by NavBenchmark.
+function NavCountTrace()
+{
+    if (NavMeter != None)
+    {
+        NavMeter.CountTrace(1);
+    }
+}
+
+function NavCountSearch()
+{
+    if (NavMeter != None)
+    {
+        NavMeter.CountSearch();
+    }
+}
+
+function NavCountReach()
+{
+    if (NavMeter != None)
+    {
+        NavMeter.CountReach();
+    }
+}
+
+// One-time per-match micro-benchmark: measures unit cost of a trace, a reach check,
+// and a path search on this pawn, then stores results in NavMeter.
+function NavBenchmark()
+{
+    local float TraceUs, ReachUs, SearchUs, TotalMs;
+    local float R, Angle;
+    local int Elapsed;
+    local int StartMs, EndMs;
+    local int Y, Mo, Dw, D, H, Mi, S, Ms;
+    local int I, NodeCount;
+    local vector StartPoint, EndPoint, Extent, HitLoc, HitNorm;
+    local NavigationPoint N;
+    local array<NavigationPoint> Nodes;
+
+    if (Pawn == None)
+    {
+        return;
+    }
+    if (NavMeter == None)
+    {
+        return;
+    }
+
+    TraceUs = 0;
+    ReachUs = 0;
+    SearchUs = 0;
+    TotalMs = 0;
+
+    // TRACES: 6000 collision traces in 8 rotating directions
+    R = Pawn.GetCollisionRadius();
+    StartPoint = Pawn.Location;
+    Extent.X = R;
+    Extent.Y = R;
+    Extent.Z = 8.0;
+
+    GetSystemTime(Y, Mo, Dw, D, H, Mi, S, Ms);
+    StartMs = ((H * 60 + Mi) * 60 + S) * 1000 + Ms;
+
+    for (I = 0; I < 6000; I++)
+    {
+        Angle = float(I % 8) * 0.785398;
+        EndPoint = StartPoint;
+        EndPoint.X += Cos(Angle) * 400.0;
+        EndPoint.Y += Sin(Angle) * 400.0;
+        Trace(HitLoc, HitNorm, EndPoint, StartPoint, true, Extent);
+    }
+
+    GetSystemTime(Y, Mo, Dw, D, H, Mi, S, Ms);
+    EndMs = ((H * 60 + Mi) * 60 + S) * 1000 + Ms;
+
+    if (EndMs >= StartMs)
+    {
+        Elapsed = EndMs - StartMs;
+        TraceUs = float(Elapsed) * 1000.0 / 6000.0;
+        TotalMs += float(Elapsed);
+    }
+
+    // Collect up to 12 navigation points near the pawn
+    NodeCount = 0;
+    foreach WorldInfo.RadiusNavigationPoints(class'NavigationPoint', N, Pawn.Location, 2500.0)
+    {
+        if (NodeCount < 12)
+        {
+            Nodes.AddItem(N);
+            NodeCount++;
+        }
+    }
+
+    if (NodeCount >= 2)
+    {
+        // REACH: 400 reachability checks cycling through the nodes
+        GetSystemTime(Y, Mo, Dw, D, H, Mi, S, Ms);
+        StartMs = ((H * 60 + Mi) * 60 + S) * 1000 + Ms;
+
+        for (I = 0; I < 400; I++)
+        {
+            ActorReachable(Nodes[I % NodeCount]);
+        }
+
+        GetSystemTime(Y, Mo, Dw, D, H, Mi, S, Ms);
+        EndMs = ((H * 60 + Mi) * 60 + S) * 1000 + Ms;
+
+        if (EndMs >= StartMs)
+        {
+            Elapsed = EndMs - StartMs;
+            ReachUs = float(Elapsed) * 1000.0 / 400.0;
+            TotalMs += float(Elapsed);
+        }
+
+        // SEARCH: 300 path searches cycling through the nodes
+        GetSystemTime(Y, Mo, Dw, D, H, Mi, S, Ms);
+        StartMs = ((H * 60 + Mi) * 60 + S) * 1000 + Ms;
+
+        for (I = 0; I < 300; I++)
+        {
+            FollowPlanBegin();
+            FindPathToward(Nodes[I % NodeCount]);
+            FollowPlanEnd();
+        }
+
+        GetSystemTime(Y, Mo, Dw, D, H, Mi, S, Ms);
+        EndMs = ((H * 60 + Mi) * 60 + S) * 1000 + Ms;
+
+        if (EndMs >= StartMs)
+        {
+            Elapsed = EndMs - StartMs;
+            SearchUs = float(Elapsed) * 1000.0 / 300.0;
+            TotalMs += float(Elapsed);
+        }
+    }
+
+    NavMeter.SetUnitCosts(TraceUs, SearchUs, ReachUs);
+    EchelonLog("NAV_BENCH traces=6000 reach=400 search=300 total_ms=" $ string(TotalMs));
 }
 
 function FollowWatchdog()
@@ -523,6 +742,12 @@ function bool FollowCheckReachable(bool bForceNow)
         return bFollowReachStable;
     }
 
+    if (!bForceNow && bFollowReachKnown && !NavAllowReach())
+    {
+        FollowNextReachCheckTime = IterNow + 0.02;
+        return bFollowReachStable;
+    }
+
     IterReach = WalkReachable(FollowLeaderPawn);
     // ActorReachable may count a jump up to a ledge; this mover can't jump it, so make it path instead.
     if (IterReach && Abs(FollowLeaderPawn.Location.Z - Pawn.Location.Z) > FollowDirectMaxZ)
@@ -595,6 +820,7 @@ function bool WalkReachable(Actor Other)
     local bool bReach;
 
     FollowPlanBegin();
+    NavCountReach();
     bReach = ActorReachable(Other);
     FollowPlanEnd();
     return bReach;
@@ -605,6 +831,7 @@ function bool WalkPointReachable(vector Dest)
     local bool bReach;
 
     FollowPlanBegin();
+    NavCountReach();
     bReach = PointReachable(Dest);
     FollowPlanEnd();
     return bReach;
@@ -683,6 +910,7 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
         FollowBadEdgesBlock(IterMinStrikes, IterBlocked);
         FollowSquadEdgesBlock(IterMinStrikes, IterBlocked);
         FollowPlanBegin();
+        NavCountSearch();
         if (Goal != None)
         {
             IterFirst = FindPathToward(Goal);
@@ -747,6 +975,11 @@ function bool FollowBuildPath()
     }
 
     FollowCrumbGoal = FollowPickCrumbFrom(EcholonFollowNavBase(FollowLeaderCtrl));
+    if (!NavAllowSearch())
+    {
+        FollowNextPathTime = IterNow;
+        return false;
+    }
     IterFirst = None;
     if (FollowCrumbGoal != None)
     {
@@ -805,6 +1038,7 @@ function bool FollowWalkClear(vector From, vector To)
     A.Z = From.Z - H + FollowKneeHeight;
     B = To;
     B.Z = To.Z - H + FollowKneeHeight;
+    NavCountTrace();
     if (Trace(HitLoc, HitNorm, B, A, true, Ext) != None)
     {
         return false;
@@ -812,12 +1046,14 @@ function bool FollowWalkClear(vector From, vector To)
     Mid = (From + To) * 0.5;
     Probe = Mid;
     Probe.Z -= H + FollowFloorDrop;
+    NavCountTrace();
     if (Trace(HitLoc, HitNorm, Probe, Mid, false) == None)
     {
         return false;
     }
     Probe = To;
     Probe.Z -= H + FollowFloorDrop;
+    NavCountTrace();
     if (Trace(HitLoc, HitNorm, Probe, To, false) == None)
     {
         return false;
@@ -886,7 +1122,9 @@ function vector FollowFeelDir(vector Target)
     Right = Normal(Dir * Cos(Ang) - Side * Sin(Ang));
     Start = Pawn.Location;
     Start.Z = Start.Z - Pawn.GetCollisionHeight() + FollowKneeHeight;
+    NavCountTrace();
     bHitL = (Trace(HitLoc, HitNorm, Start + Left * Len, Start, false) != None);
+    NavCountTrace();
     bHitR = (Trace(HitLoc, HitNorm, Start + Right * Len, Start, false) != None);
     if (bHitL && !bHitR)
     {
@@ -1910,7 +2148,7 @@ PathMove:
     }
     FollowOnMoveBegin(false);
     EchelonLog("NAV_ACCEL_NODE node=" $ string(FollowNode));
-    Pawn.Acceleration = FollowFeelDir(FollowSteerPoint(FollowNode)) * FMax(Pawn.GroundSpeed, 0.0001f);
+    Pawn.Acceleration = FollowSteerDirBudgeted(FollowNode) * FMax(Pawn.GroundSpeed, 0.0001f);
     Sleep(FollowMinLoopSleep);
     Goto('Dispatch');
 
@@ -2018,6 +2256,7 @@ defaultproperties
     FollowResumeMargin=96.0
     FollowZTolerance=128.0
     FollowWatchdogPeriod=0.25
+    FollowSteerCacheMaxAge=0.4
     FollowPhaseJitter=0.03
     FollowReachIntervalDirect=0.25
     FollowReachIntervalPath=0.5
