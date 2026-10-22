@@ -63,10 +63,17 @@ state PickNextMove
                 if (RegroupElapsed < REGROUP_DURATION
                     && KFGRI.bTraderIsOpen && NextShoppingTime < WorldInfo.TimeSeconds && KFGRI.OpenedTrader != None)
                 {
-                    EchelonLog("REGROUP_SHOP src=PickMove");
-                    HubPick("P4.5_Regroup", 'GoShopping');
-                    GotoState('GoShopping');
-                    return;
+                    if (mut.bRemoteShopActive)
+                    {
+                        RemoteShop();   // buys on the spot, then the regroup goes on below
+                    }
+                    else
+                    {
+                        EchelonLog("REGROUP_SHOP src=PickMove");
+                        HubPick("P4.5_Regroup", 'GoShopping');
+                        GotoState('GoShopping');
+                        return;
+                    }
                 }
                 if (RegroupElapsed < REGROUP_DURATION
                     && GlobalZedCount > 0 && GlobalZedCount != 15 && GlobalZedCount <= 30 && AcquireHuntTarget())
@@ -224,9 +231,16 @@ state PickNextMove
         // Priority 9: Economy
         if (KFGRI.bTraderIsOpen && NextShoppingTime < WorldInfo.TimeSeconds && KFGRI.OpenedTrader != None)
         {
-            HubPick("P9_Economy", 'GoShopping');
-            GotoState('GoShopping');
-            return;
+            if (mut != None && mut.bRemoteShopActive)
+            {
+                RemoteShop();   // buys on the spot, then the trader roam below takes over
+            }
+            else
+            {
+                HubPick("P9_Economy", 'GoShopping');
+                GotoState('GoShopping');
+                return;
+            }
         }
 
         // Priority 9.5: Trader roam (free trader time, already shopped)
@@ -1619,6 +1633,7 @@ state GoShopping
             {
                 TraderRetryCount = 0;
                 NextShoppingTime = WorldInfo.TimeSeconds + TRADER_GIVEUP_COOLDOWN;
+                ShoppedWave = KFGRI.WaveNum;   // a bot that cannot reach the trader must not hold up the playtest trader skip
                 HubFail("trader_unreachable");
                 EchelonLog("TRADER_GIVEUP retries=" $ string(TRADER_MAX_RETRIES) $ " cooldown=" $ string(TRADER_GIVEUP_COOLDOWN));
                 PickCombatStyle();
@@ -1655,9 +1670,10 @@ state GoShopping
         if (KFGRI.TraderItems != None)
         {
             ProcessPurchase(KFGRI.TraderItems);
+            EchelonLog("SHOP_WALK wave=" $ string(KFGRI.WaveNum) $ " dosh_before=" $ string(LastShopDoshBefore)
+                $ " dosh_after=" $ string(int(PlayerReplicationInfo.Score)) $ " bought=" $ string(LastShopBought));
         }
-        NextShoppingTime = WorldInfo.TimeSeconds + 60.0;
-        NextDoshShareTime = WorldInfo.TimeSeconds + 50.0;
+        FinishShopping();
         if (Rand(3) == 0)
         {
             GotoState('VictoryDance', 'MoveTaunt');

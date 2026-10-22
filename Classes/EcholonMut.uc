@@ -114,6 +114,10 @@ var() config bool bAllowBotCrouch;
 // Count bots as voters in the skip-trader vote (stock behaviour). Off by default: only human
 // players vote, and the vote passes when every human votes yes (EcholonVoteCollector).
 var() config bool bBotsCountInSkipTraderVote;
+// Remote shop: bots buy from where they stand instead of walking to the trader. Off unless set to True
+// here, or for one match with ?RemoteShop=1 on the map URL (?RemoteShop=0 forces it off).
+var() config bool bRemoteShop;
+var transient bool bRemoteShopActive;
 // Bots get scoreboard pictures from the local avatar server (kit\Start-AvatarServer.bat). Off by default.
 var() config bool bBotAvatars;
 // Port of the local avatar server. 0 or less means 8765.
@@ -133,9 +137,16 @@ var float LastAuditLogTime;
 // Spike for the automated playtest runner; see the playtest plan.
 var transient bool bPlaytest;
 var transient bool bPlaytestSpectating;
-var transient float PlaytestNextCamTime;
 var transient float PlaytestNextReportTime;
-var transient name PlaytestCamMode;           // 'ThirdPerson' or 'FirstPerson', kept across bot switches
+var transient name PlaytestCamMode;           // 'ThirdPerson', 'FirstPerson' or 'Orbit' (middle click cycles them), kept across bot switches
+var transient bool bPlaytestFreeFly;          // Space: the camera flies free (view target = the spectator itself)
+var transient Pawn PlaytestLastWatched;       // the bot to go back to when free fly ends
+var transient bool bPlaytestSkipTrader;       // ?SkipTrader=1: cut the trader to 5 s once every living bot has shopped
+var transient bool bSkipTraderOpen;           // the trader was open at the previous tick
+var transient bool bSkipTraderDone;           // this trader round was skipped already
+var transient int SkipTraderWave;             // WaveNum of this trader round
+var transient float SkipTraderAllDoneAt;      // when every living bot was first seen done (0 = not yet)
+var transient string SkipTraderBlockers;      // the bots that held the skip up the last time any did (for TRADER_SKIP_MISSED)
 var transient int PlaytestLastZedCount;
 var transient float PlaytestZedCountSince;    // when AIAliveCount last changed (stuck-wave check)
 var transient int PlaytestWaves;             // wave cap for this match (0 = whole match)
@@ -592,12 +603,43 @@ function MatchStarting()
         SetTimer(1.0, true);
     }
     SetTimer(0.1, true, 'CheckWave');
+    if (bRemoteShopActive)
+    {
+        SetTimer(1.0, true, 'RemoteShopSweep');
+    }
     InstallVoteCollector();
+}
+
+// Remote shop: while the trader is open every bot that may shop buys on the spot, whatever it is doing.
+// The bots' own picks reach the economy step only after objective, regroup and follow steps, which can hold
+// a bot for a minute (seen 2026-10-23: a trader round passed with 3 of 7 bots not yet shopped).
+// RemoteShop skips bots in a fight, still on cooldown, or with nothing to buy from.
+function RemoteShopSweep()
+{
+    local int I;
+
+    if (KF == None || KF.MyKFGRI == None || !KF.MyKFGRI.bTraderIsOpen)
+        return;
+    for (I = 0; I < ActiveBots.Length; I++)
+    {
+        if (ActiveBots[I] != None && ActiveBots[I].Pawn != None && ActiveBots[I].Pawn.IsAliveAndWell())
+            ActiveBots[I].RemoteShop();
+    }
 }
 
 function InitMutator(string Options, out string ErrorMessage)
 {
     super.InitMutator(Options, ErrorMessage);
+
+    bRemoteShopActive = bRemoteShop;
+    if (class'GameInfo'.static.HasOption(Options, "RemoteShop"))
+    {
+        bRemoteShopActive = class'GameInfo'.static.ParseOption(Options, "RemoteShop") ~= "1";
+    }
+    if (bRemoteShopActive)
+    {
+        EchelonLog("SHOP_REMOTE_MODE on=1 source=" $ (class'GameInfo'.static.HasOption(Options, "RemoteShop") ? "url" : "config"));
+    }
 
     bPlaytest = class'GameInfo'.static.ParseOption(Options, "Playtest") ~= "1";
     if (bPlaytest)
@@ -605,11 +647,13 @@ function InitMutator(string Options, out string ErrorMessage)
         // Our controller makes left/right click and the camera-mode key work on bots (see EcholonSpectatorPC).
         WorldInfo.Game.PlayerControllerClass = class'EcholonSpectatorPC';
         PlaytestCamMode = 'ThirdPerson';
+        bPlaytestSkipTrader = class'GameInfo'.static.ParseOption(Options, "SkipTrader") ~= "1";
         PlaytestWaves = class'GameInfo'.static.GetIntOption(Options, "PlaytestWaves", 0);
         PlaytestBotsOverride = class'GameInfo'.static.GetIntOption(Options, "PlaytestBots", 0);
         if (PlaytestBotsOverride > 0)
             NumBots = byte(PlaytestBotsOverride);
-        EchelonLog("PLAYTEST_START map=" $ WorldInfo.GetMapName(true) $ " waves=" $ string(PlaytestWaves) $ " bots=" $ string(NumBots));
+        EchelonLog("PLAYTEST_START map=" $ WorldInfo.GetMapName(true) $ " waves=" $ string(PlaytestWaves) $ " bots=" $ string(NumBots)
+            $ " skip_trader=" $ string(bPlaytestSkipTrader) $ " remote_shop=" $ string(bRemoteShopActive));
         SetTimer(1.0, true, 'PlaytestTick');
     }
 }
@@ -650,12 +694,20 @@ final function PlaytestMakeSpectator(KFPlayerController PC)
     EchelonLog("PLAYTEST_SPECTATE again=" $ string(bPlaytestSpectating) $ " living_before=" $ string(LivingBefore)
         $ " living_after=" $ string(KF.GetLivingPlayerCount()) $ " wave=" $ string(KF.MyKFGRI.WaveNum));
     bPlaytestSpectating = true;
-    PlaytestNextCamTime = 0.0;
+    if (EcholonSpectatorPC(PC) != None)
+        EcholonSpectatorPC(PC).SetWheelBinds();
+}
+
+// Camera style for a watched bot: the orbit mode uses the stock 'FreeCam' style (the camera sits behind the
+// bot and takes its rotation from the mouse); 'ThirdPerson' follows the bot's own facing.
+final function name PlaytestBotCamStyle()
+{
+    return (PlaytestCamMode == 'Orbit') ? 'FreeCam' : PlaytestCamMode;
 }
 
 // Points the human's camera at the next (Dir 1) or previous (Dir -1) living bot, in PlaytestCamMode.
 // Stock SpectateNextPlayer skips bots: KFGameInfo.CanSpectate only accepts PlayerController owners.
-// A manual switch (a click) pauses the 30 s auto-rotation for 60 s.
+// The camera stays on a bot until it dies (PlaytestTick) or a click moves it; a click also ends free fly.
 final function PlaytestStepCamera(PlayerController PC, int Dir, optional bool bManual)
 {
     local int I, Start, Count;
@@ -680,24 +732,88 @@ final function PlaytestStepCamera(PlayerController PC, int Dir, optional bool bM
         B = ActiveBots[(((Start + I * Dir) % Count) + Count) % Count];
         if (B != None && B.Pawn != None && B.Pawn.IsAliveAndWell())
         {
+            if (bPlaytestFreeFly)
+            {
+                bPlaytestFreeFly = false;
+                EchelonLog("PLAYTEST_CAMERA_FREE on=0");
+            }
+            PlaytestLastWatched = B.Pawn;
             PC.SetViewTarget(B.Pawn);
-            PC.SetCameraMode(PlaytestCamMode);
-            PlaytestNextCamTime = WorldInfo.TimeSeconds + (bManual ? 60.0 : 30.0);
+            PC.SetCameraMode(PlaytestBotCamStyle());
+            PlaytestApplyZoom(PC);
             EchelonLog("PLAYTEST_CAMERA target=" $ B.LogTag() $ " mode=" $ string(PlaytestCamMode) $ " manual=" $ string(bManual));
             return;
         }
     }
 }
 
-// Camera-mode key: first person <-> third person on the bot being watched.
+// Camera-mode key (middle click): third person -> first person -> free turning orbit -> third person,
+// on the bot being watched. While the camera flies free it only changes the mode used when a bot is
+// watched again.
 final function PlaytestToggleCamMode(PlayerController PC)
 {
     if (PC == None)
         return;
-    PlaytestCamMode = (PlaytestCamMode == 'FirstPerson') ? 'ThirdPerson' : 'FirstPerson';
-    PC.SetCameraMode(PlaytestCamMode);
-    PlaytestNextCamTime = WorldInfo.TimeSeconds + 60.0;
+    if (PlaytestCamMode == 'ThirdPerson')
+        PlaytestCamMode = 'FirstPerson';
+    else if (PlaytestCamMode == 'FirstPerson')
+        PlaytestCamMode = 'Orbit';
+    else
+        PlaytestCamMode = 'ThirdPerson';
+    if (!bPlaytestFreeFly)
+    {
+        PC.SetCameraMode(PlaytestBotCamStyle());
+        PlaytestApplyZoom(PC);
+    }
     EchelonLog("PLAYTEST_CAMERA_MODE mode=" $ string(PlaytestCamMode));
+}
+
+// Puts the remembered wheel-zoom distance back on the camera (it survives bot and mode switches).
+final function PlaytestApplyZoom(PlayerController PC)
+{
+    if (EcholonSpectatorPC(PC) != None)
+        EcholonSpectatorPC(PC).ApplyZoom();
+}
+
+// Space: the camera leaves the bots and flies free (view target = the spectator, WASD + mouse), starting
+// where the camera is now. Space again goes back to the bot watched last (the next living bot if it died).
+final function PlaytestToggleFreeFly(PlayerController PC)
+{
+    local Pawn Watched;
+    local vector Loc;
+    local rotator Rot;
+
+    if (PC == None)
+        return;
+
+    if (!bPlaytestFreeFly)
+    {
+        Watched = Pawn(PC.ViewTarget);
+        if (Watched != None)
+            PlaytestLastWatched = Watched;
+        PC.GetPlayerViewPoint(Loc, Rot);
+        Rot.Roll = 0;
+        PC.SetLocation(Loc);
+        PC.SetRotation(Rot);
+        bPlaytestFreeFly = true;
+        PC.SetViewTarget(PC);
+        PC.SetCameraMode('FirstPerson');
+        EchelonLog("PLAYTEST_CAMERA_FREE on=1");
+        return;
+    }
+
+    bPlaytestFreeFly = false;
+    if (PlaytestLastWatched != None && PlaytestLastWatched.IsAliveAndWell())
+    {
+        PC.SetViewTarget(PlaytestLastWatched);
+        PC.SetCameraMode(PlaytestBotCamStyle());
+        PlaytestApplyZoom(PC);
+    }
+    else
+    {
+        PlaytestStepCamera(PC, 1);
+    }
+    EchelonLog("PLAYTEST_CAMERA_FREE on=0");
 }
 
 // Stand-in VIP while no human is alive: the current anchor while it is a living squad leader,
@@ -823,13 +939,114 @@ final function PlaytestCheckWaveEnd()
     bPlaytestLastTrader = Trader;
 }
 
+// Playtest trader skip (?SkipTrader=1): once every living bot has finished shopping (or given up) the trader
+// is cut to 5 s through the stock skip path (KFVoteCollector.SkipTraderTime, no vote), so a run does not sit
+// through the whole break. Bots sharing dosh (DonatingMoney) get up to 20 s after the last bot finished.
+// Dead bots are ignored; a bot that respawns counts again once alive (Restart clears its ShoppedWave).
+final function PlaytestCheckTraderSkip()
+{
+    local KFGameReplicationInfo KFGRI;
+    local EcholonBot B;
+    local bool bSharing;
+    local int Living, Remaining, After;
+    local float Waited;
+    local string Pending;
+
+    if (!bPlaytestSkipTrader || KF == None || KF.MyKFGRI == None)
+        return;
+    KFGRI = KF.MyKFGRI;
+
+    if (!KFGRI.bTraderIsOpen)
+    {
+        if (bSkipTraderOpen && !bSkipTraderDone)
+        {
+            EchelonLog("TRADER_SKIP_MISSED wave=" $ string(SkipTraderWave) $ " pending=" $ SkipTraderBlockers);
+        }
+        bSkipTraderOpen = false;
+        return;
+    }
+
+    if (!bSkipTraderOpen)
+    {
+        bSkipTraderOpen = true;
+        bSkipTraderDone = false;
+        SkipTraderWave = KFGRI.WaveNum;
+        SkipTraderAllDoneAt = 0.0;
+        SkipTraderBlockers = "none";
+    }
+
+    // Remembered every tick, also inside the last 5 s: a bot that shops just before the trader closes must
+    // still be named as the one that held the skip up.
+    Pending = PlaytestPendingShoppers();
+    if (Pending != "none")
+        SkipTraderBlockers = Pending;
+
+    Remaining = KFGRI.GetTraderTimeRemaining();
+    if (bSkipTraderDone || Remaining <= 5)
+        return;
+
+    foreach WorldInfo.AllControllers(class'EcholonBot', B)
+    {
+        if (B.Pawn == None || !B.Pawn.IsAliveAndWell())
+            continue;
+        Living++;
+        if (B.IsInState('DonatingMoney'))
+            bSharing = true;
+    }
+    if (Living == 0 || Pending != "none")
+    {
+        SkipTraderAllDoneAt = 0.0;
+        return;
+    }
+
+    if (SkipTraderAllDoneAt == 0.0)
+        SkipTraderAllDoneAt = WorldInfo.TimeSeconds;
+    Waited = WorldInfo.TimeSeconds - SkipTraderAllDoneAt;
+    if (bSharing && Waited < 20.0)
+        return;
+
+    if (KFGRI.VoteCollector != None)
+    {
+        KFGRI.VoteCollector.SkipTraderTime();
+    }
+    else
+    {
+        KFGRI.RemainingTime = 5;
+        KFGRI.RemainingMinute = 5;
+        KF.SkipTrader(5);
+    }
+    After = KFGRI.GetTraderTimeRemaining();
+    bSkipTraderDone = true;
+    EchelonLog("TRADER_SKIP wave=" $ string(SkipTraderWave) $ " bots=" $ string(Living) $ " waited_share=" $ string(int(Waited))
+        $ " saved=" $ string(Remaining - After));
+}
+
+// Names of the living bots that have not finished shopping this trader round, comma separated; "none" if all have.
+final function string PlaytestPendingShoppers()
+{
+    local EcholonBot B;
+    local string Pending;
+
+    foreach WorldInfo.AllControllers(class'EcholonBot', B)
+    {
+        if (B.Pawn == None || !B.Pawn.IsAliveAndWell() || B.ShoppedWave == SkipTraderWave)
+            continue;
+        Pending = Pending $ (Pending != "" ? "," : "") $ B.LogTag();
+    }
+    return (Pending == "") ? "none" : Pending;
+}
+
 function PlaytestQuit()
 {
     local PlayerController PC;
 
     PC = WorldInfo.GetALocalPlayerController();
     if (PC != None)
+    {
+        if (EcholonSpectatorPC(PC) != None)
+            EcholonSpectatorPC(PC).RestoreWheelBinds();
         PC.ConsoleCommand("exit");
+    }
 }
 
 // Before the match begins the human sits in the ready-up lobby; mark them ready so the run needs no input.
@@ -874,6 +1091,7 @@ function PlaytestTick()
 
     // Before the human lookup: after a defeat the local controller can be gone, and the run must still end.
     PlaytestCheckWaveEnd();
+    PlaytestCheckTraderSkip();
 
     PC = GetPlaytestHuman();
     if (PC == None)
@@ -884,8 +1102,9 @@ function PlaytestTick()
         PlaytestMakeSpectator(PC);
     }
 
+    // The camera stays on a bot until the bot dies (or is gone); only Space (free fly) or a click moves it.
     ViewPawn = Pawn(PC.ViewTarget);
-    if (WorldInfo.TimeSeconds >= PlaytestNextCamTime || ViewPawn == None || !ViewPawn.IsAliveAndWell())
+    if (!bPlaytestFreeFly && (ViewPawn == None || !ViewPawn.IsAliveAndWell()))
     {
         PlaytestStepCamera(PC, 1);
     }

@@ -168,6 +168,9 @@ var transient float SerpentineTime;
 var transient float NextGrenadeTimer;
 var transient float EnemyEncounterTime;
 var transient float NextShoppingTime;
+var transient int ShoppedWave;          // KFGRI.WaveNum when this bot last finished shopping (or gave up); -1 = not yet
+var transient int LastShopBought;       // purchase actions in the last ProcessPurchase (weapons, ammo top-ups, armor, grenades)
+var transient int LastShopDoshBefore;   // score before the last ProcessPurchase
 var transient float NextHuntTime;
 var transient float ObjectiveBailUntil;
 var transient float LastNodeBlockTime;
@@ -521,6 +524,7 @@ function Restart(bool bVehicleTransition)
     LastFactory = None;
     FavoriteWeapon = None;
     NextShoppingTime = WorldInfo.TimeSeconds - 1.0;
+    ShoppedWave = -1;   // a respawned bot has lost its gear: the playtest trader skip waits for it to shop again
 
     if ((KFInventoryManager(Pawn.InvManager) != None) && (Pawn.InvManager.Class != Class'EcholonBot.EcholonInventoryManager'))
     {
@@ -2114,12 +2118,42 @@ final function EcholonWeaponInfo GetBestBuy(int Cash)
     return Best;
 }
 
+// Shared tail of a shopping trip (walk or remote): the next trip is a minute away, a dosh share comes
+// before that, and ShoppedWave tells the playtest trader skip this bot is done for the wave.
+final function FinishShopping()
+{
+    NextShoppingTime = WorldInfo.TimeSeconds + 60.0;
+    NextDoshShareTime = WorldInfo.TimeSeconds + 50.0;
+    if (KFGRI != None)
+    {
+        ShoppedWave = KFGRI.WaveNum;
+    }
+}
+
+// Remote shop (EcholonMut.bRemoteShopActive): buy from where the bot stands, no walk to the trader.
+// Runs only while the trader is open, the bot may shop again, and nothing is being fought.
+// Returns true when a shopping trip was made, even one that bought nothing (a broke bot is done too).
+final function bool RemoteShop()
+{
+    if (Pawn == None || KFGRI == None || !KFGRI.bTraderIsOpen || KFGRI.OpenedTrader == None || KFGRI.TraderItems == None
+        || NextShoppingTime >= WorldInfo.TimeSeconds || Enemy != None)
+    {
+        return false;
+    }
+    ProcessPurchase(KFGRI.TraderItems);
+    EchelonLog("SHOP_REMOTE wave=" $ string(KFGRI.WaveNum) $ " dosh_before=" $ string(LastShopDoshBefore)
+        $ " dosh_after=" $ string(int(PlayerReplicationInfo.Score)) $ " bought=" $ string(LastShopBought));
+    FinishShopping();
+    return true;
+}
+
 final function ProcessPurchase(KFGFxObject_TraderItems L)
 {
     local int S, N, J, olds;
     local byte I, loops;
     local KFWeapon W, WW;
     local EcholonWeaponInfo A;
+    local bool bGrenades;
 
     if (!mut.bTraderListInit)
     {
@@ -2132,6 +2166,8 @@ final function ProcessPurchase(KFGFxObject_TraderItems L)
     }
 
     S = int(PlayerReplicationInfo.Score);
+    LastShopDoshBefore = S;
+    LastShopBought = 0;
     olds = 0;
 
     if (Perk != None)
@@ -2193,6 +2229,10 @@ final function ProcessPurchase(KFGFxObject_TraderItems L)
                         N = Min(N, int(float(S) / A.PricePerBullet[I]));
                     }
                     W.SpareAmmoCount[I] += N;
+                    if (N > 0)
+                    {
+                        LastShopBought++;
+                    }
                     S -= int(float(N) * A.PricePerBullet[I]);
                     if (S <= 0)
                     {
@@ -2214,6 +2254,7 @@ final function ProcessPurchase(KFGFxObject_TraderItems L)
                 J++;
             }
             KFInvManager.CreateInventory(A.WeaponClass);
+            LastShopBought++;
             S -= A.BuyPrice;
         }
         loops++;
@@ -2228,6 +2269,10 @@ final function ProcessPurchase(KFGFxObject_TraderItems L)
         }
         KPawn.Armor += byte(N);
         S -= (N * L.ArmorPrice);
+        if (N > 0)
+        {
+            LastShopBought++;
+        }
     }
 
     if ((S > 0) || mut.bBotsUnlimitedCash)
@@ -2237,7 +2282,12 @@ final function ProcessPurchase(KFGFxObject_TraderItems L)
         {
             S -= L.GrenadePrice;
             KFInvManager.GrenadeCount++;
+            bGrenades = true;
             N--;
+        }
+        if (bGrenades)
+        {
+            LastShopBought++;
         }
     }
 
@@ -2666,7 +2716,7 @@ function bool AuditRateLimit(string Msg)
 		return true;
 	}
 	if (Left(Msg, 4) ~= "NAV_" || Left(Msg, 11) ~= "SPAWN_NUDGE" || Left(Msg, 8) ~= "RETREAT_" || Left(Msg, 7) ~= "COMBAT_"
-		|| Left(Msg, 9) ~= "HEADLESS_" || Left(Msg, 5) ~= "LOOK_")
+		|| Left(Msg, 9) ~= "HEADLESS_" || Left(Msg, 5) ~= "LOOK_" || Left(Msg, 5) ~= "SHOP_")
 	{
 		return true;  // were plain `log lines before; kept unthrottled
 	}
@@ -5327,6 +5377,7 @@ function UpdateHoldAreaDrift()
 
 defaultproperties
 {
+    ShoppedWave=-1
     LookTurnRate=32768.0
     LookSweepAmp=20.0
     LookSweepPeriod=5.0
