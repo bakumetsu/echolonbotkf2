@@ -885,16 +885,16 @@ final function PickRetreatMove()
     {
         if (Enemy == None)
         {
-            MoveToX(Pawn.Location + (VRand() * 400.0));
+            MoveToX(Pawn.Location + (RandDir2D() * 400.0), None, true, 'Retreat1');
         }
         else
         {
-            MoveToX(((Normal(Pawn.Location - Enemy.Location) * 500.0) + Pawn.Location) + (VRand() * 200.0), Enemy);
+            MoveToX(((Normal(Pawn.Location - Enemy.Location) * 500.0) + Pawn.Location) + (RandDir2D() * 200.0), Enemy, true, 'Retreat2');
         }
     }
     else
     {
-        MoveTowardX(Best, Enemy);
+        MoveTowardX(Best, Enemy, true, 'Retreat3');
     }
 }
 

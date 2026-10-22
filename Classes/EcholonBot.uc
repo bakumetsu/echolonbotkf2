@@ -584,6 +584,7 @@ state FightEnemy
         AuditStateExit(NextStateName);
         SetTimer(0.0, false);
         ClearTimer('FinishedMove');
+        ClearTimer('CombatRepick');
         if (Pawn != None)
         {
             Pawn.ShouldCrouch(false);
@@ -673,8 +674,56 @@ state FightEnemy
 
     function FinishedMove()
     {
+        local string Reason;
+
         Pawn.ShouldCrouch(false);
-        PickCombatStyle();
+
+        if (Enemy == None || !Enemy.IsAliveAndWell())
+        {
+            Reason = "enemy_gone";
+            LastHubCheckTime = WorldInfo.TimeSeconds;
+            if (WorldInfo.TimeSeconds - LastRepickLog >= 2.0)
+            {
+                LastRepickLog = WorldInfo.TimeSeconds;
+                EchelonLog("COMBAT_REPICK reason=" $ Reason);
+            }
+            PickCombatStyle();
+            return;
+        }
+        if (KFPawn_Monster(Enemy) != None && KFPawn_Monster(Enemy).bIsHeadless)
+        {
+            Reason = "headless";
+            LastHubCheckTime = WorldInfo.TimeSeconds;
+            if (WorldInfo.TimeSeconds - LastRepickLog >= 2.0)
+            {
+                LastRepickLog = WorldInfo.TimeSeconds;
+                EchelonLog("COMBAT_REPICK reason=" $ Reason);
+            }
+            PickCombatStyle();
+            return;
+        }
+        if (WorldInfo.TimeSeconds - LastHubCheckTime >= CombatHubGap)
+        {
+            Reason = "hub_gap";
+            LastHubCheckTime = WorldInfo.TimeSeconds;
+            if (WorldInfo.TimeSeconds - LastRepickLog >= 2.0)
+            {
+                LastRepickLog = WorldInfo.TimeSeconds;
+                EchelonLog("COMBAT_REPICK reason=" $ Reason);
+            }
+            PickCombatStyle();
+            return;
+        }
+
+        PickStyle();
+    }
+
+    function CombatRepick()
+    {
+        if (Enemy != None && Enemy.IsAliveAndWell() && MoveFlags == 0)
+        {
+            PickStyle();
+        }
     }
 
     function PickStyle()
@@ -700,12 +749,12 @@ state FightEnemy
             {
                 if (WalkReachable(ObjectiveGoal))
                 {
-                    MoveTowardX(ObjectiveGoal);
+                    MoveTowardX(ObjectiveGoal, None, true, 'FE1');
                     return;
                 }
                 if (BuildPathToward(ObjectiveGoal))
                 {
-                    MoveTowardX(MoveTarget);
+                    MoveTowardX(MoveTarget, None, true, 'FE2');
                     return;
                 }
             }
@@ -724,7 +773,7 @@ state FightEnemy
         {
             if (BuildPathToward(GroupLeader.Pawn))
             {
-                MoveTowardX(MoveTarget, Enemy);
+                MoveTowardX(MoveTarget, Enemy, true, 'FE3');
                 return;
             }
         }
@@ -734,7 +783,7 @@ state FightEnemy
             {
                 if (BuildPathToward(FollowingHuman))
                 {
-                    MoveTowardX(MoveTarget, Enemy);
+                    MoveTowardX(MoveTarget, Enemy, true, 'FE4');
                     return;
                 }
             }
@@ -785,17 +834,17 @@ state FightEnemy
                 }
                 if (WalkReachable(Enemy))
                 {
-                    MoveTowardX(Enemy);
+                    MoveTowardX(Enemy, None, true, 'FE5');
                 }
                 else
                 {
                     if (BuildPathToward(Enemy))
                     {
-                        MoveTowardX(MoveTarget, Enemy);
+                        MoveTowardX(MoveTarget, Enemy, true, 'FE6');
                     }
                     else
                     {
-                        MoveToX((Normal(Enemy.Location - Pawn.Location) * 150.0) + Pawn.Location + (VRand() * 200.0), Enemy);
+                        MoveToX((Normal(Enemy.Location - Pawn.Location) * 150.0) + Pawn.Location + (RandDir2D() * 200.0), Enemy, true, 'FE7');
                     }
                 }
             }
@@ -803,7 +852,7 @@ state FightEnemy
             {
                 if (Rand(2) == 0)
                 {
-                    MoveToX(Pawn.Location + (VRand() * 300.0), Enemy);
+                    MoveToX(Pawn.Location + (RandDir2D() * 300.0), Enemy, true, 'FE8');
                 }
                 else
                 {
