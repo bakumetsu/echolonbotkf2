@@ -182,6 +182,9 @@ var transient int NavLevel;
 var transient NavigationPoint NavLastGood;
 var float NavBlockedUntil;
 var bool bNavTeleport;
+var float NavTeleportAfter; // seconds of stall before teleport is allowed
+var float NavNextTeleportTry; // earliest game time the next teleport attempt may fire
+var float NavTeleportWaitLog; // last game time a NAV_TELEPORT_WAIT log was printed
 var transient float TempBlockTime;
 var transient float NextVictoryDance;
 var transient float NextDoshShareTime;
@@ -1348,17 +1351,90 @@ function Tick(float Delta)
     }
 }
 
+// Teleport-step member vars
+
+// True when no human camera can see Loc (or Subject); false if any line of sight succeeds.
+final function bool NavUnseen(vector Loc, Pawn Subject)
+{
+    local vector CamLoc, ToLoc;
+    local Rotator CamRot;
+    local PlayerController PC;
+
+    foreach WorldInfo.AllControllers(class'PlayerController', PC)
+    {
+        if (Subject != None && PC.ViewTarget == Subject)
+        {
+            return false;
+        }
+
+        PC.GetPlayerViewPoint(CamLoc, CamRot);
+        ToLoc = Loc - CamLoc;
+
+        if (VSize(ToLoc) > 6000.0)
+        {
+            continue;
+        }
+
+        if ((Normal(ToLoc) dot vector(CamRot)) < 0.25)
+        {
+            continue;
+        }
+
+        if (FastTrace(Loc + vect(0, 0, 50), CamLoc))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Teleports the pawn to NavLastGood if both origin and target are off-screen and stalled long enough.
+final function NavTryTeleport(float IterNow)
+{
+    local vector TeleportLoc;
+
+    if (!bNavTeleport || NavLastGood == None || Pawn == None
+        || NavStall < NavTeleportAfter || IterNow < NavNextTeleportTry)
+    {
+        return;
+    }
+
+    TeleportLoc = NavLastGood.Location;
+    TeleportLoc.Z += Pawn.GetCollisionHeight();
+
+    if (NavUnseen(Pawn.Location, Pawn) && NavUnseen(TeleportLoc, Pawn))
+    {
+        Pawn.SetLocation(TeleportLoc);
+        Pawn.Velocity = vect(0, 0, 0);
+        EchelonLog("NAV_TELEPORT to=" $ string(NavLastGood) $ " unseen=1");
+        NavStall = 0.0;
+        NavLevel = 0;
+        NavProbeLoc = Pawn.Location;
+        NavNextTeleportTry = IterNow + 1.0;
+    }
+    else
+    {
+        NavNextTeleportTry = IterNow + 1.0;
+        if (IterNow - NavTeleportWaitLog >= 10.0)
+        {
+            NavTeleportWaitLog = IterNow;
+            EchelonLog("NAV_TELEPORT_WAIT stall=" $ string(NavStall));
+        }
+    }
+}
+
 // Progress check for MoveTo/MoveToward and the follow mover. 0.75 s without progress backs off (not in follow, which
 // has its own ladder), 1.5 s strikes the edge and ends the move so the hub replans, 3 s walks back to the last good
-// node, 6 s reports Blocked (the hub skips tethering for 10 s), 15 s teleports to the last good node when no human sees the bot.
+// node, 6 s reports Blocked (the hub skips tethering for 10 s), 5 s of stall teleports to the last good node when neither the bot
+// nor the target spot is on any human's screen (retried every second).
 final function NavProgressCheck()
 {
-    local float IterNow, IterH;
-    local bool bFollow, bMoving, bSeen;
+    local float IterNow;
+    local bool bFollow, bMoving;
     local vector IterDir;
     local ReachSpec IterSpec;
     local NavigationPoint IterEnd;
-    local PlayerController IterPC;
 
     if (Pawn == None)
     {
@@ -1462,31 +1538,7 @@ final function NavProgressCheck()
             EndMoveTime = IterNow - 1.0;
         }
     }
-    if (NavLevel < 5 && NavStall >= 15.0)
-    {
-        NavLevel = 5;
-        if (bNavTeleport && NavLastGood != None)
-        {
-            foreach WorldInfo.AllControllers(class'PlayerController', IterPC)
-            {
-                if (IterPC.Pawn != None && IterPC.Pawn.IsAliveAndWell() && IterPC.LineOfSightTo(Pawn))
-                {
-                    bSeen = true;
-                }
-            }
-            if (!bSeen)
-            {
-                IterH = Pawn.GetCollisionHeight();
-                IterDir = NavLastGood.Location;
-                IterDir.Z += IterH;
-                Pawn.SetLocation(IterDir);
-                EchelonLog("NAV_TELEPORT to=" $ string(NavLastGood));
-                NavStall = 0.0;
-                NavLevel = 0;
-                NavProbeLoc = Pawn.Location;
-            }
-        }
-    }
+    NavTryTeleport(IterNow);
 }
 
 final function bool MarkDoorPath(KFDoorActor door)
@@ -4886,6 +4938,9 @@ function UpdateHoldAreaDrift()
 defaultproperties
 {
     bNavTeleport=true
+    NavTeleportAfter=5.0
+    NavNextTeleportTry=0.0
+    NavTeleportWaitLog=0.0
     bIsPlayer=true
     bNotifyApex=true
     CurrentFormation=StaggeredColumn
