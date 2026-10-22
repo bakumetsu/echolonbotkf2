@@ -603,10 +603,6 @@ function MatchStarting()
         SetTimer(1.0, true);
     }
     SetTimer(0.1, true, 'CheckWave');
-    if (bRemoteShopActive)
-    {
-        SetTimer(1.0, true, 'RemoteShopSweep');
-    }
     InstallVoteCollector();
 }
 
@@ -614,12 +610,16 @@ function MatchStarting()
 // The bots' own picks reach the economy step only after objective, regroup and follow steps, which can hold
 // a bot for a minute (seen 2026-10-23: a trader round passed with 3 of 7 bots not yet shopped).
 // RemoteShop skips bots in a fight, still on cooldown, or with nothing to buy from.
+// CheckWave starts this 1 s timer when the trader opens; it stops itself when the trader closes.
 function RemoteShopSweep()
 {
     local int I;
 
     if (KF == None || KF.MyKFGRI == None || !KF.MyKFGRI.bTraderIsOpen)
+    {
+        ClearTimer('RemoteShopSweep');
         return;
+    }
     for (I = 0; I < ActiveBots.Length; I++)
     {
         if (ActiveBots[I] != None && ActiveBots[I].Pawn != None && ActiveBots[I].Pawn.IsAliveAndWell())
@@ -2144,6 +2144,11 @@ function BroadcastSpottedEnemy(int GroupID, Pawn Spotted)
 
 function CheckWave()
 {
+    if (bRemoteShopActive && KF.MyKFGRI.bTraderIsOpen && !IsTimerActive('RemoteShopSweep'))
+    {
+        SetTimer(1.0, true, 'RemoteShopSweep');
+    }
+
     if (bNewWave && KF.GetStateName() == 'TraderOpen')
     {
         bNewWave = false;
