@@ -101,6 +101,14 @@ var EFollowStatus FollowStatus;
 var EcholonNavMeter NavMeter;      // shared nav cost counter, set by EcholonMut.RegisterBot
 var EcholonNavBudget NavBudget;    // shared per-frame nav budget, set by EcholonMut.RegisterBot
 var EcholonNavScan NavScan;        // start-of-match link scan result (bad links), set by EcholonMut.RegisterBot
+var float FollowRampStart; // game time the pawn last started from a stop
+var float FollowRampUpTime; // seconds to ramp from min pct to full speed
+var float FollowRampMinPct; // minimum speed fraction at ramp start
+var float FollowCornerSlowDist; // uu distance from next node to begin corner slow
+var float FollowCornerMinPct; // minimum speed fraction during corner slow
+var float FollowCornerAngle; // degree threshold above which corner slow applies
+var float FollowSeparationDist; // 2D radius (uu) within which squadmates repel
+var float FollowSeparationGain; // multiplier applied to the accumulated push
 var vector FollowSteerCachePoint;  // last steer point computed
 var Actor FollowSteerCacheNode;    // the route node that point was computed for
 var float FollowSteerCacheTime;    // when it was computed
@@ -272,6 +280,118 @@ function FollowWatchdogBegin()
 function bool FollowCheckExit()
 {
     return false;
+}
+
+// ---------------------------------------------------------------- speed ramps and separation (N9)
+// Speed ramp member vars
+
+// Returns the maximum 2D speed (uu/s) allowed right now.
+function float FollowSpeedCap()
+{
+    local float Now, Speed, Cap1, Cap2, Dot, AngleDeg, V1Len, V2Len;
+    local vector V1, V2;
+
+    Now = WorldInfo.TimeSeconds;
+    Speed = VSize2D(Pawn.Velocity);
+
+    if (Speed < 30.0)
+    {
+        FollowRampStart = Now;
+    }
+
+    Cap1 = Pawn.GroundSpeed * FClamp(
+        FollowRampMinPct + (1.0 - FollowRampMinPct) * (Now - FollowRampStart) / FollowRampUpTime,
+        FollowRampMinPct, 1.0);
+
+    Cap2 = Pawn.GroundSpeed;
+
+    if (FollowRouteIdx + 1 < FollowRoute.Length
+        && FollowRoute[FollowRouteIdx] != None
+        && FollowRoute[FollowRouteIdx + 1] != None)
+    {
+        V1 = FollowRoute[FollowRouteIdx].Location - Pawn.Location;
+        V1.Z = 0.0;
+        V2 = FollowRoute[FollowRouteIdx + 1].Location - FollowRoute[FollowRouteIdx].Location;
+        V2.Z = 0.0;
+        V1Len = VSize(V1);
+        V2Len = VSize(V2);
+
+        if (V1Len > 1.0 && V2Len > 1.0)
+        {
+            Dot = Normal(V1) dot Normal(V2);
+            Dot = FClamp(Dot, -1.0, 1.0);
+            AngleDeg = Acos(Dot) * 57.29578;
+
+            if (AngleDeg > FollowCornerAngle)
+            {
+                Cap2 = Pawn.GroundSpeed * FClamp(V1Len / FollowCornerSlowDist, FollowCornerMinPct, 1.0);
+            }
+        }
+    }
+
+    return FMin(Cap1, Cap2);
+}
+
+// Scales horizontal velocity when it exceeds the current speed cap (walking only: sprint speed is above GroundSpeed).
+function FollowApplySpeedCap()
+{
+    local float Cap, Speed;
+    local KFPawn KP;
+
+    KP = KFPawn(Pawn);
+    if (KP == None || KP.bIsSprinting)
+    {
+        return;
+    }
+    Cap = FollowSpeedCap();
+    Speed = VSize2D(Pawn.Velocity);
+
+    if (Pawn.Physics == PHYS_Walking && Speed > Cap && Speed > 1.0)
+    {
+        Pawn.Velocity.X *= Cap / Speed;
+        Pawn.Velocity.Y *= Cap / Speed;
+    }
+}
+
+// Separation member vars
+
+// Blends a separation push into the given unit movement direction.
+function vector FollowSeparationPush(vector Dir)
+{
+    local vector Push, Away, Result;
+    local float Len;
+    local KFPawn_Human P;
+
+    Push = vect(0.0, 0.0, 0.0);
+
+    foreach WorldInfo.AllPawns(class'KFPawn_Human', P, Pawn.Location, FollowSeparationDist)
+    {
+        if (P == Pawn || !P.IsAliveAndWell())
+        {
+            continue;
+        }
+
+        Away = Pawn.Location - P.Location;
+        Away.Z = 0.0;
+        Len = VSize(Away);
+
+        if (Len < 1.0)
+        {
+            Away = -Dir;
+            Len = 1.0;
+        }
+
+        Push += (Away / Len) * (1.0 - FMin(Len, FollowSeparationDist) / FollowSeparationDist);
+    }
+
+    if (VSize(Push) < 0.001)
+    {
+        return Dir;
+    }
+
+    Result = Dir + Push * FollowSeparationGain;
+    Result.Z = Dir.Z;
+    return Normal(Result);
 }
 
 // ---------------------------------------------------------------- nav budget (N7)
@@ -2183,7 +2303,8 @@ PathMove:
     }
     FollowOnMoveBegin(false);
     EchelonLog("NAV_ACCEL_NODE node=" $ string(FollowNode));
-    Pawn.Acceleration = FollowSteerDirBudgeted(FollowNode) * FMax(Pawn.GroundSpeed, 0.0001f);
+    Pawn.Acceleration = FollowSeparationPush(FollowSteerDirBudgeted(FollowNode)) * FMax(Pawn.GroundSpeed, 0.0001f);
+    FollowApplySpeedCap();
     Sleep(FollowMinLoopSleep);
     Goto('Dispatch');
 
@@ -2291,6 +2412,13 @@ defaultproperties
     FollowResumeMargin=96.0
     FollowZTolerance=128.0
     FollowWatchdogPeriod=0.25
+    FollowRampUpTime=0.6
+    FollowRampMinPct=0.4
+    FollowCornerSlowDist=300.0
+    FollowCornerMinPct=0.45
+    FollowCornerAngle=60.0
+    FollowSeparationDist=80.0
+    FollowSeparationGain=0.8
     FollowSteerCacheMaxAge=0.4
     FollowPhaseJitter=0.03
     FollowReachIntervalDirect=0.25
