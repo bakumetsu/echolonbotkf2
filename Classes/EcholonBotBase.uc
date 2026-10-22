@@ -1232,6 +1232,8 @@ function Tick(float Delta)
         return;
     }
 
+    FollowSampleCrumb();
+
     // Follow-combat escape: route to combat when a Zed has LOS while tethered
     if (IsInState('FollowingLeader') || IsInState('FollowingLeaderBasic'))
     {

@@ -123,6 +123,14 @@ var float FollowFeelerAngle;
 var float FollowFeelerPush;
 var float FollowKneeHeight;
 var float FollowFloorDrop;
+// Breadcrumbs (nav redesign N3): the nav points this bot actually walked, newest last. A follower plans to
+// the newest crumb of its leader instead of chasing the leader pawn.
+var array<NavigationPoint> FollowCrumbs;
+var int FollowCrumbMax;
+var float FollowCrumbNextTime;
+var float FollowCrumbInterval;
+var NavigationPoint FollowCrumbGoal;
+var int FollowCrumbMaxLag;
 
 
 // Log id for this bot: "EcholonBot_3(Widow)", the in-game name without its rank tag. kit/tools/log_reader.py reads it.
@@ -341,7 +349,7 @@ function FollowWatchdog()
     }
 
     if (!IterReach && !bFollowRouteStale
-        && VSizeSq(FollowLeaderPawn.Location - FollowLastLeaderPathLoc) > (FollowRepathDistance * FollowRepathDistance))
+        && FollowLeaderMovedOn(FollowLastLeaderPathLoc, FollowRepathDistance * FollowRepathDistance))
     {
         bFollowRouteStale = true;
     }
@@ -673,6 +681,7 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
             }
         }
         FollowBadEdgesBlock(IterMinStrikes, IterBlocked);
+        FollowSquadEdgesBlock(IterMinStrikes, IterBlocked);
         FollowPlanBegin();
         if (Goal != None)
         {
@@ -726,7 +735,28 @@ function bool FollowBuildPath()
 
     FollowNextPathTime = IterNow + FollowPathMinInterval + (FRand() * FollowPhaseJitter);
 
-    IterFirst = FollowFindWalkablePath(FollowLeaderPawn, vect(0,0,0));
+    if (FollowBuildTrailRoute())
+    {
+        FollowRouteIdx = 0;
+        FollowPathFailBackoff = 0.0;
+        bFollowRouteStale = false;
+        FollowLastLeaderPathLoc = FollowLeaderPawn.Location;
+        FollowLastPawnTargetPathLoc = FollowLeaderPawn.Location;
+        EchelonLog("NAV_TRAIL nodes=" $ string(FollowRoute.Length) $ " goal=" $ string(FollowCrumbGoal));
+        return true;
+    }
+
+    FollowCrumbGoal = FollowPickCrumbFrom(EcholonFollowNavBase(FollowLeaderCtrl));
+    IterFirst = None;
+    if (FollowCrumbGoal != None)
+    {
+        IterFirst = FollowFindWalkablePath(FollowCrumbGoal, vect(0,0,0));
+    }
+    if (IterFirst == None)
+    {
+        FollowCrumbGoal = None;
+        IterFirst = FollowFindWalkablePath(FollowLeaderPawn, vect(0,0,0));
+    }
     if (IterFirst == None)
     {
         FollowPathFailBackoff = FClamp(FollowPathFailBackoff * 2.0, FollowPathFailBackoffMin, FollowPathFailBackoffMax);
@@ -751,7 +781,7 @@ function bool FollowBuildPath()
     bFollowRouteStale = false;
     FollowLastLeaderPathLoc = FollowLeaderPawn.Location;
     FollowLastPawnTargetPathLoc = FollowLeaderPawn.Location;
-    EchelonLog("NAV_PATH_OK nodes=" $ string(FollowRoute.Length) $ " to=" $ string(FollowLeaderPawn));
+    EchelonLog("NAV_PATH_OK nodes=" $ string(FollowRoute.Length) $ " to=" $ string(FollowLeaderPawn) $ " crumb=" $ string(FollowCrumbGoal));
     return true;
 }
 
@@ -1072,7 +1102,7 @@ function FollowOnNodeMoveEnd(Actor IterNode)
     if (Pawn.ReachedDestination(IterNode))
     {
         FollowSameNodeCount = 0;
-        if (FollowLeaderPawn != None && VSizeSq(FollowLeaderPawn.Location - FollowLastPawnTargetPathLoc) > FollowNodeRepathDistSq)
+        if (FollowLeaderPawn != None && FollowLeaderMovedOn(FollowLastPawnTargetPathLoc, FollowNodeRepathDistSq))
         {
             bFollowRouteStale = true;
             FollowLastPawnTargetPathLoc = FollowLeaderPawn.Location;
@@ -1218,6 +1248,10 @@ function FollowStrikeEdge(ReachSpec Spec)
 
     FollowBadUntil[I] = WorldInfo.TimeSeconds + Penalty;
 
+    if (EcholonFollowNavBase(FollowLeaderCtrl) != None && EcholonFollowNavBase(FollowLeaderCtrl) != Self)
+    {
+        EcholonFollowNavBase(FollowLeaderCtrl).FollowAddSquadStrike(Spec);
+    }
     EchelonLog("NAV_STRIKE edge=" $ string(Spec.Start) $ "->" $ string(Spec.GetEnd()) $ " strikes=" $ string(FollowBadStrikes[I]) $ " until=" $ string(FollowBadUntil[I]));
 }
 
@@ -1305,6 +1339,207 @@ function bool FollowLadderStuck(Name IterCause)
     FollowLadderCount = 0;
     EchelonLog("NAV_LADDER level=2 edge=" $ string(Spec.Start) $ "->" $ string(Spec.GetEnd()) $ " cause=" $ string(IterCause));
     return false;
+}
+
+// Called every tick by the bot: records the nav point the pawn stands at when it changes.
+function FollowSampleCrumb()
+{
+    local NavigationPoint IterAnchor;
+
+    if (Pawn == None || WorldInfo.TimeSeconds < FollowCrumbNextTime)
+    {
+        return;
+    }
+    FollowCrumbNextTime = WorldInfo.TimeSeconds + FollowCrumbInterval;
+    if (Pawn.Physics != PHYS_Walking)
+    {
+        return;
+    }
+    IterAnchor = Pawn.Anchor;
+    if (IterAnchor == None || VSizeSq(Pawn.Location - IterAnchor.Location) > 14400.0)
+    {
+        return;
+    }
+    if (FollowCrumbs.Length > 0 && FollowCrumbs[FollowCrumbs.Length - 1] == IterAnchor)
+    {
+        return;
+    }
+    FollowCrumbs.AddItem(IterAnchor);
+    if (FollowCrumbs.Length > FollowCrumbMax)
+    {
+        FollowCrumbs.Remove(0, FollowCrumbs.Length - FollowCrumbMax);
+    }
+}
+
+// Newest crumb of Leader's trail that this pawn is not already standing at, or None (then plan to the leader pawn).
+function NavigationPoint FollowPickCrumbFrom(EcholonFollowNavBase Leader)
+{
+    local int IterIdx;
+
+    if (Leader == None || Leader == Self || Pawn == None)
+    {
+        return None;
+    }
+    for (IterIdx = Leader.FollowCrumbs.Length - 1; IterIdx >= 0; IterIdx--)
+    {
+        if (Leader.FollowCrumbs[IterIdx] != None)
+        {
+            if (VSizeSq(Pawn.Location - Leader.FollowCrumbs[IterIdx].Location) < 22500.0)
+            {
+                return None;
+            }
+            return Leader.FollowCrumbs[IterIdx];
+        }
+    }
+    return None;
+}
+
+// How many leader crumbs are newer than the crumb this route leads to; -1 without a crumb goal.
+function int FollowCrumbLag()
+{
+    local EcholonFollowNavBase IterLeader;
+    local int IterIdx;
+
+    IterLeader = EcholonFollowNavBase(FollowLeaderCtrl);
+    if (FollowCrumbGoal == None || IterLeader == None)
+    {
+        return -1;
+    }
+    IterIdx = IterLeader.FollowCrumbs.Find(FollowCrumbGoal);
+    if (IterIdx == INDEX_NONE)
+    {
+        return FollowCrumbMaxLag;
+    }
+    return IterLeader.FollowCrumbs.Length - 1 - IterIdx;
+}
+
+// True when the route should be replanned because the leader moved on: crumb lag with a crumb goal,
+// else the old distance test.
+function bool FollowLeaderMovedOn(vector LastLoc, float DistSq)
+{
+    local int IterLag;
+
+    if (FollowLeaderPawn == None)
+    {
+        return false;
+    }
+    IterLag = FollowCrumbLag();
+    if (IterLag >= 0)
+    {
+        return IterLag >= FollowCrumbMaxLag;
+    }
+    return VSizeSq(FollowLeaderPawn.Location - LastLoc) > DistSq;
+}
+
+// Reuse the leader's trail as the route when this pawn stands on or beside it (no A*).
+function bool FollowBuildTrailRoute()
+{
+    local EcholonFollowNavBase IterLeader;
+    local int IterIdx, IterStart, IterBest;
+    local float IterD, IterBestD;
+    local NavigationPoint IterPrev;
+
+    IterLeader = EcholonFollowNavBase(FollowLeaderCtrl);
+    if (IterLeader == None || IterLeader == Self || Pawn == None || IterLeader.FollowCrumbs.Length < 2)
+    {
+        return false;
+    }
+    IterBest = -1;
+    IterBestD = 40000.0;
+    for (IterIdx = 0; IterIdx < IterLeader.FollowCrumbs.Length - 1; IterIdx++)
+    {
+        if (IterLeader.FollowCrumbs[IterIdx] == None)
+        {
+            continue;
+        }
+        IterD = VSizeSq(Pawn.Location - IterLeader.FollowCrumbs[IterIdx].Location);
+        if (IterD < IterBestD && FollowWalkClear(Pawn.Location, IterLeader.FollowCrumbs[IterIdx].Location))
+        {
+            IterBestD = IterD;
+            IterBest = IterIdx;
+        }
+    }
+    if (IterBest < 0)
+    {
+        return false;
+    }
+    FollowRoute.Length = 0;
+    IterPrev = IterLeader.FollowCrumbs[IterBest];
+    for (IterStart = IterBest + 1; IterStart < IterLeader.FollowCrumbs.Length && FollowRoute.Length < FollowMaxRouteNodes; IterStart++)
+    {
+        if (IterLeader.FollowCrumbs[IterStart] == None || IterLeader.FollowCrumbs[IterStart] == IterPrev)
+        {
+            continue;
+        }
+        if (!FollowIsWalkableSpec(IterPrev.GetReachSpecTo(IterLeader.FollowCrumbs[IterStart])))
+        {
+            break;
+        }
+        FollowRoute.AddItem(IterLeader.FollowCrumbs[IterStart]);
+        IterPrev = IterLeader.FollowCrumbs[IterStart];
+    }
+    if (FollowRoute.Length == 0)
+    {
+        return false;
+    }
+    FollowCrumbGoal = NavigationPoint(FollowRoute[FollowRoute.Length - 1]);
+    return true;
+}
+
+// Copy a strike into this bot's table as a squad strike (no forwarding, no log spam).
+function FollowAddSquadStrike(ReachSpec Spec)
+{
+    local int IterIdx, IterJ;
+    local float IterPenalty;
+
+    if (Spec == None)
+    {
+        return;
+    }
+    IterIdx = FollowBadSpecs.Find(Spec);
+    if (IterIdx == INDEX_NONE)
+    {
+        if (FollowBadSpecs.Length >= FollowBadEdgeMax)
+        {
+            return;
+        }
+        FollowBadSpecs.AddItem(Spec);
+        FollowBadUntil.AddItem(0.0);
+        FollowBadStrikes.AddItem(1);
+        IterIdx = FollowBadSpecs.Length - 1;
+    }
+    else
+    {
+        FollowBadStrikes[IterIdx]++;
+    }
+    IterPenalty = FollowBadBaseTime;
+    for (IterJ = 1; IterJ < FollowBadStrikes[IterIdx]; IterJ++)
+    {
+        IterPenalty *= 2.0;
+    }
+    FollowBadUntil[IterIdx] = WorldInfo.TimeSeconds + FMin(IterPenalty, FollowBadMaxTime);
+}
+
+// Block the leader's live bad edges too (squad table: strikes any member recorded were copied to the leader).
+function FollowSquadEdgesBlock(int MinStrikes, out array<ReachSpec> OutBlocked)
+{
+    local EcholonFollowNavBase IterLeader;
+    local int IterIdx;
+
+    IterLeader = EcholonFollowNavBase(FollowLeaderCtrl);
+    if (IterLeader == None || IterLeader == Self || Pawn == None)
+    {
+        return;
+    }
+    for (IterIdx = 0; IterIdx < IterLeader.FollowBadSpecs.Length; IterIdx++)
+    {
+        if (IterLeader.FollowBadSpecs[IterIdx] != None && IterLeader.FollowBadStrikes[IterIdx] >= MinStrikes
+            && IterLeader.FollowBadUntil[IterIdx] > WorldInfo.TimeSeconds && IterLeader.FollowBadSpecs[IterIdx].BlockedBy == None)
+        {
+            IterLeader.FollowBadSpecs[IterIdx].BlockedBy = Pawn;
+            OutBlocked.AddItem(IterLeader.FollowBadSpecs[IterIdx]);
+        }
+    }
 }
 
 function bool FollowTryBlockNode(Actor IterNodeActor)
@@ -1822,4 +2057,7 @@ defaultproperties
     FollowFeelerPush=0.6
     FollowKneeHeight=40.0
     FollowFloorDrop=80.0
+    FollowCrumbMax=16
+    FollowCrumbInterval=0.4
+    FollowCrumbMaxLag=3
 }
