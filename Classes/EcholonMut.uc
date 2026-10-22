@@ -43,6 +43,7 @@ var transient EcholonNavBudget NavBudget;     // per-frame nav budget, shared by
 var transient EcholonNavScan NavScan;
 var transient EcholonZonePlanner ZonePlanner;  // zone list builder, logging only (Hold and Relocate zones, step 2)
 var transient bool bZoneStarted;
+var() config int ZoneConfigVer;               // 0 = zone settings never written; 1 = defaults written once (separate from ConfigVer, which resets everything)
 var() config bool bZonePlanner;               // build the zone list at match start (logging only for now)
 var() config int ZoneMinSpots;                // standing spots a zone needs to count as usable
 var() config float ZoneSpotSpacing;           // minimum distance between two picked spots
@@ -261,7 +262,22 @@ function PostBeginPlay()
     NavBudget = new class'EcholonBot.EcholonNavBudget';
     NavScan = new class'EcholonBot.EcholonNavScan';
     // Config vars cannot be given defaults in defaultproperties and ConfigVer must not be bumped (it resets
-    // every setting), so a zone setting missing from the ini reads 0 and gets its built-in default here.
+    // every setting). ZoneConfigVer is a separate stamp: the first time it is below 1, the zone settings get
+    // their defaults and are saved once. Nothing else in the ini is touched.
+    if (ZoneConfigVer < 1)
+    {
+        bZonePlanner = true;
+        ZoneMinSpots = 6;
+        ZoneSpotSpacing = 200.0;
+        ZonePodRadius = 800.0;
+        ZonePodRadiusMax = 1400.0;
+        ZonePodStep = 200.0;
+        ZoneSpawnClear = 300.0;
+        ZoneMergeDist = 800.0;
+        ZoneConfigVer = 1;
+        SaveConfig();
+    }
+    // A zone value cleared by hand reads 0: use the built-in default.
     if (ZoneMinSpots <= 0)
         ZoneMinSpots = 6;
     if (ZoneSpotSpacing <= 0.0)
@@ -273,7 +289,7 @@ function PostBeginPlay()
     if (ZonePodStep <= 0.0)
         ZonePodStep = 200.0;
     if (ZoneSpawnClear <= 0.0)
-        ZoneSpawnClear = 1000.0;
+        ZoneSpawnClear = 300.0;
     if (ZoneMergeDist <= 0.0)
         ZoneMergeDist = 800.0;
     if (bZonePlanner)

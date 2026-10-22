@@ -473,13 +473,21 @@ final function StepZones(float Now)
         }
         else
         {
-            for (i = 0; i < SpawnLocs.Length; i++)
+            // A spawn volume centre inside the zone: near the centre or near any standing spot.
+            for (i = 0; i < SpawnLocs.Length && Z.bUsable; i++)
             {
                 if (VSize(SpawnLocs[i] - Z.Center) < Mut.ZoneSpawnClear)
                 {
                     Z.Why = "spawn_near";
                     Z.bUsable = false;
-                    break;
+                }
+                for (j = 0; j < Z.Spots.Length && Z.bUsable; j++)
+                {
+                    if (VSize(SpawnLocs[i] - Z.Spots[j].Location) < Mut.ZoneSpawnClear)
+                    {
+                        Z.Why = "spawn_near";
+                        Z.bUsable = false;
+                    }
                 }
             }
         }
@@ -503,7 +511,7 @@ final function StepZones(float Now)
 
     if (bMerged)
     {
-        Mut.EchelonLog("ZONE_LIST id=" $ string(Z.Id) $ " src=" $ SrcStr $ " name=" $ string(Z.Source.Name) $ " at=" $ Fmt(Z.Center) $ " radius=" $ string(int(Z.Radius)) $ " spots=0 entries=0 usable=0 why=" $ Z.Why);
+        Mut.EchelonLog("ZONE_LIST id=" $ string(Z.Id) $ " src=" $ SrcStr $ " name=" $ string(Z.Source.Name) $ " at=" $ Fmt(Z.Center) $ " radius=" $ string(int(Z.Radius)) $ " spots=0 entries=0 usable=0 why=" $ Z.Why $ " into=" $ Mid(Z.Why, 12));
     }
     else
     {
