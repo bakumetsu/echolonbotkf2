@@ -128,6 +128,13 @@ var transient float PlaytestNextReportTime;
 var transient name PlaytestCamMode;           // 'ThirdPerson' or 'FirstPerson', kept across bot switches
 var transient int PlaytestLastZedCount;
 var transient float PlaytestZedCountSince;    // when AIAliveCount last changed (stuck-wave check)
+var transient int PlaytestWaves;             // wave cap for this match (0 = whole match)
+var transient int PlaytestBotsOverride;      // bot count override for this match only
+var transient int PlaytestWavesDone;         // waves ended so far
+var transient float PlaytestWaveStart;       // TimeSeconds when the current wave began
+var transient bool bPlaytestLastTrader;      // bTraderIsOpen at the previous tick (edge detection)
+var transient bool bPlaytestDone;            // PLAYTEST_DONE logged, the game is about to quit
+var transient bool bPlaytestReadyLogged;     // PLAYTEST_READY logged once
 
 function EchelonLog(string Msg)
 {
@@ -269,7 +276,11 @@ function InitMutator(string Options, out string ErrorMessage)
         // Our controller makes left/right click and the camera-mode key work on bots (see EcholonSpectatorPC).
         WorldInfo.Game.PlayerControllerClass = class'EcholonSpectatorPC';
         PlaytestCamMode = 'ThirdPerson';
-        EchelonLog("PLAYTEST_START map=" $ WorldInfo.GetMapName(true) $ " bots=" $ string(NumBots));
+        PlaytestWaves = class'GameInfo'.static.GetIntOption(Options, "PlaytestWaves", 0);
+        PlaytestBotsOverride = class'GameInfo'.static.GetIntOption(Options, "PlaytestBots", 0);
+        if (PlaytestBotsOverride > 0)
+            NumBots = byte(PlaytestBotsOverride);
+        EchelonLog("PLAYTEST_START map=" $ WorldInfo.GetMapName(true) $ " waves=" $ string(PlaytestWaves) $ " bots=" $ string(NumBots));
         SetTimer(1.0, true, 'PlaytestTick');
     }
 }
@@ -415,15 +426,101 @@ final function PlaytestCheckStuckWave()
     PlaytestZedCountSince = WorldInfo.TimeSeconds;
 }
 
+final function int PlaytestCountBotsAlive()
+{
+    local int Count;
+    local EcholonBot B;
+
+    foreach WorldInfo.AllControllers(class'EcholonBot', B)
+    {
+        if (B.Pawn != None && B.Pawn.IsAliveAndWell())
+            Count++;
+    }
+    return Count;
+}
+
+// Logs PLAYTEST_WAVE_END on each wave end (trader opens, or the match ends) and PLAYTEST_DONE when the run is over.
+final function PlaytestCheckWaveEnd()
+{
+    local bool Over, Trader;
+    local int Alive;
+    local string Result, Reason;
+
+    if (bPlaytestDone)
+        return;
+
+    Over = KF.MyKFGRI.bMatchIsOver;
+    Trader = KF.MyKFGRI.bTraderIsOpen;
+
+    if (PlaytestWaveStart == 0.0)
+        PlaytestWaveStart = WorldInfo.TimeSeconds;
+
+    if ((Trader && !bPlaytestLastTrader) || Over)
+    {
+        PlaytestWavesDone++;
+        Alive = PlaytestCountBotsAlive();
+        Result = (Over && Alive == 0) ? "wipe" : "won";
+        EchelonLog("PLAYTEST_WAVE_END wave=" $ string(KF.MyKFGRI.WaveNum) $ " result=" $ Result $ " bots_alive=" $ string(Alive)
+            $ " duration=" $ string(int(WorldInfo.TimeSeconds - PlaytestWaveStart)));
+
+        if (Over)
+            Reason = (Alive == 0) ? "wipe" : "victory";
+        else if (PlaytestWaves > 0 && PlaytestWavesDone >= PlaytestWaves)
+            Reason = "waves";
+
+        if (Reason != "")
+        {
+            EchelonLog("PLAYTEST_DONE reason=" $ Reason $ " waves_done=" $ string(PlaytestWavesDone));
+            bPlaytestDone = true;
+            SetTimer(5.0, false, 'PlaytestQuit');
+        }
+    }
+
+    if (!Trader && bPlaytestLastTrader)
+        PlaytestWaveStart = WorldInfo.TimeSeconds;
+    bPlaytestLastTrader = Trader;
+}
+
+function PlaytestQuit()
+{
+    local PlayerController PC;
+
+    PC = WorldInfo.GetALocalPlayerController();
+    if (PC != None)
+        PC.ConsoleCommand("exit");
+}
+
+// Before the match begins the human sits in the ready-up lobby; mark them ready so the run needs no input.
+final function PlaytestAutoReady()
+{
+    local KFPlayerController PC;
+
+    PC = GetPlaytestHuman();
+    if (PC == None || PC.PlayerReplicationInfo == None || PC.PlayerReplicationInfo.bReadyToPlay)
+        return;
+
+    PC.PlayerReplicationInfo.bReadyToPlay = true;
+    if (!bPlaytestReadyLogged)
+    {
+        bPlaytestReadyLogged = true;
+        EchelonLog("PLAYTEST_READY map=" $ WorldInfo.GetMapName(true));
+    }
+}
+
 function PlaytestTick()
 {
     local KFPlayerController PC;
     local Pawn ViewPawn;
-    local EcholonBot B;
     local int BotsAlive;
 
-    if (KF == None || KF.MyKFGRI == None || !KF.MyKFGRI.bMatchHasBegun)
+    if (KF == None || KF.MyKFGRI == None)
         return;
+
+    if (!KF.MyKFGRI.bMatchHasBegun)
+    {
+        PlaytestAutoReady();
+        return;
+    }
 
     PC = GetPlaytestHuman();
     if (PC == None)
@@ -441,15 +538,12 @@ function PlaytestTick()
     }
 
     PlaytestCheckStuckWave();
+    PlaytestCheckWaveEnd();
 
     if (WorldInfo.TimeSeconds >= PlaytestNextReportTime)
     {
         PlaytestNextReportTime = WorldInfo.TimeSeconds + 10.0;
-        foreach WorldInfo.AllControllers(class'EcholonBot', B)
-        {
-            if (B.Pawn != None && B.Pawn.IsAliveAndWell())
-                BotsAlive++;
-        }
+        BotsAlive = PlaytestCountBotsAlive();
         EchelonLog("PLAYTEST_HEARTBEAT wave=" $ string(KF.MyKFGRI.WaveNum) $ " trader=" $ string(KF.MyKFGRI.bTraderIsOpen)
             $ " over=" $ string(KF.MyKFGRI.bMatchIsOver) $ " state=" $ string(KF.GetStateName())
             $ " living=" $ string(KF.GetLivingPlayerCount()) $ " bots_alive=" $ string(BotsAlive)
