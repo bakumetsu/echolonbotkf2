@@ -276,6 +276,21 @@ var transient bool bShotProbeClear;
 var transient rotator AimRot;
 var transient float LastAimTime;
 var transient float AimReadyTime;
+var float RetreatStartTime; // when the current retreat began (0 = none)
+var vector RetreatStartLoc; // where it began
+var float RetreatCooldownUntil; // no new retreat before this time (2 s after one ends)
+var Pawn RetreatTarget; // the zed the retreat is shooting at now
+var Pawn RetreatNoFire; // a calm Fleshpound we must not shoot during its calm window
+var float RetreatCalmUntil; // end of the calm-Fleshpound sprint window
+var bool bRetreatSprint; // sprint is allowed during this retreat (calm Fleshpound window or raging Scrake close)
+var bool bRetreatSurrounded; // every direction was blocked at the last check
+var float RetreatLogTime; // throttle for RETREAT_SHOT logs
+var array<Pawn> RetreatFPs; // Fleshpounds seen within 25 m
+var array<bool> RetreatFPRaged; // their last known IsEnraged()
+var float RetreatMaxDist; // 750.0 (15 m)
+var float RetreatMinStay; // 1.5 s minimum retreat duration
+var float RetreatFireInterval; // 0.2 s between fire ticks
+var vector RetreatDir; // last escape direction chosen by PickRetreatMove
 var float LastHubCheckTime;     // game time of the last PickCombatStyle (hub) call made from FightEnemy.FinishedMove
 var float CombatHubGap;         // seconds between hub checks while FightEnemy keeps the same enemy
 var float LastRepickLog;        // game time of the last COMBAT_REPICK log line (throttle 2 s)
@@ -3887,6 +3902,11 @@ final function bool IsTraderFreeTime()
 	return (KFGRI != None && KFGRI.bTraderIsOpen && KFGRI.GetTraderTimeRemaining() > TRADER_REFORM_REMAINING);
 }
 
+// Overridden in EcholonBotLogic (retreat that shoots); the base class only needs the name for SprintTick.
+function RetreatFireTick()
+{
+}
+
 // Single owner of the sprint flag (replaces the per-state SetSprinting calls). Named timer, 0.25 s.
 // Edge-triggered: SetSprinting plays panting dialog and lowers the weapon, so call it only on a change.
 function SprintTick()
@@ -3898,6 +3918,8 @@ function SprintTick()
     bWant = WantsSprint();
     if (bWant != KPawn.bIsSprinting)
         KPawn.SetSprinting(bWant);
+    if (CurrentOrder == 'CMD_TacticalRetreat' && !IsInState('TacticalRetreat'))
+        RetreatFireTick();
 }
 
 // Whether the bot should sprint right now; see SprintTick. Retreat and shopping always sprint, free trader
@@ -3916,8 +3938,10 @@ final function bool WantsSprint()
         return false;
 
     S = GetStateName();
-    if (S == 'TacticalRetreat' || S == 'GoShopping')
+    if (S == 'GoShopping')
         return true;
+    if (S == 'TacticalRetreat' || CurrentOrder == 'CMD_TacticalRetreat')
+        return bRetreatSprint;
     if (IsTraderFreeTime() && (S == 'Roaming' || S == 'DoObjective' || S == 'FollowingLeader'
         || S == 'FollowingLeaderBasic' || S == 'PickNextMove'))
     {
@@ -4998,6 +5022,9 @@ function UpdateHoldAreaDrift()
 
 defaultproperties
 {
+    RetreatMaxDist=750.0
+    RetreatMinStay=1.5
+    RetreatFireInterval=0.2
     CombatHubGap=0.5
     ZeroMoveMinDist=50.0
     BashMaxDistSq=5625.0
