@@ -46,6 +46,7 @@ var int QHead;
 var bool bFloodInit;
 var int ReachedCount;
 var int StarvedFrames;
+var array<vector> ZoneSpawns;
 var array<NavigationPoint> SeenIn;
 var array<NavigationPoint> SeenOut;
 
@@ -310,6 +311,7 @@ final function StepZones(float Now)
     local int EntryCount;
     local int UsableInt;
     local int Dropped;
+    local float ReachMax;
     local float NearSpawn;
 
     // --- Step 0: all zones processed ---
@@ -348,9 +350,22 @@ final function StepZones(float Now)
         Candidates.Length = 0;
         Dropped = 0;
 
+        ZoneSpawns.Length = 0;
+
         if (Z.Src == 0)
         {
-            // Dosh: candidates = reached GoodSpotNodes in Z.Pool
+            // Dosh: candidates = reached GoodSpotNodes in Z.Pool (plus the area of pods merged into it)
+            AbsorbMergedPods(Z);
+            ReachMax = 0.0;
+            for (i = 0; i < Z.Pool.Length; i++)
+            {
+                D = VSize(Z.Pool[i].Location - Z.Center);
+                if (D > ReachMax)
+                {
+                    ReachMax = D;
+                }
+            }
+            BuildZoneSpawns(Z.Center, ReachMax + Mut.ZoneSpawnClear + 50.0);
             for (i = 0; i < Z.Pool.Length; i++)
             {
                 N = Z.Pool[i];
@@ -399,6 +414,7 @@ final function StepZones(float Now)
             if (bFoundCenter)
             {
                 Z.Center = BestLoc;
+                BuildZoneSpawns(Z.Center, Mut.ZonePodRadiusMax + Mut.ZoneSpawnClear + 50.0);
                 R = Mut.ZonePodRadius;
 
                 // Build initial candidates
@@ -680,14 +696,64 @@ final function bool SpawnNear(vector L)
 {
     local int i;
 
-    for (i = 0; i < SpawnLocs.Length; i++)
+    for (i = 0; i < ZoneSpawns.Length; i++)
     {
-        if (VSize(SpawnLocs[i] - L) < Mut.ZoneSpawnClear)
+        if (VSize(ZoneSpawns[i] - L) < Mut.ZoneSpawnClear)
         {
             return true;
         }
     }
     return false;
+}
+
+// Keep only the spawn volume centres that can matter for the zone being built (within Reach of its centre).
+final function BuildZoneSpawns(vector C, float Reach)
+{
+    local int i;
+
+    ZoneSpawns.Length = 0;
+    for (i = 0; i < SpawnLocs.Length; i++)
+    {
+        if (VSize(SpawnLocs[i] - C) <= Reach)
+        {
+            ZoneSpawns.AddItem(SpawnLocs[i]);
+        }
+    }
+}
+
+// A trader pod merged into a Dosh Hold zone lends its standing area to it: its reached nodes join the Pool.
+final function AbsorbMergedPods(out ZoneRec Z)
+{
+    local int k, m;
+    local KFTraderTrigger T;
+    local float PodR, PodH, Excl;
+    local NavigationPoint N;
+    local string Tag;
+
+    Tag = "merged_into_" $ string(Z.Id);
+    for (k = 0; k < Zones.Length; k++)
+    {
+        if (Zones[k].Src != 1 || Zones[k].Why != Tag)
+        {
+            continue;
+        }
+        T = KFTraderTrigger(Zones[k].Source);
+        if (T == None)
+        {
+            continue;
+        }
+        T.GetBoundingCylinder(PodR, PodH);
+        Excl = PodR + 150.0;
+        for (m = 0; m < AllNodes.Length; m++)
+        {
+            N = AllNodes[m];
+            if (IsReached(N) && GoodSpotNode(N) && Z.Pool.Find(N) < 0
+                && VSize2D(N.Location - T.Location) > Excl && VSize2D(N.Location - T.Location) <= Mut.ZonePodRadius)
+            {
+                Z.Pool.AddItem(N);
+            }
+        }
+    }
 }
 
 // True when N is a valid spot candidate (not a lift, ladder, teleporter or jump pad).
