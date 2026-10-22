@@ -40,7 +40,7 @@ struct CachedHumanInfo { var KFPawn_Human HumanPawn; var vector Loc; var vector 
 var transient array<EcholonWeaponInfo> TraderList;
 var transient EcholonNavMeter NavMeter;       // nav cost counter, shared by all bots (N6)
 var transient EcholonNavBudget NavBudget;     // per-frame nav budget, shared by all bots (N7)
-var transient EcholonNavScan NavScan;
+var transient EcholonNavScan NavScan;         // start-of-match link scan state and bad links (N8)
 var transient EcholonZonePlanner ZonePlanner;  // zone list builder, logging only (Hold and Relocate zones, step 2)
 var transient bool bZoneStarted;
 var() config int ZoneConfigVer;               // 0 = zone settings never written; 1 = defaults written once (separate from ConfigVer, which resets everything)
@@ -51,7 +51,7 @@ var() config float ZonePodRadius;             // first radius tried around a tra
 var() config float ZonePodRadiusMax;          // largest radius tried around a trader pod
 var() config float ZonePodStep;               // radius growth per try
 var() config float ZoneSpawnClear;            // a zone with a zed spawn volume this close is not usable
-var() config float ZoneMergeDist;             // a pod this close to a Dosh Hold zone merges into it         // start-of-match link scan state and bad links (N8)
+var() config float ZoneMergeDist;             // a pod this close to a Dosh Hold zone merges into it
 var transient EcholonNavGrid NavGrid;         // shared floor-is-lava tile table (N10)
 var() config int NavGridSquads;               // 0 = lava grid for every squad, N = only squad N (1 = first), -1 = off
 var() config bool bNavGridDebug;              // log an ASCII map of the grid around squad 1's leader every 20 s

@@ -1,6 +1,7 @@
 // EcholonZonePlanner.uc
-// Stage A: skeleton, data structs, candidate collection (Dosh Holds + trader pods).
-// Logging only; no behaviour change. Work spread over frames via Step() from mutator Tick.
+// Builds the zone list once per match: candidate defend zones (Dosh Hold volumes and trader pods), a
+// reachability flood from the player starts, standing spots, entries and a usable verdict.
+// Logging only; no behaviour change. Work is spread over frames via Step() from the mutator Tick.
 
 class EcholonZonePlanner extends Object transient;
 
