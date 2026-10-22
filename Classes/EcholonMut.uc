@@ -409,6 +409,7 @@ final function PlaytestCheckStuckWave()
         || WorldInfo.TimeSeconds - PlaytestZedCountSince < 180.0)
         return;
 
+    N = 0;
     foreach WorldInfo.AllPawns(class'KFPawn_Monster', M)
     {
         if (!M.IsAliveAndWell())
