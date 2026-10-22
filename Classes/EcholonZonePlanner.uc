@@ -46,6 +46,8 @@ var int QHead;
 var bool bFloodInit;
 var int ReachedCount;
 var int StarvedFrames;
+var array<NavigationPoint> SeenIn;
+var array<NavigationPoint> SeenOut;
 
 const PH_COLLECT = 0;
 const PH_FLOOD = 1;
@@ -307,6 +309,7 @@ final function StepZones(float Now)
     local string SrcStr;
     local int EntryCount;
     local int UsableInt;
+    local int Dropped;
     local float NearSpawn;
 
     // --- Step 0: all zones processed ---
@@ -343,6 +346,7 @@ final function StepZones(float Now)
     if (!bMerged)
     {
         Candidates.Length = 0;
+        Dropped = 0;
 
         if (Z.Src == 0)
         {
@@ -352,7 +356,14 @@ final function StepZones(float Now)
                 N = Z.Pool[i];
                 if (IsReached(N) && GoodSpotNode(N))
                 {
-                    Candidates.AddItem(N);
+                    if (SpawnNear(N.Location))
+                    {
+                        Dropped++;
+                    }
+                    else
+                    {
+                        Candidates.AddItem(N);
+                    }
                 }
             }
             PickSpots(Z, Candidates);
@@ -392,6 +403,7 @@ final function StepZones(float Now)
 
                 // Build initial candidates
                 Candidates.Length = 0;
+                Dropped = 0;
                 for (i = 0; i < AllNodes.Length; i++)
                 {
                     N = AllNodes[i];
@@ -399,7 +411,14 @@ final function StepZones(float Now)
                     {
                         if (VSize2D(N.Location - Z.Center) <= R && Abs(N.Location.Z - Z.Center.Z) <= 300.0 && VSize2D(N.Location - T.Location) > Excl)
                         {
-                            Candidates.AddItem(N);
+                            if (SpawnNear(N.Location))
+                            {
+                                Dropped++;
+                            }
+                            else
+                            {
+                                Candidates.AddItem(N);
+                            }
                         }
                     }
                 }
@@ -411,6 +430,7 @@ final function StepZones(float Now)
                 {
                     R += Mut.ZonePodStep;
                     Candidates.Length = 0;
+                    Dropped = 0;
                     for (i = 0; i < AllNodes.Length; i++)
                     {
                         N = AllNodes[i];
@@ -418,7 +438,14 @@ final function StepZones(float Now)
                         {
                             if (VSize2D(N.Location - Z.Center) <= R && Abs(N.Location.Z - Z.Center.Z) <= 300.0 && VSize2D(N.Location - T.Location) > Excl)
                             {
-                                Candidates.AddItem(N);
+                                if (SpawnNear(N.Location))
+                                {
+                                    Dropped++;
+                                }
+                                else
+                                {
+                                    Candidates.AddItem(N);
+                                }
                             }
                         }
                     }
@@ -430,6 +457,8 @@ final function StepZones(float Now)
 
         // --- Step 5: Entries ---
         Z.Entries.Length = 0;
+        SeenIn.Length = 0;
+        SeenOut.Length = 0;
         for (i = 0; i < AllNodes.Length; i++)
         {
             N = AllNodes[i];
@@ -476,35 +505,25 @@ final function StepZones(float Now)
         Z.bUsable = true;
         Z.Why = "ok";
 
-        if (Z.Spots.Length == 0)
+        if (Z.Src == 0 && Z.Pool.Length == 0)
+        {
+            Z.Why = "no_nodes";
+            Z.bUsable = false;
+        }
+        else if (Z.Spots.Length == 0 && Dropped == 0)
         {
             Z.Why = "unreachable";
+            Z.bUsable = false;
+        }
+        else if (SpawnNear(Z.Center))
+        {
+            Z.Why = "spawn_near";
             Z.bUsable = false;
         }
         else if (Z.Spots.Length < Mut.ZoneMinSpots)
         {
             Z.Why = "few_spots";
             Z.bUsable = false;
-        }
-        else
-        {
-            // A spawn volume centre inside the zone: near the centre or near any standing spot.
-            for (i = 0; i < SpawnLocs.Length && Z.bUsable; i++)
-            {
-                if (VSize(SpawnLocs[i] - Z.Center) < Mut.ZoneSpawnClear)
-                {
-                    Z.Why = "spawn_near";
-                    Z.bUsable = false;
-                }
-                for (j = 0; j < Z.Spots.Length && Z.bUsable; j++)
-                {
-                    if (VSize(SpawnLocs[i] - Z.Spots[j].Location) < Mut.ZoneSpawnClear)
-                    {
-                        Z.Why = "spawn_near";
-                        Z.bUsable = false;
-                    }
-                }
-            }
         }
 
         if (Z.bUsable && Z.Entries.Length == 0)
@@ -545,7 +564,7 @@ final function StepZones(float Now)
         {
             UsableInt = 1;
         }
-        Mut.EchelonLog("ZONE_LIST id=" $ string(Z.Id) $ " src=" $ SrcStr $ " name=" $ string(Z.Source.Name) $ " at=" $ Fmt(Z.Center) $ " radius=" $ string(int(Z.Radius)) $ " spots=" $ string(Z.Spots.Length) $ " entries=" $ string(EntryCount) $ " usable=" $ string(UsableInt) $ " why=" $ Z.Why $ " nearspawn=" $ string(int(NearSpawn)));
+        Mut.EchelonLog("ZONE_LIST id=" $ string(Z.Id) $ " src=" $ SrcStr $ " name=" $ string(Z.Source.Name) $ " at=" $ Fmt(Z.Center) $ " radius=" $ string(int(Z.Radius)) $ " spots=" $ string(Z.Spots.Length) $ " entries=" $ string(EntryCount) $ " usable=" $ string(UsableInt) $ " why=" $ Z.Why $ " nearspawn=" $ string(int(NearSpawn)) $ " dropped=" $ string(Dropped));
 
         if (Z.bUsable)
         {
@@ -657,6 +676,21 @@ final function PickSpots(out ZoneRec Z, array<NavigationPoint> Candidates)
 }
 
 // True when N is a valid spot candidate (not a special marker).
+// True when a zed spawn volume centre lies within ZoneSpawnClear of the location.
+final function bool SpawnNear(vector L)
+{
+    local int i;
+
+    for (i = 0; i < SpawnLocs.Length; i++)
+    {
+        if (VSize(SpawnLocs[i] - L) < Mut.ZoneSpawnClear)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 final function bool GoodSpotNode(NavigationPoint N)
 {
     if (N == None)
@@ -702,6 +736,17 @@ final function AddEntryLink(out ZoneRec Z, NavigationPoint Inside, NavigationPoi
     local int i;
     local ZoneEntry E;
     local bool bFound;
+
+    // A two-way link shows up from both ends: count each Inside/Outside pair once.
+    for (i = 0; i < SeenIn.Length; i++)
+    {
+        if (SeenIn[i] == Inside && SeenOut[i] == Outside)
+        {
+            return;
+        }
+    }
+    SeenIn.AddItem(Inside);
+    SeenOut.AddItem(Outside);
 
     bFound = false;
     for (i = 0; i < Z.Entries.Length; i++)
