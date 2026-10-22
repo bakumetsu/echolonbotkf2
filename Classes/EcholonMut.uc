@@ -371,9 +371,9 @@ final function PlaytestToggleCamMode(PlayerController PC)
     EchelonLog("PLAYTEST_CAMERA_MODE mode=" $ string(PlaytestCamMode));
 }
 
-// The VIP anchor while the human spectates: the current anchor while it is a living squad leader,
+// Stand-in VIP while no human is alive: the current anchor while it is a living squad leader,
 // else the first living squad leader by group. It stays a squad leader (no CAPTAIN, no demotion).
-final function EcholonBot PlaytestPickAnchor()
+final function EcholonBot PickLeaderAnchor()
 {
     local EcholonBot Cur;
     local int GroupIdx;
@@ -708,8 +708,8 @@ function InitializePlatoon()
             continue;
         if (Bot.bIsAlphaCommander)
             Bot.BotRank = LIEUTENANT;
-        else if (Bot == VIPController && !bPlaytest)
-            Bot.BotRank = CAPTAIN;
+        else if (Bot == VIPController && !Bot.bIsGroupLeader)
+            Bot.BotRank = CAPTAIN;  // a stand-in VIP is always a squad leader, so this no longer fires
     }
 
     SyncSquadLeaders();
@@ -880,7 +880,7 @@ function UpdateMacroWaypoints()
                 }
                 else if (VIP == GroupLeader)
                 {
-                    // Playtest: this leader is the VIP anchor itself, so it moves freely.
+                    // This leader is the stand-in VIP itself (no human alive), so it moves freely.
                     Fireteams[GroupIdx].Anchor = None;
                     GroupLeader.AssignedAnchor = None;
                 }
@@ -980,40 +980,42 @@ function NavigationPoint FindNearestChokepoint(Controller VIP)
 }
 
 
+// The VIP is a living human whenever there is one. While no human is alive (dead and waiting for the
+// trader, or spectating in playtest mode) a living bot squad leader stands in as the anchor
+// (PickLeaderAnchor); it stays a squad leader. The VIP goes back to the human as soon as they respawn.
 function Controller GetVIPController()
 {
-    local Controller C;
-    local EcholonBot Anchor;
-
-    if (bPlaytest)
-    {
-        Anchor = PlaytestPickAnchor();
-        if (Anchor != VIPController)
-        {
-            EchelonLog("PLAYTEST_ANCHOR new=" $ (Anchor != None ? Anchor.LogTag() : "None") $ " old="
-                $ (EcholonBot(VIPController) != None ? EcholonBot(VIPController).LogTag() : "None"));
-            VIPController = Anchor;
-        }
-        return VIPController;
-    }
-
-    if (VIPController != None && !VIPController.bDeleteMe
-        && VIPController.Pawn != None && VIPController.Pawn.Health > 0)
-    {
-        return VIPController;
-    }
+    local Controller C, NewVIP;
 
     foreach WorldInfo.AllControllers(class'Controller', C)
     {
         if (PlayerController(C) != None && C.Pawn != None && C.Pawn.Health > 0)
         {
-            VIPController = C;
-            return VIPController;
+            NewVIP = C;
+            break;
         }
     }
+    if (NewVIP == None)
+    {
+        NewVIP = PickLeaderAnchor();
+    }
 
-    VIPController = None;
-    return None;
+    if (NewVIP != VIPController)
+    {
+        EchelonLog("VIP_CHANGE new=" $ VIPTag(NewVIP) $ " old=" $ VIPTag(VIPController)
+            $ " kind=" $ (EcholonBot(NewVIP) != None ? "leader" : (NewVIP != None ? "human" : "none")));
+        VIPController = NewVIP;
+    }
+    return VIPController;
+}
+
+final function string VIPTag(Controller C)
+{
+    if (EcholonBot(C) != None)
+        return EcholonBot(C).LogTag();
+    if (C != None && C.PlayerReplicationInfo != None)
+        return "human(" $ C.PlayerReplicationInfo.PlayerName $ ")";
+    return "None";
 }
 
 function Pawn FindBossPawn()
@@ -1240,30 +1242,12 @@ function CleanupRangedHealCooldowns()
     }
 }
 
+// The VIP died: a living human takes over, else a living squad leader stands in (see GetVIPController).
+// Before 2026-10-22 the best-scoring bot became VIP and alpha commander, was demoted from squad leader,
+// and kept the VIP even after the human respawned.
 function HandleVIPSuccession()
 {
-    local EcholonBot Best;
-
-    if (bPlaytest)
-    {
-        GetVIPController();  // picks the next living squad leader, no demotion
-        return;
-    }
-
-    Best = FindBestCandidate(ActiveBots);
-    if (Best == None)
-    {
-        return;
-    }
-
-    VIPController = Best;
-    AlphaCommander = Best;
-    Best.bIsAlphaCommander = true;
-
-    if (Best.bIsGroupLeader)
-    {
-        DemoteGroupLeader(Best);
-    }
+    GetVIPController();
 }
 
 function HandleFireteamCasualty(EcholonBot DeadBot)
