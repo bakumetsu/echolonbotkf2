@@ -848,6 +848,217 @@ final function ActivatePlayerDiedSequenceEvents()
     }
 }
 
+// ---------------------------------------------------------------- emergency drop during retreat (C2 rule 7)
+// A trapped bot may jump off a ledge when the fall (game formula: 100 * (v - MaxFallSpeed) / MaxFallSpeed above 1325 uu/s)
+// costs under 40% of its health and leaves at least 25 HP, fewer than 2 zeds wait at the landing and the landing tile is safe.
+// Returns fall damage in HP for a fall of Height uu
+function float RetreatFallDamage(float Height)
+{
+    local float G, V;
+
+    if (Height <= 0.0)
+    {
+        return 0.0;
+    }
+    G = Abs(WorldInfo.WorldGravityZ);
+    V = Sqrt(2.0 * G * Height);
+    if (V > Pawn.MaxFallSpeed)
+    {
+        return 100.0 * (V - Pawn.MaxFallSpeed) / Pawn.MaxFallSpeed;
+    }
+    return 0.0;
+}
+
+// Searches 8 directions for a safe ledge drop; returns best option via out params
+function bool RetreatFindDrop(out vector DropDir, out vector EdgePoint, out vector LandPoint, out float Damage, out int ZedsNearLanding)
+{
+    local vector Dir, P, TrS, TrE, HitLoc, HitNorm;
+
+    local vector EdgePt, LandPt, LTrS, LTrE;
+    local float FeetZ, Yaw, Angle, D, LandZ, Height, Dmg, PrevD;
+
+    local int I, J, ZCount, BestZeds;
+    local Actor HitActor;
+
+    local float BestDmg;
+    local bool bFound, bLedge;
+
+    local KFPawn_Monster Z;
+    FeetZ = Pawn.Location.Z - Pawn.GetCollisionHeight();
+    Yaw = Pawn.Rotation.Yaw * 0.0000958738;
+    BestDmg = 99999.0;
+    BestZeds = 999;
+    bFound = false;
+    for (I = 0; I < 8; I++)
+    {
+        Angle = float(I) * 0.785398;
+        Dir.X = Cos(Yaw + Angle);
+        Dir.Y = Sin(Yaw + Angle);
+        Dir.Z = 0.0;
+        bLedge = false;
+        for (J = 0; J < 5; J++)
+        {
+            D = 100.0 + float(J) * 50.0;
+            P.X = Pawn.Location.X + Dir.X * D;
+            P.Y = Pawn.Location.Y + Dir.Y * D;
+            TrS.X = P.X;
+            TrS.Y = P.Y;
+            TrS.Z = FeetZ + 50.0;
+            TrE.X = P.X;
+            TrE.Y = P.Y;
+            TrE.Z = FeetZ - 120.0;
+            NavCountTrace();
+            HitActor = Trace(HitLoc, HitNorm, TrE, TrS, false);
+            if (HitActor == None)
+            {
+                bLedge = true;
+                if (J == 0)
+                {
+                    EdgePt = Pawn.Location;
+                }
+                else
+                {
+                    PrevD = 100.0 + float(J - 1) * 50.0;
+                    EdgePt.X = Pawn.Location.X + Dir.X * PrevD;
+                    EdgePt.Y = Pawn.Location.Y + Dir.Y * PrevD;
+                    EdgePt.Z = FeetZ;
+                }
+                break;
+            }
+        }
+        if (!bLedge)
+        {
+            continue;
+        }
+        LTrS.X = P.X + Dir.X * 60.0;
+        LTrS.Y = P.Y + Dir.Y * 60.0;
+        LTrS.Z = FeetZ + 50.0;
+        LTrE.X = LTrS.X;
+        LTrE.Y = LTrS.Y;
+        LTrE.Z = FeetZ - 1800.0;
+        NavCountTrace();
+        HitActor = Trace(HitLoc, HitNorm, LTrE, LTrS, false);
+        if (HitActor == None)
+        {
+            continue;
+        }
+        LandZ = HitLoc.Z;
+        Height = FeetZ - LandZ;
+        if (Height < 120.0)
+        {
+            continue;
+        }
+        Dmg = RetreatFallDamage(Height);
+        if (Dmg >= 0.4 * float(Pawn.Health) || float(Pawn.Health) - Dmg < 25.0)
+        {
+            continue;
+        }
+        LandPt.X = LTrS.X;
+        LandPt.Y = LTrS.Y;
+        LandPt.Z = LandZ;
+        ZCount = 0;
+        foreach WorldInfo.AllPawns(class'KFPawn_Monster', Z, LandPt, 150.0)
+        {
+            if (Z.IsAliveAndWell() && !Z.bIsHeadless)
+            {
+                ZCount++;
+            }
+        }
+        if (ZCount >= 2)
+        {
+            continue;
+        }
+        if (NavGrid != None)
+        {
+            if (NavGridEval(NavGrid.TileOf(LandPt.X), NavGrid.TileOf(LandPt.Y), LandZ, WorldInfo.TimeSeconds) != 1)
+            {
+                continue;
+            }
+        }
+        if (Dmg < BestDmg || (Dmg == BestDmg && ZCount < BestZeds))
+        {
+            BestDmg = Dmg;
+            BestZeds = ZCount;
+            DropDir = Dir;
+            EdgePoint = EdgePt;
+            LandPoint = LandPt;
+            Damage = Dmg;
+            ZedsNearLanding = ZCount;
+            bFound = true;
+        }
+    }
+    return bFound;
+}
+
+// Polled every 0.2 s while retreating; detects landing or timeout after a drop
+function RetreatDropCheck()
+{
+    local float Now;
+
+    local vector Dest;
+    if (!bRetreatDropping)
+    {
+        return;
+    }
+    Now = WorldInfo.TimeSeconds;
+    if (Pawn.Physics == PHYS_Walking && Pawn.Location.Z < RetreatDropStartZ - 80.0)
+    {
+        bRetreatDropping = false;
+        bNavGridPause = false;
+        RetreatDropCooldown = Now + 20.0;
+        Dest.X = Pawn.Location.X + RetreatDropDir.X * 250.0;
+        Dest.Y = Pawn.Location.Y + RetreatDropDir.Y * 250.0;
+        Dest.Z = Pawn.Location.Z;
+        MoveToX(Dest, RetreatTarget, false, 'RetreatLand');
+        EchelonLog("RETREAT_LANDED hp=" $ string(Pawn.Health));
+    }
+    else if (Now - RetreatDropStartTime > 3.0)
+    {
+        bRetreatDropping = false;
+        bNavGridPause = false;
+        RetreatDropCooldown = Now + 20.0;
+    }
+}
+
+// Gate and commit an emergency drop during retreat
+function bool RetreatTryDrop(float BestScore)
+{
+    local vector DropDir, EdgePoint, LandPoint, JumpDest;
+
+    local float Damage, Now;
+    local int Zeds;
+
+    if (!bIsRetreating || bRetreatDropping)
+    {
+        return false;
+    }
+    Now = WorldInfo.TimeSeconds;
+    if (Now < RetreatDropCooldown)
+    {
+        return false;
+    }
+    if (!bRetreatSurrounded && BestScore >= 40.0)
+    {
+        return false;
+    }
+    if (!RetreatFindDrop(DropDir, EdgePoint, LandPoint, Damage, Zeds))
+    {
+        return false;
+    }
+    bRetreatDropping = true;
+    bNavGridPause = true;
+    RetreatDropStartTime = Now;
+    RetreatDropStartZ = Pawn.Location.Z;
+    RetreatDropDir = DropDir;
+    RetreatDropLand = LandPoint;
+    EchelonLog("RETREAT_DROP fall_dmg=" $ string(int(Damage)) $ " hp=" $ string(Pawn.Health) $ " zeds_behind=" $ string(RetreatZedsInCone(-DropDir, 600.0)));
+    JumpDest.X = EdgePoint.X + DropDir.X * 150.0;
+    JumpDest.Y = EdgePoint.Y + DropDir.Y * 150.0;
+    JumpDest.Z = EdgePoint.Z;
+    MoveToX(JumpDest, RetreatTarget, false, 'RetreatDrop');
+    return true;
+}
+
 // ---------------------------------------------------------------- retreat that shoots (C2)
 // Escape direction: 8 headings scored by zeds in a 45 degree cone, walkable tiles (lava grid) and dead ends;
 // the fire timer shoots the zed blocking the way (never a headless one or a calm Fleshpound during its window).
@@ -1134,6 +1345,7 @@ function RetreatFireTick()
     }
 
     RetreatHeavyCheck();
+    RetreatDropCheck();
 
     EscapeDir = RetreatDir;
     if (VSizeSq(EscapeDir) < 0.25)
@@ -1176,8 +1388,16 @@ function PickRetreatMove()
         return;
     }
 
+    if (bRetreatDropping)
+    {
+        return;
+    }
     Dir = RetreatPickDir(Score, Zeds);
     RetreatDir = Dir;
+    if (RetreatTryDrop(Score))
+    {
+        return;
+    }
 
     if (RetreatStartTime == 0.0)
     {
