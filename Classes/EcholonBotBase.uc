@@ -5076,7 +5076,7 @@ function LtHumanBoundLoop()
         ltAnchor = Pawn.Location;
     }
 
-    if (mut.bObjectiveActive)
+    if (mut.HasHoldGoals())
     {
         objLoc = mut.GetObjectiveLocation();
     }

@@ -143,13 +143,14 @@ state PickNextMove
         }
 
         // Priority 5: SYG Enforcement (also the mutator's hunt order when few zeds are left, see UpdateHuntOrders)
-        if (!mut.bObjectiveActive && ObjectiveGoal != None && !mut.bHuntOrderActive)
+        if (!mut.HasHoldGoals() && ObjectiveGoal != None && !mut.bHuntOrderActive)
         {
             ObjectiveGoal = None;
         }
-        if (mut.bObjectiveActive || mut.bHuntOrderActive)
+        if (mut.HasHoldGoals() || mut.bHuntOrderActive)
         {
-            if (mut.bHuntOrderActive && !mut.bObjectiveActive)
+            // Hunt orders and zones hand out goals per squad: ask again at every pick. A real objective keeps the cached goal.
+            if ((mut.bHuntOrderActive || mut.bZoneActive) && !mut.bObjectiveActive)
             {
                 ObjectiveGoal = mut.GetBotObjective(self);
             }
@@ -752,7 +753,7 @@ state FightEnemy
             return;
         }
 
-        if (mut.bObjectiveActive)
+        if (mut.HasHoldGoals())
         {
             if (ObjectiveGoal == None)
             {

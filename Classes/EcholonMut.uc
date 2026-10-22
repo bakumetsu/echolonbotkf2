@@ -88,6 +88,8 @@ var int MaxEmoteCount;
 var float NextVictoryDance;
 var bool bNewWave;
 var bool bObjectiveActive;
+var bool bZoneActive;                         // a planner zone (not a map objective) owns the squad goals; never true together with bObjectiveActive
+var int ActiveZoneId;
 var float LastHoldTravelTime;
 var bool bHuntOrderActive;
 var float LastHuntOrderTime;
@@ -3053,6 +3055,12 @@ function int MoveSquadMembers(int FromIdx, int ToIdx)
     return Fireteams[ToIdx].Members.Length;
 }
 
+// True when squads have a hold goal: a real map objective or a planner zone.
+final function bool HasHoldGoals()
+{
+    return bObjectiveActive || bZoneActive;
+}
+
 final function NavigationPoint GetBotObjective(EcholonBot B)
 {
     local int GroupIdx, i;
@@ -3063,7 +3071,8 @@ final function NavigationPoint GetBotObjective(EcholonBot B)
     if (!bObjectiveActive)
     {
         // Hunt order (no map objective): the squad's goal is the node nearest the leftover zed.
-        if (!bHuntOrderActive || B == None)
+        // Planner zone: the squad's goal is its role spot (set by the planner in SquadOrders).
+        if ((!bHuntOrderActive && !bZoneActive) || B == None)
         {
             return None;
         }

@@ -773,7 +773,7 @@ function bool FollowCheckExit()
     }
 
     if (mut != None
-        && mut.bObjectiveActive
+        && mut.HasHoldGoals()
         && ObjectiveGoal != None)
     {
         IterDistSq = VSizeSq(ObjectiveGoal.Location - Pawn.Location);
