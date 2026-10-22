@@ -3402,7 +3402,7 @@ function bool RelocateSpotOk(vector Spot, Pawn P)
         return false;
     }
 
-    if (Trace(HitLoc, HitNorm, Spot - vect(0,0,96), Spot + vect(0,0,32), false) == None)
+    if (Trace(HitLoc, HitNorm, Spot - vect(0,0,160), Spot + vect(0,0,32), false) == None)
     {
         EchelonLog("SPAWN_SPOT_REJECT reason=floor");
         return false;
