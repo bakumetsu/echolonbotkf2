@@ -119,6 +119,12 @@ var transient array<string> AvailableBotNames;
 var transient array<Class<KFPerk> > PerkPool;
 var transient array<int> PerkPoolCounts;
 var float LastAuditLogTime;
+// Playtest mode (?Playtest=1 on the map URL): the human leaves play and watches the bots.
+// Spike for the automated playtest runner; see the playtest plan.
+var transient bool bPlaytest;
+var transient bool bPlaytestSpectating;
+var transient float PlaytestNextCamTime;
+var transient float PlaytestNextReportTime;
 
 function EchelonLog(string Msg)
 {
@@ -248,6 +254,132 @@ function MatchStarting()
     }
     SetTimer(0.1, true, 'CheckWave');
     InstallVoteCollector();
+}
+
+function InitMutator(string Options, out string ErrorMessage)
+{
+    super.InitMutator(Options, ErrorMessage);
+
+    bPlaytest = class'GameInfo'.static.ParseOption(Options, "Playtest") ~= "1";
+    if (bPlaytest)
+    {
+        EchelonLog("PLAYTEST_START map=" $ WorldInfo.GetMapName(true) $ " bots=" $ string(NumBots));
+        SetTimer(1.0, true, 'PlaytestTick');
+    }
+}
+
+final function KFPlayerController GetPlaytestHuman()
+{
+    local KFPlayerController PC;
+
+    foreach WorldInfo.AllControllers(class'KFPlayerController', PC)
+    {
+        if (PC.IsLocalPlayerController())
+            return PC;
+    }
+    return None;
+}
+
+// Takes the human out of play: no pawn, spectator flags set, spectating state.
+// Runs again if the game hands the human a new pawn (e.g. a respawn at trader time).
+final function PlaytestMakeSpectator(KFPlayerController PC)
+{
+    local Pawn P;
+    local int LivingBefore;
+
+    LivingBefore = KF.GetLivingPlayerCount();
+    P = PC.Pawn;
+    if (P != None)
+    {
+        PC.UnPossess();
+        P.Destroy();
+    }
+
+    PC.PlayerReplicationInfo.bOnlySpectator = true;
+    PC.PlayerReplicationInfo.bIsSpectator = true;
+    PC.PlayerReplicationInfo.bOutOfLives = true;
+    PC.GotoState('Spectating');
+    KF.ForceLivingPlayerCount(byte(KF.NumBots));
+
+    EchelonLog("PLAYTEST_SPECTATE again=" $ string(bPlaytestSpectating) $ " living_before=" $ string(LivingBefore)
+        $ " living_after=" $ string(KF.GetLivingPlayerCount()) $ " wave=" $ string(KF.MyKFGRI.WaveNum));
+    bPlaytestSpectating = true;
+    PlaytestNextCamTime = 0.0;
+}
+
+// Points the human's camera at the next living bot, in third person.
+// Stock SpectateNextPlayer skips bots: KFGameInfo.CanSpectate only accepts PlayerController owners.
+final function PlaytestNextCamera(KFPlayerController PC)
+{
+    local int I, Start, Count;
+    local EcholonBot B;
+
+    Count = ActiveBots.Length;
+    if (Count == 0)
+        return;
+
+    Start = 0;
+    for (I = 0; I < Count; I++)
+    {
+        if (ActiveBots[I] != None && ActiveBots[I].Pawn == PC.ViewTarget)
+        {
+            Start = I + 1;
+            break;
+        }
+    }
+
+    for (I = 0; I < Count; I++)
+    {
+        B = ActiveBots[(Start + I) % Count];
+        if (B != None && B.Pawn != None && B.Pawn.IsAliveAndWell())
+        {
+            PC.SetViewTarget(B.Pawn);
+            PC.SetCameraMode('ThirdPerson');
+            EchelonLog("PLAYTEST_CAMERA target=" $ B.LogTag());
+            return;
+        }
+    }
+}
+
+function PlaytestTick()
+{
+    local KFPlayerController PC;
+    local Pawn ViewPawn;
+    local EcholonBot B;
+    local int BotsAlive;
+
+    if (KF == None || KF.MyKFGRI == None || !KF.MyKFGRI.bMatchHasBegun)
+        return;
+
+    PC = GetPlaytestHuman();
+    if (PC == None)
+        return;
+
+    if (PC.Pawn != None)
+    {
+        PlaytestMakeSpectator(PC);
+    }
+
+    ViewPawn = Pawn(PC.ViewTarget);
+    if (WorldInfo.TimeSeconds >= PlaytestNextCamTime || ViewPawn == None || !ViewPawn.IsAliveAndWell())
+    {
+        PlaytestNextCamera(PC);
+        PlaytestNextCamTime = WorldInfo.TimeSeconds + 30.0;
+    }
+
+    if (WorldInfo.TimeSeconds >= PlaytestNextReportTime)
+    {
+        PlaytestNextReportTime = WorldInfo.TimeSeconds + 10.0;
+        foreach WorldInfo.AllControllers(class'EcholonBot', B)
+        {
+            if (B.Pawn != None && B.Pawn.IsAliveAndWell())
+                BotsAlive++;
+        }
+        EchelonLog("PLAYTEST_HEARTBEAT wave=" $ string(KF.MyKFGRI.WaveNum) $ " trader=" $ string(KF.MyKFGRI.bTraderIsOpen)
+            $ " over=" $ string(KF.MyKFGRI.bMatchIsOver) $ " state=" $ string(KF.GetStateName())
+            $ " living=" $ string(KF.GetLivingPlayerCount()) $ " bots_alive=" $ string(BotsAlive)
+            $ " zeds_left=" $ string(KF.AIAliveCount) $ " human_state=" $ string(PC.GetStateName()));
+    }
 }
 
 // Swap the skip-trader vote for one that only counts humans (see bBotsCountInSkipTraderVote).
