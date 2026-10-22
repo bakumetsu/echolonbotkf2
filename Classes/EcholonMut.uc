@@ -41,6 +41,17 @@ var transient array<EcholonWeaponInfo> TraderList;
 var transient EcholonNavMeter NavMeter;       // nav cost counter, shared by all bots (N6)
 var transient EcholonNavBudget NavBudget;     // per-frame nav budget, shared by all bots (N7)
 var transient EcholonNavScan NavScan;         // start-of-match link scan state and bad links (N8)
+var transient EcholonZonePlanner ZonePlanner;  // zone list builder, logging only (Hold and Relocate zones, step 2)
+var transient bool bZoneStarted;
+var() config int ZoneConfigVer;               // 0 = zone settings never written; 1 = defaults written once (separate from ConfigVer, which resets everything)
+var() config bool bZonePlanner;               // build the zone list at match start (logging only for now)
+var() config int ZoneMinSpots;                // standing spots a zone needs to count as usable
+var() config float ZoneSpotSpacing;           // minimum distance between two picked spots
+var() config float ZonePodRadius;             // first radius tried around a trader pod
+var() config float ZonePodRadiusMax;          // largest radius tried around a trader pod
+var() config float ZonePodStep;               // radius growth per try
+var() config float ZoneSpawnClear;            // a zone with a zed spawn volume this close is not usable
+var() config float ZoneMergeDist;             // a pod this close to a Dosh Hold zone merges into it
 var transient EcholonNavGrid NavGrid;         // shared floor-is-lava tile table (N10)
 var() config int NavGridSquads;               // 0 = lava grid for every squad, N = only squad N (1 = first), -1 = off
 var() config bool bNavGridDebug;              // log an ASCII map of the grid around squad 1's leader every 20 s
@@ -250,6 +261,41 @@ function PostBeginPlay()
     NavMeter = new class'EcholonBot.EcholonNavMeter';
     NavBudget = new class'EcholonBot.EcholonNavBudget';
     NavScan = new class'EcholonBot.EcholonNavScan';
+    // Config vars cannot be given defaults in defaultproperties and ConfigVer must not be bumped (it resets
+    // every setting). ZoneConfigVer is a separate stamp: the first time it is below 1, the zone settings get
+    // their defaults and are saved once. Nothing else in the ini is touched.
+    if (ZoneConfigVer < 1)
+    {
+        bZonePlanner = true;
+        ZoneMinSpots = 6;
+        ZoneSpotSpacing = 200.0;
+        ZonePodRadius = 800.0;
+        ZonePodRadiusMax = 1400.0;
+        ZonePodStep = 200.0;
+        ZoneSpawnClear = 300.0;
+        ZoneMergeDist = 800.0;
+        ZoneConfigVer = 1;
+        SaveConfig();
+    }
+    // A zone value cleared by hand reads 0: use the built-in default.
+    if (ZoneMinSpots <= 0)
+        ZoneMinSpots = 6;
+    if (ZoneSpotSpacing <= 0.0)
+        ZoneSpotSpacing = 200.0;
+    if (ZonePodRadius <= 0.0)
+        ZonePodRadius = 800.0;
+    if (ZonePodRadiusMax <= 0.0)
+        ZonePodRadiusMax = 1400.0;
+    if (ZonePodStep <= 0.0)
+        ZonePodStep = 200.0;
+    if (ZoneSpawnClear <= 0.0)
+        ZoneSpawnClear = 300.0;
+    if (ZoneMergeDist <= 0.0)
+        ZoneMergeDist = 800.0;
+    if (bZonePlanner)
+    {
+        ZonePlanner = new class'EcholonBot.EcholonZonePlanner';
+    }
     NavGrid = new class'EcholonBot.EcholonNavGrid';
     NavGrid.Clear();
     if (bNavGridDebug)
@@ -562,6 +608,26 @@ event Tick(float DeltaTime)
     {
         NavScanStep();
     }
+    else if (ZonePlanner != None && NavScan != None && NavScan.bDone)
+    {
+        ZoneStep();
+    }
+}
+
+// Zone list (logging only): starts once the link scan is done, then steps one unit of work per frame.
+function ZoneStep()
+{
+    if (ZonePlanner.bDone)
+    {
+        return;
+    }
+    if (!bZoneStarted)
+    {
+        bZoneStarted = true;
+        ZonePlanner.Begin(self, WorldInfo.TimeSeconds);
+        return;
+    }
+    ZonePlanner.Step(WorldInfo.TimeSeconds);
 }
 
 function AddMutator(Mutator M)
