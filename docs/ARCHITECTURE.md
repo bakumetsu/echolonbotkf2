@@ -82,6 +82,7 @@ Single-writer rules: only the mutator changes ranks, fireteams, squad orders and
 | Heal action itself (animation, range, ammo cost) | `EcholonBot` states `HealingSelf`, `HealOther`, `HealRanged` | |
 | Grab escape | `EcholonBot` state `BreakLose`, `EcholonBotBase.TryBreakFree`, `ForceBreakGrapple` | |
 | New squad behaviour | rank loop in `EcholonBotBase` (`SLDecisionLoop`), data in `EcholonMut` | Check the main caveat in the Base section first |
+| Bot scoreboard pictures | `EcholonMut.AvatarRequest`, `AvatarDownloadDone`, `AvatarSetEntry` | Needs the local avatar server; `bBotAvatars` and `AvatarServerPort` in config |
 | Chat lines, chat timing | `EcholonChat` config (`KFEcholonChat.ini`) | |
 
 ### Debugging hints
@@ -89,6 +90,7 @@ Single-writer rules: only the mutator changes ranks, fireteams, squad orders and
 - Every bot log line goes through `EchelonLog` and reads `[EcholonAudit] EcholonBot_3(Widow) KEY name=value ...`. The tag comes from `LogTag()` in `EcholonFollowNavBase`: `EcholonBot_N` plus the in-game name without the `[rank]` tag, spaces as `_`. The mutator's lines start with `[EcholonAudit] [Mut]`. Look them up in the `KFGame/Logs` log file.
 - Naming convention for new logs: call `EchelonLog("<SYSTEM>_<EVENT> name=value ...")`. The key is uppercase and its prefix names the system (`NAV_`, `HUB_`, `TETHER_`, `REGROUP_`). Do not repeat the bot name in the message. `kit/tools/log_reader.py` reads the source, so new keys need no update there. The `TRADER_ROAM*` lines are the exception: they use a plain `log` with `LogTag()`.
 - Follow-locomotion lines are `NAV_*` keys: `NAV_STUCK` (with `node=`) and the per-tick movement lines `NAV_ACCEL_NODE`, `NAV_ACCEL_LEADER`, `NAV_ACCEL_ESCAPE`, `NAV_ACCEL_YIELD`. Entering the hub logs `HUB_ENTER from=<state>`; a spawn fix logs `SPAWN_NUDGE status=nudging|settling`.
+- A bot shows the KF2 logo instead of a picture: check the avatar server is running and read the `AVATAR_FAIL` lines (`kit\tools\log_reader.py --sample AVATAR_FAIL`).
 - Audit lines are rate-limited (see `AuditRateLimit`), so a missing line does not prove nothing happened.
 - Before assuming a function runs, search for its callers: several functions on main have no caller (listed in the sections as "no caller on main").
 - Some code carries `// @STUB(Mx)` comments left over from the build kit. They do not mean the code is missing.
@@ -185,7 +187,7 @@ The mutator and the only "hub" in the mod. It spawns the bots, organises them in
 
 ### Config (saved in the ini, versioned by `CUR_CONFIGVER = 3`)
 
-`PostBeginPlay` rewrites every config field to defaults and calls `SaveConfig` whenever the saved `ConfigVer` differs from 3. Defaults: `NumBots` 7, `BotMaxPerkLv` 25 (min stays whatever the ini holds), `BotsDamageScale` 1.0, `ZedCountScaling` 0.2, `bNoZerkerBots` true, custom names on (8 names: Alex, Reaper, Ghost, Widow, Havoc, Ranger, Blaze, Cipher), `bShowBotLevel` false, `bShowBotRole` true, `MaxBotsPerPerk` 2, `AllowedPerks` = every perk in `KFPlayerController.PerkList`, `MaxZedsForFailsafe` 3, `FailsafeActivationDelay` 3.0, heal settings `HealCylinderRadius` 400, `HealCylinderHeight` 300, `HealMinHealthPct` 60, `bEnableFastTraceHealing` true. `MinimumBots`, `bBotsUnlimitedAmmo`, `bBotsUnlimitedCash` and `bDebugGrapple` are not reset by this block (they default to zero/false).
+`PostBeginPlay` rewrites every config field to defaults and calls `SaveConfig` whenever the saved `ConfigVer` differs from 3. Defaults: `NumBots` 7, `BotMaxPerkLv` 25 (min stays whatever the ini holds), `BotsDamageScale` 1.0, `ZedCountScaling` 0.2, `bNoZerkerBots` true, custom names on (8 names: Alex, Reaper, Ghost, Widow, Havoc, Ranger, Blaze, Cipher), `bShowBotLevel` false, `bShowBotRole` true, `MaxBotsPerPerk` 2, `AllowedPerks` = every perk in `KFPlayerController.PerkList`, `MaxZedsForFailsafe` 3, `FailsafeActivationDelay` 3.0, heal settings `HealCylinderRadius` 400, `HealCylinderHeight` 300, `HealMinHealthPct` 60, `bEnableFastTraceHealing` true. `MinimumBots`, `bBotsUnlimitedAmmo`, `bBotsUnlimitedCash` and `bDebugGrapple` are not reset by this block (they default to zero/false). The same holds for `bBotAvatars` (off) and `AvatarServerPort` (0 means 8765).
 
 ### Constants
 
@@ -195,6 +197,7 @@ Squads: `MIN_GROUPS` 2, `MAX_GROUPS` 4, `BOTS_PER_GROUP_TARGET` 3, `VIP_ESCORT_M
 
 - `Fireteams[]` (`FireteamData`: `Members`, `Leader`, `Anchor`) and `SquadOrders[]` (`SquadOrder`: leader, hold zone, goal point and nav node, slot list and slot locations, phase, start time, objective-bail stamp, per-bot node blacklist, seed angle). Index `i` is group id `i+1`.
 - `ActiveBots`, `VIPController`/`AlphaCommander`, `CachedHumans` (position/velocity of living human pawns), `TraderList` (`EcholonWeaponInfo`), `PendingPromotions`, ranged-heal cooldown arrays, perk pool arrays, name pool.
+- Avatars (transient): `AvatarMatchId`, and the parallel arrays `AvatarDL[]` (`KFHTTPImageDownloader`), `AvatarPRI[]`, `AvatarApplied[]`, one slot per requested bot picture.
 
 ### Timers
 
@@ -212,6 +215,7 @@ Squads: `MIN_GROUPS` 2, `MAX_GROUPS` 4, `BOTS_PER_GROUP_TARGET` 3, `VIP_ESCORT_M
 - `PostBeginPlay`: registers itself in the mutator chain, caches `KFGameInfo_Survival`, applies config defaults, spawns the `EcholonChat` actor once (`bChatterInit`), starts the two timers. `AddMutator` destroys a second mutator of the same class.
 - `MatchStarting`: in a standalone game, spawns `NumBots` bots straight away; otherwise starts the 1 s population timer. Starts `CheckWave`.
 - `AddBot`: finds a player start, spawns an `EcholonBot` there, picks its perk (`PickBotPerk`), sets the PRI perk class and id, runs `GenericPlayerInitialization` and `RestartBot`, gives starting cash, and updates the game's living player count. A bot registers itself with `RegisterBot` from the bot base class, not from here.
+- Bot avatars (`bBotAvatars`, standalone only, off by default): `MatchStarting` rolls `AvatarMatchId` and logs `AVATAR_ON`. `AddBot` calls `AvatarRequest(PRI)` after the PRI id is set. It gives the bot a fake `UniqueId` (`Uid.A` 0, `Uid.B` `0x0EC00000` + `PlayerID`), then starts a `KFHTTPImageDownloader` for `http://127.0.0.1:<AvatarPort()>/avatar/<match>/<PlayerID>.png` (`AVATAR_REQUEST`). The server is `kit/tools/avatar_server.py`, started by `kit\Start-AvatarServer.bat` (local kit, not in this repo). It crops images from `Documents\My Games\KillingFloor2\KFGame\BotAvatars` to 128x128 and shuffles them per match; when it runs out it returns 404 and the bot keeps the KF2 logo. `AvatarDownloadDone` (the delegate does not say which downloader finished, so it checks all pending ones) calls `AvatarSetEntry`, which writes the texture into the local `KFPlayerController.AvatarList` that the scoreboard reads (`AVATAR_SET`, or `AVATAR_FAIL`).
 - `RestartBot`: a hand-written copy of the game's restart sequence: pick start spot, spawn pawn, possess, default inventory, `SetPlayerDefaults`, fire `SeqEvent_PlayerSpawned` kismet events, `SetTeam`, then re-apply the bot's chosen character archetype (it must come after `SetTeam`, which resets it), then set PRI health and at least the respawn cash.
 - `RemoveBot`: destroys the lowest scoring bot (random + a quarter of its dosh, minus 500 if dead, plus current health if alive).
 - `RegisterBot`/`UnregisterBot`: maintain `ActiveBots`; register sets `bot.mut` and the watchdog contact stamp; unregister also calls `HandleFireteamCasualty`.
@@ -220,7 +224,7 @@ Squads: `MIN_GROUPS` 2, `MAX_GROUPS` 4, `BOTS_PER_GROUP_TARGET` 3, `VIP_ESCORT_M
 - `InitTraderList(L)`: builds an `EcholonWeaponInfo` per trader item; `FindWeaponByClass` looks one up. The bot base calls `InitTraderList` the first time it needs the list.
 - `RespawnBots`: at trader time, sets every bot's shopping time to now, respawns dead bots, gives living ones +500 dosh.
 - `NetDamage` (mutator hook): damage to a bot from a teammate becomes 0 with momentum x0.25; any other damage to a bot is multiplied by `BotsDamageScale`.
-- `Mutate` console commands: `AI` (debug line for nearest bot, anyone), and for standalone games or admins: `Help`, `SetNumBots`, `SetMinBots`, `SetBotMinLv`, `SetBotMaxLv`, `SetScaleZedCount`, `SetNoZerker`, `SetBotsInfAmmo`, `SetBotInfDosh`, `SetUseCustomNames`, `SetBotsLevel`, `SetBotRole`, `SetBotDamageScale`, `SetBotChat`, `BotTalk`. Each saves the config and replies to the sender.
+- `Mutate` console commands: `AI` (debug line for nearest bot, anyone), and for standalone games or admins: `Help`, `SetNumBots`, `SetMinBots`, `SetBotMinLv`, `SetBotMaxLv`, `SetScaleZedCount`, `SetNoZerker`, `SetBotsInfAmmo`, `SetBotInfDosh`, `SetUseCustomNames`, `SetBotsLevel`, `SetBotRole`, `SetBotAvatars`, `SetBotDamageScale`, `SetBotChat`, `BotTalk`. Each saves the config and replies to the sender.
 - `PickRandEmote`/`ShouldDoVictoryDance` (5 s global gap between dances) serve the bots' emote code.
 
 ### Fireteams and ranks
