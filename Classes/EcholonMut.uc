@@ -641,12 +641,14 @@ function InitMutator(string Options, out string ErrorMessage)
         EchelonLog("SHOP_REMOTE_MODE on=1 source=" $ (class'GameInfo'.static.HasOption(Options, "RemoteShop") ? "url" : "config"));
     }
 
+    // Our controller makes the spectator keys work on bots (click, middle click, Space, wheel) when the human is dead,
+    // in normal play as well as in playtest mode. Everything it overrides sits in state Spectating (see EcholonSpectatorPC).
+    WorldInfo.Game.PlayerControllerClass = class'EcholonSpectatorPC';
+    PlaytestCamMode = 'ThirdPerson';
+
     bPlaytest = class'GameInfo'.static.ParseOption(Options, "Playtest") ~= "1";
     if (bPlaytest)
     {
-        // Our controller makes left/right click and the camera-mode key work on bots (see EcholonSpectatorPC).
-        WorldInfo.Game.PlayerControllerClass = class'EcholonSpectatorPC';
-        PlaytestCamMode = 'ThirdPerson';
         bPlaytestSkipTrader = class'GameInfo'.static.ParseOption(Options, "SkipTrader") ~= "1";
         PlaytestWaves = class'GameInfo'.static.GetIntOption(Options, "PlaytestWaves", 0);
         PlaytestBotsOverride = class'GameInfo'.static.GetIntOption(Options, "PlaytestBots", 0);
@@ -694,8 +696,6 @@ final function PlaytestMakeSpectator(KFPlayerController PC)
     EchelonLog("PLAYTEST_SPECTATE again=" $ string(bPlaytestSpectating) $ " living_before=" $ string(LivingBefore)
         $ " living_after=" $ string(KF.GetLivingPlayerCount()) $ " wave=" $ string(KF.MyKFGRI.WaveNum));
     bPlaytestSpectating = true;
-    if (EcholonSpectatorPC(PC) != None)
-        EcholonSpectatorPC(PC).SetWheelBinds();
 }
 
 // Camera style for a watched bot: the orbit mode uses the stock 'FreeCam' style (the camera sits behind the
