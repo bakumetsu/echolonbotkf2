@@ -68,7 +68,7 @@ const OW_STUCK_MIN_DIST_SQ = 10000.0;
 const OW_STUCK_MOVE_SQ = 900.0;
 const SW_ARRIVE_SQ = 22500.0;
 const SW_SCAN_AMP_DEG = 15.0;
-const SW_SCAN_OMEGA = 1.5707963;
+const SW_SCAN_OMEGA = 0.7853982;
 const SW_TWO_PI = 6.2831853;
 const SW_DEG_TO_URU = 182.0444;
 const CQB_BASH_SQ = 14400.0;
@@ -276,6 +276,16 @@ var transient bool bShotProbeClear;
 var transient rotator AimRot;
 var transient float LastAimTime;
 var transient float AimReadyTime;
+var float LookSweepUntil;    // idle sweep stays active until this game time (LookModeSweep refreshes)
+var int LookBaseYaw;         // centre yaw of the idle sweep
+var int LookCurYaw;          // yaw the bot currently looks at (smoothed)
+var name LookMode;           // last logged mode: 'ahead', 'sweep', 'combat' or 'off'
+var float LookModeLogTime;   // throttle for LOOK_MODE logs (1 s)
+var float LookTurnRate;      // max look turn rate outside combat, rot units/s (default 32768.0)
+var float LookSweepAmp;      // sweep amplitude in degrees (default 20.0)
+var float LookSweepPeriod;   // seconds per full sweep cycle (default 5.0)
+var float LookAheadDist;     // how far ahead to look while walking (default 150.0)
+var rotator LookDefaultRate; // Pawn.RotationRate captured on first UpdateLook call
 var float HeadlessAvoidUntil;      // movers blend HeadlessAvoidDir in until this game time
 var vector HeadlessAvoidDir;       // unit horizontal direction away from the headless zed
 var bool bHeadlessStep;            // true while this function drives Pawn.Acceleration itself
@@ -1077,7 +1087,7 @@ simulated function GetPlayerViewPoint(out Vector out_Location, out Rotator out_R
     }
 }
 
-final function MoveToX(Vector Dest, optional Actor ViewFocus, optional bool bSerpent = true, optional name Src)
+final function MoveToX(Vector Dest, optional Actor ViewFocus, optional bool bSerpent = false, optional name Src)
 {
     if (IsInState('FightEnemy') && VSize2D(Dest - Pawn.Location) < ZeroMoveMinDist)
     {
@@ -1099,7 +1109,7 @@ final function MoveToX(Vector Dest, optional Actor ViewFocus, optional bool bSer
     }
 }
 
-final function MoveTowardX(Actor Dest, optional Actor ViewFocus, optional bool bSerpent = true, optional name Src)
+final function MoveTowardX(Actor Dest, optional Actor ViewFocus, optional bool bSerpent = false, optional name Src)
 {
     if (IsInState('FightEnemy') && Dest != None && Pawn.ReachedDestination(Dest))
     {
@@ -1293,6 +1303,7 @@ function Tick(float Delta)
     }
 
     FollowSampleCrumb();
+    UpdateLook(Delta);
 
     // Follow-combat escape: route to combat when a Zed has LOS while tethered
     if (IsInState('FollowingLeader') || IsInState('FollowingLeaderBasic'))
@@ -2485,7 +2496,7 @@ final function bool CheckObjectiveHazard()
 
     // Zeds are near but nothing is targetable yet -- hold this call.
     Focus = None;
-    SetFocalPoint(Pawn.Location + (VRand() * 300.0));
+    LookModeSweep();
     return true;
 }
 
@@ -3910,6 +3921,184 @@ final function bool IsTraderFreeTime()
 	return (KFGRI != None && KFGRI.bTraderIsOpen && KFGRI.GetTraderTimeRemaining() > TRADER_REFORM_REMAINING);
 }
 
+// ---------------------------------------------------------------- one owner of the view outside combat (C4)
+// Walking: look 150 uu ahead along the move direction; idle: a slow level sweep of +-20 degrees (5 s per sweep);
+// turn rate capped at 180 degrees/s outside combat. In combat the enemy decides as before.
+// Called by idle code in place of a random look; maintains the idle sweep window.
+function LookModeSweep()
+{
+    local float Now;
+
+    if (Pawn == None)
+    {
+        return;
+    }
+    Now = WorldInfo.TimeSeconds;
+    if (Now >= (LookSweepUntil - 2.0))
+    {
+        if (SquadLeader != None && SquadLeader.Pawn != None)
+        {
+            LookBaseYaw = LastValidSquadLeaderYaw;
+        }
+        else
+        {
+            LookBaseYaw = Pawn.Rotation.Yaw;
+        }
+    }
+    LookSweepUntil = Now + 3.0;
+}
+
+// Returns true when the bot is in a combat state or has a live enemy target.
+function bool LookInCombat()
+{
+    if (Enemy != None && Enemy.IsAliveAndWell())
+    {
+        return true;
+    }
+    if (IsInState('FightEnemy'))
+    {
+        return true;
+    }
+    if (IsInState('TacticalRetreat'))
+    {
+        return true;
+    }
+    if (IsInState('BreakLose'))
+    {
+        return true;
+    }
+    if (IsInState('Hunting'))
+    {
+        return true;
+    }
+    if (IsInState('HealRanged'))
+    {
+        return true;
+    }
+    return false;
+}
+
+// Updates the active look mode and logs the transition when the 1 s throttle elapses.
+function LookSetMode(name NewMode)
+{
+    local float Now;
+
+    if (NewMode == LookMode)
+    {
+        return;
+    }
+    LookMode = NewMode;
+    Now = WorldInfo.TimeSeconds;
+    if (Now - LookModeLogTime >= 1.0)
+    {
+        LookModeLogTime = Now;
+        EchelonLog("LOOK_MODE mode=" $ string(NewMode));
+    }
+}
+
+// Returns the yaw (0..65535) of the horizontal movement direction, or -1 if stationary.
+function int LookMoveYaw()
+{
+    local vector HV;
+    local rotator R;
+
+    if (Pawn == None)
+    {
+        return -1;
+    }
+    HV.X = Pawn.Velocity.X;
+    HV.Y = Pawn.Velocity.Y;
+    HV.Z = 0;
+    if (VSize(HV) > 60.0)
+    {
+        R = Rotator(HV);
+        return R.Yaw;
+    }
+    HV.X = Pawn.Acceleration.X;
+    HV.Y = Pawn.Acceleration.Y;
+    HV.Z = 0;
+    if (VSize(HV) > 1.0)
+    {
+        R = Rotator(HV);
+        return R.Yaw;
+    }
+    return -1;
+}
+
+// Per-tick owner of the bot view direction outside combat; smooths yaw and sets focal point.
+function UpdateLook(float DeltaTime)
+{
+    local int LookTarget;
+    local int Delta;
+    local int MaxStep;
+    local rotator R;
+    local int MoveYaw;
+
+    if (Pawn == None || Pawn.Health <= 0)
+    {
+        return;
+    }
+    if (LookDefaultRate.Yaw == 0)
+    {
+        LookDefaultRate = Pawn.RotationRate;
+        LookCurYaw = Pawn.Rotation.Yaw;
+    }
+    if (LookInCombat())
+    {
+        LookSetMode('combat');
+        Pawn.RotationRate = LookDefaultRate;
+        LookCurYaw = Pawn.Rotation.Yaw;
+        return;
+    }
+    Pawn.RotationRate = LookDefaultRate;
+    Pawn.RotationRate.Yaw = int(LookTurnRate);
+    if (Focus != None)
+    {
+        LookSetMode('off');
+        LookCurYaw = Pawn.Rotation.Yaw;
+        return;
+    }
+    MoveYaw = LookMoveYaw();
+    if ((MoveFlags != 0 || (IsInState('FollowingLeader') && bFollowMoveActive)) && MoveYaw >= 0)
+    {
+        LookTarget = MoveYaw;
+        LookSetMode('ahead');
+    }
+    else if (WorldInfo.TimeSeconds < LookSweepUntil)
+    {
+        LookTarget = LookBaseYaw + int(LookSweepAmp * Sin(WorldInfo.TimeSeconds * 6.2831853 / LookSweepPeriod) * 182.0444);
+        LookSetMode('sweep');
+    }
+    else
+    {
+        LookSetMode('off');
+        LookCurYaw = Pawn.Rotation.Yaw;
+        return;
+    }
+    Delta = ((LookTarget - LookCurYaw + 98304) & 65535) - 32768;
+    MaxStep = int(LookTurnRate * DeltaTime);
+    if (Delta > MaxStep)
+    {
+        Delta = MaxStep;
+    }
+    else if (Delta < -MaxStep)
+    {
+        Delta = -MaxStep;
+    }
+    LookCurYaw = (LookCurYaw + Delta) & 65535;
+    R.Pitch = 0;
+    R.Roll = 0;
+    R.Yaw = LookCurYaw;
+    if (LookMode == 'ahead')
+    {
+        SetFocalPoint(Pawn.Location + vector(R) * LookAheadDist);
+    }
+    else
+    {
+        SetFocalPoint(Pawn.Location + vector(R) * 1000.0);
+    }
+}
+
 // ---------------------------------------------------------------- keep 2 m from headless zeds (C3)
 // Steers away from a headless zed that is closing in (it still deals damage); called every 0.25 s by a timer.
 function HeadlessAvoidTick()
@@ -4366,12 +4555,12 @@ function UpdateSectorWatch()
     if (dt > 0.5)
         dt = 0.2;
 
-    SectorScanPhase += dt * SW_SCAN_OMEGA * PanicScanSpeedMultiplier;
+    SectorScanPhase += dt * SW_SCAN_OMEGA;
     if (SectorScanPhase > SW_TWO_PI)
         SectorScanPhase -= SW_TWO_PI;
 
     baseYaw = LastValidSquadLeaderYaw + (OverwatchSlot * 16384);
-    scanOffset = int(SW_SCAN_AMP_DEG * PanicScanSpeedMultiplier * Sin(SectorScanPhase + (float(OverwatchSlot) * 0.7853982)) * SW_DEG_TO_URU);
+    scanOffset = int(SW_SCAN_AMP_DEG * Sin(SectorScanPhase + (float(OverwatchSlot) * 0.7853982)) * SW_DEG_TO_URU);
 
     R.Pitch = 0;
     R.Roll = 0;
@@ -4622,11 +4811,6 @@ event HearNoise(float Loudness, Actor NoiseMaker, optional Name NoiseType)
     if (IsHostileZed(NoisePawn))
     {
         GruntOnSight(NoisePawn);
-    }
-    else
-    {
-        NoiseGlanceUntil = WorldInfo.TimeSeconds + 1.5;
-        SetFocalPoint(NoiseMaker.Location);
     }
 }
 
@@ -5136,6 +5320,10 @@ function UpdateHoldAreaDrift()
 
 defaultproperties
 {
+    LookTurnRate=32768.0
+    LookSweepAmp=20.0
+    LookSweepPeriod=5.0
+    LookAheadDist=150.0
     HeadlessAvoidDist=150.0
     HeadlessKeepDist=100.0
     RetreatMaxDist=750.0
