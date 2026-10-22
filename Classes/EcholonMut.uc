@@ -3371,14 +3371,7 @@ function RelocateBotsToAmmoCrates()
         Occupancy[Pick]++;
 
         AnchorPos = AmmoFactories[Pick].Location;
-        Spot = AnchorPos;
-        for (Tries = 0; Tries < 6; Tries++)
-        {
-            Spot = PickSquadSpawnPoint(AnchorPos, 60.0, 120.0);
-            if (FastTrace(Spot + vect(0, 0, 40), AnchorPos + vect(0, 0, 40)))
-                break;
-            Spot = AnchorPos;
-        }
+        Spot = PickRelocateSpot(AnchorPos, Bot.Pawn);
         Bot.Pawn.SetLocation(Spot);
         EchelonLog("SPAWN_SPREAD bot=" $ Bot.Name $ " crate=" $ string(Pick) $ " occupancy=" $ string(Occupancy[Pick]));
     }
@@ -3396,6 +3389,91 @@ function SpawnSquadAt(vector AnchorPos, int SquadIndex)
         GruntPos = PickSquadSpawnPoint(AnchorPos, 90.0, 150.0);
         SpawnBotWithRank(GRUNT, GruntPos);
     }
+}
+
+function bool RelocateSpotOk(vector Spot, Pawn P)
+{
+    local vector HitLoc, HitNorm, FloorLoc, Probe, Ext, FloorTop;
+    local float H, R;
+    local NavigationPoint N;
+
+    if (P == None)
+    {
+        return false;
+    }
+
+    if (Trace(HitLoc, HitNorm, Spot - vect(0,0,96), Spot + vect(0,0,32), false) == None)
+    {
+        EchelonLog("SPAWN_SPOT_REJECT reason=floor");
+        return false;
+    }
+    FloorLoc = HitLoc;
+
+    H = P.GetCollisionHeight();
+    R = P.GetCollisionRadius();
+    Probe = FloorLoc;
+    Probe.Z += H + 4.0;
+    Ext.X = R;
+    Ext.Y = R;
+    Ext.Z = H;
+    if (Trace(HitLoc, HitNorm, Probe + vect(0,0,2), Probe, true, Ext) != None)
+    {
+        EchelonLog("SPAWN_SPOT_REJECT reason=clearance");
+        return false;
+    }
+
+    FloorTop = FloorLoc + vect(0,0,32);
+    foreach WorldInfo.RadiusNavigationPoints(class'NavigationPoint', N, FloorLoc, 400.0)
+    {
+        if (FastTrace(N.Location, FloorTop) && Abs(N.Location.Z - FloorLoc.Z) <= 128.0)
+        {
+            return true;
+        }
+    }
+
+    EchelonLog("SPAWN_SPOT_REJECT reason=nav");
+    return false;
+}
+
+function vector PickRelocateSpot(vector AnchorPos, Pawn P)
+{
+    local int Tries;
+    local vector Spot;
+    local NavigationPoint N;
+    local PathNode BestNode;
+    local float BestDistSq;
+    local float DistSq;
+
+    for (Tries = 0; Tries < 8; Tries++)
+    {
+        Spot = PickSquadSpawnPoint(AnchorPos, 80.0, 160.0);
+        if (FastTrace(Spot + vect(0,0,40), AnchorPos + vect(0,0,40)) && RelocateSpotOk(Spot, P))
+        {
+            EchelonLog("SPAWN_SPOT result=ok tries=" $ string(Tries + 1));
+            return Spot;
+        }
+    }
+
+    BestNode = None;
+    BestDistSq = 999999999.0;
+    foreach WorldInfo.RadiusNavigationPoints(class'NavigationPoint', N, AnchorPos, 300.0)
+    {
+        if (PathNode(N) == None)
+            continue;
+        DistSq = VSizeSq(N.Location - AnchorPos);
+        if (DistSq < BestDistSq)
+        {
+            BestDistSq = DistSq;
+            BestNode = PathNode(N);
+        }
+    }
+
+    EchelonLog("SPAWN_SPOT result=fallback");
+    if (BestNode != None)
+        Spot = BestNode.Location;
+        Spot.Z += P.GetCollisionHeight();
+        return Spot;
+    return AnchorPos;
 }
 
 function vector PickSquadSpawnPoint(vector AnchorPos, float MinR, float MaxR)
