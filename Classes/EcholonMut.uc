@@ -2007,8 +2007,12 @@ function UpdateHuntOrders()
         if (bHuntOrderActive)
         {
             bHuntOrderActive = false;
-            for (i = 0; i < SquadOrders.Length; i++)
-                SquadOrders[i].GoalNav = None;
+            // A hold zone that started in the same tick owns the goals now.
+            if (!bObjectiveActive)
+            {
+                for (i = 0; i < SquadOrders.Length; i++)
+                    SquadOrders[i].GoalNav = None;
+            }
             EchelonLog("HUNT_ORDER_END");
         }
         return;
@@ -2055,6 +2059,7 @@ final function SetHoldObjective(Volume V)
     local NavigationPoint GP;
     local int i;
     local EcholonBot L;
+    local EcholonBot B;
 
     ValidPoints.Length = 0;
     foreach WorldInfo.AllNavigationPoints(Class'Engine.NavigationPoint', N)
@@ -2068,6 +2073,11 @@ final function SetHoldObjective(Volume V)
 
     if (bObjectiveActive)
     {
+        // Bots cache their goal node; drop it so they fetch the new squad goal (squads may have been reshuffled).
+        foreach WorldInfo.AllControllers(class'EcholonBot', B)
+        {
+            B.ObjectiveGoal = None;
+        }
         EnsureSquadOrderTable();
         for (i = 0; i < SquadOrders.Length; i++)
         {
