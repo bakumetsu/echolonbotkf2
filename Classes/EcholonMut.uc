@@ -77,6 +77,7 @@ var int MaxEmoteCount;
 var float NextVictoryDance;
 var bool bNewWave;
 var bool bObjectiveActive;
+var float LastHoldTravelTime;
 var bool bHuntOrderActive;
 var float LastHuntOrderTime;
 var transient bool bTraderListInit;
@@ -1080,6 +1081,12 @@ function InitializePlatoon()
     UpdateMacroWaypoints();
     if (!IsTimerActive('UpdateMacroWaypoints'))
         SetTimer(MACRO_WAYPOINT_INTERVAL, true, 'UpdateMacroWaypoints');
+
+    if (bObjectiveActive && HoldVolume != None)
+    {
+        EchelonLog("HOLD_REISSUE reason=PlatoonRebuilt squads=" $ string(Fireteams.Length));
+        SetHoldObjective(HoldVolume);
+    }
 }
 
 function SyncSquadLeaders()
@@ -2047,6 +2054,7 @@ final function SetHoldObjective(Volume V)
     local NavigationPoint N;
     local NavigationPoint GP;
     local int i;
+    local EcholonBot L;
 
     ValidPoints.Length = 0;
     foreach WorldInfo.AllNavigationPoints(Class'Engine.NavigationPoint', N)
@@ -2067,18 +2075,31 @@ final function SetHoldObjective(Volume V)
             SquadOrders[i].SquadID = i + 1;
             SquadOrders[i].NodeBlacklist.Length = 0;
             SquadOrders[i].ObjectiveBailUntil = 0.0;
-            if (SquadOrders[i].Leader != None && SquadOrders[i].Leader.Pawn != None)
+            if (i < Fireteams.Length)
             {
-                GP = NearestValidPoint(SquadOrders[i].Leader.Pawn.Location);
-                if (GP != None)
+                L = Fireteams[i].Leader;
+                if (L != None && L.Pawn != None && L.Pawn.IsAliveAndWell())
                 {
-                    SquadOrders[i].GoalNav = GP;
-                    SquadOrders[i].GoalPoint = GP.Location;
-                    SquadOrders[i].Phase = PHASE_ENROUTE;
-                    SquadOrders[i].StartTime = WorldInfo.TimeSeconds;
-                    SquadOrders[i].SquadSeedAngle = FRand() * 6.2831855;
-                    EchelonLog("ORDER_CREATED squad=" $ string(i + 1) $ " goal=" $ CoordStr(SquadOrders[i].GoalPoint));
-                    SampleSquadSlots(i);
+                    SquadOrders[i].Leader = L;
+                    GP = NearestValidPoint(L.Pawn.Location);
+                    if (GP != None)
+                    {
+                        SquadOrders[i].GoalNav = GP;
+                        SquadOrders[i].GoalPoint = GP.Location;
+                        SquadOrders[i].Phase = PHASE_ENROUTE;
+                        SquadOrders[i].StartTime = WorldInfo.TimeSeconds;
+                        SquadOrders[i].SquadSeedAngle = FRand() * 6.2831855;
+                        EchelonLog("ORDER_CREATED squad=" $ string(i + 1) $ " goal=" $ CoordStr(SquadOrders[i].GoalPoint));
+                        SampleSquadSlots(i);
+                    }
+                }
+                else
+                {
+                    SquadOrders[i].Leader = None;
+                    SquadOrders[i].GoalNav = None;
+                    SquadOrders[i].GoalPoint = vect(0, 0, 0);
+                    SquadOrders[i].Phase = PHASE_IDLE;
+                    EchelonLog("HOLD_SKIP squad=" $ string(i + 1) $ " reason=NoLeader");
                 }
             }
             else
@@ -2088,6 +2109,11 @@ final function SetHoldObjective(Volume V)
                 SquadOrders[i].Phase = PHASE_IDLE;
             }
         }
+        EchelonLog("HOLD_START squads=" $ string(SquadOrders.Length) $ " points=" $ string(ValidPoints.Length));
+    }
+    else
+    {
+        EchelonLog("HOLD_EMPTY volume=" $ string(V.Name));
     }
 }
 
@@ -2101,6 +2127,7 @@ final function EndObjective()
 
     for (i = 0; i < SquadOrders.Length; i++)
     {
+        EchelonLog("HOLD_END squad=" $ string(i + 1) $ " phase=" $ string(SquadOrders[i].Phase));
         ReleaseSquadSlots(i, "EndObjective");
         SquadOrders[i].Leader = None;
         SquadOrders[i].Zone = None;
@@ -2412,6 +2439,36 @@ function vector GetSlotLocation(EcholonBot B)
     return SquadOrders[GroupIdx].SlotLocs[SlotIdx];
 }
 
+function LogHoldTravel()
+{
+    local int i;
+    local int bIn;
+    local SquadOrder O;
+
+    if (WorldInfo.TimeSeconds - LastHoldTravelTime < 5.0)
+        return;
+
+    LastHoldTravelTime = WorldInfo.TimeSeconds;
+
+    for (i = 0; i < SquadOrders.Length && i < Fireteams.Length; i++)
+    {
+        O = SquadOrders[i];
+        if (O.Leader == None)
+            continue;
+        if (O.Leader.Pawn == None)
+            continue;
+        if (O.Phase != PHASE_ENROUTE && O.Phase != PHASE_HOLDING)
+            continue;
+
+        if (O.Zone != None && O.Zone.Encompasses(O.Leader.Pawn))
+            bIn = 1;
+        else
+            bIn = 0;
+
+        EchelonLog("HOLD_TRAVEL squad=" $ string(i + 1) $ " phase=" $ string(O.Phase) $ " dist=" $ string(int(VSize(O.Leader.Pawn.Location - O.GoalPoint))) $ " inside=" $ bIn);
+    }
+}
+
 function EvaluateSquadPhase()
 {
     local SquadOrder O;
@@ -2427,6 +2484,7 @@ function EvaluateSquadPhase()
     if (WorldInfo == None || !bObjectiveActive)
         return;
 
+    LogHoldTravel();
     GoalRadiusSq = 9216.0;
 
     for (i = 0; i < SquadOrders.Length; i++)
@@ -2475,11 +2533,13 @@ function EvaluateSquadPhase()
         {
             O.Phase = PHASE_HOLDING;
             SquadOrders[i] = O;
+            EchelonLog("HOLD_PHASE squad=" $ string(i + 1) $ " phase=HOLDING");
         }
         else if (O.Phase == PHASE_HOLDING && !LeaderInside)
         {
             O.Phase = PHASE_ENROUTE;
             SquadOrders[i] = O;
+            EchelonLog("HOLD_PHASE squad=" $ string(i + 1) $ " phase=ENROUTE");
         }
     }
 }
