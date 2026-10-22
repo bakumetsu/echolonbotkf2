@@ -5,7 +5,7 @@ A ground-up rewrite of the KF2Bots single-player bot mod for Killing Floor 2 (UE
 ## Layout
 
 ```
-Classes/              the mod's UnrealScript source (9 classes)
+Classes/              the mod's UnrealScript source (15 classes)
 avatars/              bot avatar server and the KF2-Avatars launcher source (see avatars/README.md)
 docs/ARCHITECTURE.md  class chain, milestone plan, every class's symbols, single-writer rules
 ```
@@ -21,6 +21,8 @@ The build follows the Steam guide [KF2 SDK: compiling a mod](https://steamcommun
 3. Run `KFEditor.exe make -useunpublished` from `killingfloor2\Binaries\Win64`.
 
 The compiled package lands in `KFGame\Unpublished\BrewedPC\Script\EcholonBot.u`, and settings go in `KFEcholonBot.ini`.
+
+Navigation settings in that file: `NavGridSquads` (default 0; 0 = the floor-is-lava grid steers every squad, N = only squad N, -1 = off) and `bNavGridDebug` (default false; logs an ASCII map of the grid). At match start the bots scan every path link and block bad ones; nav cost is counted and shared per frame, and the logs show it as `NAV_COST`, `NAV_SCAN` and `NAV_GRID_*` lines.
 
 ## Playtest mode
 
