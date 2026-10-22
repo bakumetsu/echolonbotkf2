@@ -104,6 +104,11 @@ const TRADER_ROAM_PICK_TRIES = 6;
 const TRADER_ROAM_ROUTE_SLACK = 1.6;
 const TRADER_ROAM_ROUTE_EXTRA = 500.0;
 const SHOT_PROBE_INTERVAL = 0.15;
+const AIM_INTERP_SPEED = 8.0;
+const AIM_FIRE_CONE_DOT = 0.985;
+const AIM_REACT_MIN = 0.08;
+const AIM_REACT_RANGE = 0.17;
+const AIM_RESET_GAP = 1.0;
 const GRAB_SURROUND_RADIUS = 600.0;
 const GRAB_SURROUND_COUNT = 3;
 const SPRINT_TICK_INTERVAL = 0.25;
@@ -211,6 +216,7 @@ var float AuditLastLog_GOAL;
 var float AuditLastLog_FOLLOWGATE;
 var float AuditLastLog_GEN;
 var float AuditLastLog_DWELLTOT;
+var float AuditLastLog_NAVACCEL;
 var bool bHasHoldPosition;
 var vector HoldPosition;
 var float LastTriageTime;
@@ -256,6 +262,11 @@ var transient float NextShotProbeTime;
 var transient Actor ShotProbeTarget;
 var transient name ShotProbeBone;
 var transient bool bShotProbeClear;
+var transient rotator AimRot;
+var transient float LastAimTime;
+var transient float AimReadyTime;
+var transient bool bAimInit;
+var transient Actor AimLastTarget;
 var transient bool bOffsetCached;
 var transient Vector CachedLocalOffset;
 var transient int CachedOffsetEpoch;
@@ -804,6 +815,14 @@ function bool FireWeaponAt(Actor inActor)
 		Pawn.StopFiring();
 		return false;
 	}
+	// Keep the aim on the target we are shooting now, also while a burst is running: Target used to be set
+	// only when a burst started, so the next zed was ignored until the burst stopped.
+	Target = inActor;
+	if (inActor != AimLastTarget)
+	{
+		AimLastTarget = inActor;
+		AimReadyTime = WorldInfo.TimeSeconds + AIM_REACT_MIN + (FRand() * AIM_REACT_RANGE);
+	}
 	if (Pawn.IsFiring())
 	{
 		return true;
@@ -812,7 +831,6 @@ function bool FireWeaponAt(Actor inActor)
 	{
 		return false;
 	}
-	Target = inActor;
 	if (KPawn != None && KPawn.bIsSprinting)
 	{
 		KPawn.SetSprinting(false);
@@ -841,6 +859,10 @@ function bool FireWeaponAt(Actor inActor)
 			if (!IsInEffectiveRange(inActor))
 			{
 				bOutOfEffectiveRange = true;
+				return false;
+			}
+			if (!AimReadyToFire(inActor, W))
+			{
 				return false;
 			}
 			W.StartFire(BOTFM_PRIMARY);
@@ -924,10 +946,67 @@ exec function SwitchToBestWeapon(optional bool bForceNewWeapon, optional bool ch
 	}
 }
 
+// Where the bot wants to hit T: the bone the shot-point probe found clear, else the head, else the pivot.
+final function vector GetAimTargetPos(Actor T, Weapon W)
+{
+    if((W != None) && (KFPawn(T) != None) && (T == ShotProbeTarget) && bShotProbeClear && (ShotProbeBone != ''))
+    {
+        return KFPawn(T).Mesh.GetBoneLocation(ShotProbeBone);
+    }
+    if((W != None) && (KFPawn(T) != None) && !((T == ShotProbeTarget) && bShotProbeClear))
+    {
+        return KFPawn(T).Mesh.GetBoneLocation(KFPawn(T).HeadBoneName);
+    }
+    return T.Location;
+}
+
+// Eased aim: the aim direction turns toward the wanted direction at a limited speed instead of snapping
+// to it, like a player moving a mouse. It starts from where the bot is looking after a pause.
+final function rotator StepAim(vector StartLoc, vector TargetPos)
+{
+    local rotator Want;
+    local float Dt;
+
+    Want = Rotator(TargetPos - StartLoc);
+    if (Pawn == None)
+        return Want;
+    Dt = WorldInfo.TimeSeconds - LastAimTime;
+    if (!bAimInit || Dt > AIM_RESET_GAP)
+    {
+        AimRot = Pawn.Rotation;
+        bAimInit = true;
+    }
+    else if (Dt > 0.0)
+    {
+        AimRot = RInterpTo(AimRot, Want, FMin(Dt, 0.25), AIM_INTERP_SPEED);
+    }
+    LastAimTime = WorldInfo.TimeSeconds;
+    return AimRot;
+}
+
+// True when a new burst at T may start: the reaction delay after switching target has passed and the eased
+// aim is within about 10 degrees of the target. Also steps the aim, so it keeps turning between shots.
+final function bool AimReadyToFire(Actor T, Weapon W)
+{
+    local vector EyeLoc, TargetPos;
+    local rotator EyeRot, Cur;
+
+    Pawn.GetActorEyesViewPoint(EyeLoc, EyeRot);
+    TargetPos = GetAimTargetPos(T, W);
+    Cur = StepAim(EyeLoc, TargetPos);
+    if (WorldInfo.TimeSeconds < AimReadyTime)
+        return false;
+    return (Normal(vector(Cur)) Dot Normal(TargetPos - EyeLoc)) >= AIM_FIRE_CONE_DOT;
+}
+
 function Rotator GetAdjustedAimFor(Weapon W, Vector StartFireLoc)
 {
-    local Vector TargetPos;
-
+    // A dead target must not keep the aim: a burst that never stopped kept shooting at the corpse for
+    // 1-2 seconds before the bot looked at the next zed.
+    if((Pawn(Target) != None) && !Pawn(Target).IsAliveAndWell())
+    {
+        Target = Enemy;
+    }
     if(Target == None)
     {
         Target = Enemy;
@@ -937,21 +1016,7 @@ function Rotator GetAdjustedAimFor(Weapon W, Vector StartFireLoc)
         }
     }
 
-    // Aim at the bone the shot-point probe found clear; the head when this target was not probed clear.
-    if((W != None) && (KFPawn(Target) != None) && (Target == ShotProbeTarget) && bShotProbeClear && (ShotProbeBone != ''))
-    {
-        TargetPos = KFPawn(Target).Mesh.GetBoneLocation(ShotProbeBone);
-    }
-    else if((W != None) && (KFPawn(Target) != None) && !((Target == ShotProbeTarget) && bShotProbeClear))
-    {
-        TargetPos = KFPawn(Target).Mesh.GetBoneLocation(KFPawn(Target).HeadBoneName);
-    }
-    else
-    {
-        TargetPos = Target.Location;
-    }
-
-    return Rotator(TargetPos - StartFireLoc);
+    return StepAim(StartFireLoc, GetAimTargetPos(Target, W));
 }
 
 simulated function GetPlayerViewPoint(out Vector out_Location, out Rotator out_Rotation)
@@ -1137,16 +1202,16 @@ function FollowNotifyHub(EFollowStatus NewStatus)
     switch (NewStatus)
     {
         case FS_Arrived:
-            `log("[FollowNav] EcholonBot: FS_Arrived -- holding slot " $ string(FollowSlotIndex) $ "/" $ string(FollowSlotCount));
+            EchelonLog("NAV_ARRIVED slot=" $ string(FollowSlotIndex) $ "/" $ string(FollowSlotCount));
             break;
 
         case FS_LeaderTeleported:
-            `log("[FollowNav] EcholonBot: FS_LeaderTeleported -- route invalid, decorrelated");
+            EchelonLog("NAV_LEADER_TELEPORTED");
             break;
 
         case FS_LeaderLost:
         case FS_Blocked:
-            `log("[FollowNav] EcholonBot: " $ string(int(NewStatus)) @ "-- returning to PickNextMove");
+            EchelonLog("NAV_STATUS_EXIT status=" $ string(int(NewStatus)));
             FollowExitState = 'PickNextMove';
             bFollowExitPending = true;
             break;
@@ -1155,7 +1220,7 @@ function FollowNotifyHub(EFollowStatus NewStatus)
 
 function FollowOnGaveUp()
 {
-    `log("[FollowNav] EcholonBot: follow retry ladder exhausted; hub will re-decide via PickNextMove");
+    EchelonLog("NAV_RETRY_EXHAUSTED");
 }
 
 function Tick(float Delta)
@@ -1248,14 +1313,9 @@ function Tick(float Delta)
         }
         else
         {
-            if (VSizeSq(PrevMovePos - Pawn.Location) < 2500.0 * Delta)
-            {
-                if (WorldInfo.TimeSeconds - MovePauseTime > 0.5)
-                {
-                    Pawn.DoJump(false);
-                }
-            }
-            else
+            // No hop when the pawn stops moving (nav redesign N1): jumping against a wall was the wall-jumping.
+            // The wall-hit sidestep in NotifyHitWall and the follow mover's stuck ladder handle it.
+            if (VSizeSq(PrevMovePos - Pawn.Location) >= 2500.0 * Delta)
             {
                 PrevMovePos = Pawn.Location;
                 MovePauseTime = WorldInfo.TimeSeconds;
@@ -1518,7 +1578,7 @@ final function BuildTraderRoamNodes(Actor Trader)
             TraderRoamHome = N;
         }
     }
-    `log("[EcholonAudit] TRADER_ROAM_LIST bot=" $ Name $ " nodes=" $ string(TraderRoamNodes.Length) $ " trader=" $ string(Trader.Name));
+    `log("[EcholonAudit] " $ LogTag() $ " TRADER_ROAM_LIST nodes=" $ string(TraderRoamNodes.Length) $ " trader=" $ string(Trader.Name));
 }
 
 // True when N is a roam goal of the trader that is open now (a goal kept from before the trader opened can
@@ -1560,7 +1620,7 @@ final function NavigationPoint PickTraderRoamGoal()
         BuildTraderRoamNodes(Trader);
     if (TraderRoamNodes.Length == 0)
     {
-        `log("[EcholonAudit] TRADER_ROAM_EMPTY bot=" $ Name);
+        `log("[EcholonAudit] " $ LogTag() $ " TRADER_ROAM_EMPTY");
         return None;
     }
     for (Tries = 0; Tries < TRADER_ROAM_PICK_TRIES; Tries++)
@@ -1576,13 +1636,13 @@ final function NavigationPoint PickTraderRoamGoal()
         // NextHop == N means directly reachable: no route to judge.
         if (NextHop != N && RouteDist > (Straight * TRADER_ROAM_ROUTE_SLACK) + TRADER_ROAM_ROUTE_EXTRA)
             continue;
-        `log("[EcholonAudit] TRADER_ROAM bot=" $ Name $ " goal=" $ string(N.Name)
+        `log("[EcholonAudit] " $ LogTag() $ " TRADER_ROAM goal=" $ string(N.Name)
             $ " dist2d=" $ string(int(VSize2D(N.Location - Trader.Location)))
             $ " dz=" $ string(int(N.Location.Z - Trader.Location.Z))
             $ " route=" $ string(int(RouteDist)) $ " straight=" $ string(int(Straight)));
         return N;
     }
-    `log("[EcholonAudit] TRADER_ROAM_FALLBACK bot=" $ Name $ " tries=" $ string(TRADER_ROAM_PICK_TRIES));
+    `log("[EcholonAudit] " $ LogTag() $ " TRADER_ROAM_FALLBACK tries=" $ string(TRADER_ROAM_PICK_TRIES));
     return TraderRoamHome;
 }
 
@@ -1632,15 +1692,8 @@ event bool NotifyHitWall(Vector HitNormal, Actor Wall)
         {
             if ((NextAdjustTime < WorldInfo.TimeSeconds) && Pawn.Physics == 1)
             {
-                if (Rand(3) == 0)
-                {
-                    Pawn.DoJump(false);
-                }
-                else
-                {
-                    bAdjusting = true;
-                    AdjustPosition.Position = (Pawn.Location + (HitNormal * 80.0)) + (VRand() * 50.0);
-                }
+                bAdjusting = true;
+                AdjustPosition.Position = (Pawn.Location + (HitNormal * 80.0)) + (VRand() * 50.0);
             }
         }
         else
@@ -1967,7 +2020,7 @@ function ValidateAndNudgeSpawn()
     if (IsOnWalkableFloor())
         return;
 
-    `log("[FollowNav] ValidateAndNudgeSpawn: spawn not on a floor, nudging");
+    EchelonLog("SPAWN_NUDGE status=nudging");
 
     for (Attempts = 0; Attempts < 6; Attempts++)
     {
@@ -1979,7 +2032,7 @@ function ValidateAndNudgeSpawn()
             return;
     }
 
-    `log("[FollowNav] ValidateAndNudgeSpawn: nudged, still settling");
+    EchelonLog("SPAWN_NUDGE status=settling");
 }
 
 function bool IsOnWalkableFloor()
@@ -2298,7 +2351,7 @@ function EchelonLog(string Msg)
 	{
 		return;
 	}
-	`log("[EcholonAudit] " $ Name $ " " $ Msg);
+	`log("[EcholonAudit] " $ LogTag() $ " " $ Msg);
 }
 
 function bool AuditRateLimit(string Msg)
@@ -2309,6 +2362,20 @@ function bool AuditRateLimit(string Msg)
 	if (Left(Msg, 4) ~= "HUB_")
 	{
 		return true;  // hub audit lines are never throttled; hub_audit.py needs every one
+	}
+	if (Left(Msg, 10) ~= "NAV_ACCEL_")
+	{
+		// per-tick movement lines: one a second per bot is enough (NAV_STUCK names the node itself)
+		if (IterNow - AuditLastLog_NAVACCEL < 1.0)
+		{
+			return false;
+		}
+		AuditLastLog_NAVACCEL = IterNow;
+		return true;
+	}
+	if (Left(Msg, 4) ~= "NAV_" || Left(Msg, 11) ~= "SPAWN_NUDGE")
+	{
+		return true;  // were plain `log lines before; kept unthrottled
 	}
 	if (Left(Msg, 10) ~= "STATE_EXIT")
 	{
@@ -2377,7 +2444,7 @@ function AuditStateEntry()
 		// PickNextMove is the hub every decision passes through; logging it would drown the rest.
 		if (AuditStateEntryName != 'PickNextMove')
 		{
-			EchelonLog("STATE_ENTER bot=" $ Name $ " state=" $ AuditStateEntryName);
+			EchelonLog("STATE_ENTER state=" $ AuditStateEntryName);
 		}
 	}
 }
@@ -2396,11 +2463,11 @@ function AuditStateExit(name NextStateName)
 		AuditDwellTotal += IterDwell;
 		if (IterDwell >= 3.0)
 		{
-			EchelonLog("STATE_EXIT bot=" $ Name $ " state=" $ AuditStateEntryName $ " next=" $ NextStateName $ " reason=unspecified" $ " duration=" $ string(IterDwell));
+			EchelonLog("STATE_EXIT state=" $ AuditStateEntryName $ " next=" $ NextStateName $ " reason=unspecified" $ " duration=" $ string(IterDwell));
 		}
 		if (WorldInfo.TimeSeconds - AuditLastLog_DWELLTOT >= 60.0)
 		{
-			EchelonLog("DWELL_TOTAL bot=" $ Name $ " sinceLast=" $ string(AuditDwellTotal));
+			EchelonLog("DWELL_TOTAL sinceLast=" $ string(AuditDwellTotal));
 			AuditDwellTotal = 0.0;
 			AuditLastLog_DWELLTOT = WorldInfo.TimeSeconds;
 		}
@@ -2432,11 +2499,11 @@ function AuditGoalLog(string Op, string Src)
 
 	if (Op == "GOAL_SET")
 	{
-		EchelonLog("GOAL_SET bot=" $ Name $ " goal=(" $ IterLoc $ ") ammo=" $ string(IterAmmo) $ " src=" $ Src);
+		EchelonLog("GOAL_SET goal=(" $ IterLoc $ ") ammo=" $ string(IterAmmo) $ " src=" $ Src);
 	}
 	else
 	{
-		EchelonLog("GOAL_CLEAR bot=" $ Name $ " src=" $ Src);
+		EchelonLog("GOAL_CLEAR src=" $ Src);
 	}
 }
 
@@ -2444,7 +2511,7 @@ function IssueCommand(name Cmd, Vector Anchor)
 {
     CurrentOrder = Cmd;
     OrderAnchor = Anchor;
-    EchelonLog("IssueCommand: " $ Cmd);
+    EchelonLog("CMD_ISSUE cmd=" $ Cmd);
 }
 
 function SLDecisionLoop()
@@ -2486,7 +2553,7 @@ function SLDecisionLoop()
 
 function LTDispatchLoop()
 {
-    EchelonLog("LTDispatchLoop");
+    EchelonLog("LT_DISPATCH_LOOP");
 }
 
 final function ScanRoomForFormation()
@@ -3515,7 +3582,7 @@ function HubPick(string Priority, name NextState)
 	HubNextState = NextState;
 	HubPickTime = WorldInfo.TimeSeconds;
 	HubFailReason = "";
-	EchelonLog("HUB_PICK bot=" $ Name $ " p=" $ Priority $ " next=" $ NextState);
+	EchelonLog("HUB_PICK p=" $ Priority $ " next=" $ NextState);
 }
 
 // Marks the current hub step as failed; the first reason wins.
@@ -3540,7 +3607,7 @@ function HubResolve(name ExitTo)
 	{
 		Result = "fail:" $ HubFailReason;
 	}
-	EchelonLog("HUB_RESULT bot=" $ Name $ " p=" $ HubPriority $ " state=" $ HubNextState $ " exit=" $ ExitTo
+	EchelonLog("HUB_RESULT p=" $ HubPriority $ " state=" $ HubNextState $ " exit=" $ ExitTo
 		$ " dwell=" $ string(WorldInfo.TimeSeconds - HubPickTime) $ " result=" $ Result);
 	HubPriority = "";
 	HubFailReason = "";

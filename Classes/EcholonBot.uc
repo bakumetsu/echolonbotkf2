@@ -6,7 +6,7 @@ state PickNextMove
     event BeginState(Name PreviousStateName)
     {
         AuditStateEntry();
-        `log("EcholonBot: Entered PickNextMove from " $ PreviousStateName);
+        EchelonLog("HUB_ENTER from=" $ PreviousStateName);
     }
 
     event EndState(name NextStateName)
@@ -63,7 +63,7 @@ state PickNextMove
                 if (RegroupElapsed < REGROUP_DURATION
                     && KFGRI.bTraderIsOpen && NextShoppingTime < WorldInfo.TimeSeconds && KFGRI.OpenedTrader != None)
                 {
-                    EchelonLog("REGROUP_SHOP bot=" $ Name $ " src=PickMove");
+                    EchelonLog("REGROUP_SHOP src=PickMove");
                     HubPick("P4.5_Regroup", 'GoShopping');
                     GotoState('GoShopping');
                     return;
@@ -71,7 +71,7 @@ state PickNextMove
                 if (RegroupElapsed < REGROUP_DURATION
                     && GlobalZedCount > 0 && GlobalZedCount != 15 && GlobalZedCount <= 30 && AcquireHuntTarget())
                 {
-                    EchelonLog("REGROUP_HUNT bot=" $ Name $ " zeds=" $ string(GlobalZedCount));
+                    EchelonLog("REGROUP_HUNT zeds=" $ string(GlobalZedCount));
                     HubPick("P4.5_Regroup", 'Hunting');
                     GotoState('Hunting');
                     return;
@@ -100,7 +100,7 @@ state PickNextMove
                                 {
                                     mut.MoveSquadMembers(RegroupMyIdx, RegroupTargetIdx);
                                 }
-                                EchelonLog("REGROUP_ATTACH bot=" $ Name $ " target=" $ string(RegroupTargetIdx + 1) $ " size=" $ string(RegroupMySize));
+                                EchelonLog("REGROUP_ATTACH target=" $ string(RegroupTargetIdx + 1) $ " size=" $ string(RegroupMySize));
                                 if (!bIsGroupLeader && SquadLeader != None && SquadLeader.Pawn != None)
                                 {
                                     HubPick("P4.5_Regroup", 'FollowingLeader');
@@ -110,7 +110,7 @@ state PickNextMove
                             }
                             else if (RegroupAttach != None && RegroupAttach.PlayerReplicationInfo != None)
                             {
-                                EchelonLog("REGROUP_ATTACH bot=" $ Name $ " human=" $ string(RegroupAttach.PlayerReplicationInfo.Name));
+                                EchelonLog("REGROUP_ATTACH human=" $ string(RegroupAttach.PlayerReplicationInfo.Name));
                                 HubPick("P4.5_Regroup", 'FollowingLeader');
                                 FollowStart(RegroupAttach);
                                 return;
@@ -121,7 +121,7 @@ state PickNextMove
                     if (!bIsGroupLeader && RegroupHoldLeader != None && RegroupHoldLeader.Pawn != None
                         && VSizeSq(RegroupHoldLeader.Pawn.Location - Pawn.Location) > REGROUP_HOLD_DIST_SQ)
                     {
-                        EchelonLog("REGROUP_HOLD bot=" $ Name $ " toLeader");
+                        EchelonLog("REGROUP_HOLD toLeader");
                         HubPick("P4.5_Regroup", 'FollowingLeader');
                         FollowStart(RegroupHoldLeader);
                         return;
@@ -135,9 +135,17 @@ state PickNextMove
             }
         }
 
-        // Priority 5: SYG Enforcement
-        if (mut.bObjectiveActive)
+        // Priority 5: SYG Enforcement (also the mutator's hunt order when few zeds are left, see UpdateHuntOrders)
+        if (!mut.bObjectiveActive && ObjectiveGoal != None && !mut.bHuntOrderActive)
         {
+            ObjectiveGoal = None;
+        }
+        if (mut.bObjectiveActive || mut.bHuntOrderActive)
+        {
+            if (mut.bHuntOrderActive && !mut.bObjectiveActive)
+            {
+                ObjectiveGoal = mut.GetBotObjective(self);
+            }
             bHasAmmo = (Pawn != None) && (Pawn.Weapon != None)
                 && (KFWeapon(Pawn.Weapon).GetTotalAmmoAmount(0) > 0);
             if (ObjectiveGoal == None)
@@ -531,9 +539,9 @@ state DoObjective extends Roaming
                 mut.AddNodeBlock(self, ObjectiveGoal);
                 LastNodeBlockTime = WorldInfo.TimeSeconds;
                 NodeBlockCount++;
-                EchelonLog("NODE_BLOCK bot=" $ Name $ " node=(" $ string(FFloor(ObjectiveGoal.Location.X / 100.0)) $ "," $ string(FFloor(ObjectiveGoal.Location.Y / 100.0)) $ "," $ string(FFloor(ObjectiveGoal.Location.Z / 100.0)) $ ") reason=pathfail ttl=8s");
+                EchelonLog("NODE_BLOCK node=(" $ string(FFloor(ObjectiveGoal.Location.X / 100.0)) $ "," $ string(FFloor(ObjectiveGoal.Location.Y / 100.0)) $ "," $ string(FFloor(ObjectiveGoal.Location.Z / 100.0)) $ ") reason=pathfail ttl=8s");
             }
-            EchelonLog("DoObjective: objective unreachable, bailing to combat (slot=" $ string(FollowSlotIndex) $ ")");
+            EchelonLog("OBJ_UNREACHABLE slot=" $ string(FollowSlotIndex));
             PickCombatStyle();
             return;
         }
@@ -1549,7 +1557,7 @@ state GoShopping
                 TraderRetryCount = 0;
                 NextShoppingTime = WorldInfo.TimeSeconds + TRADER_GIVEUP_COOLDOWN;
                 HubFail("trader_unreachable");
-                EchelonLog("TRADER_GIVEUP bot=" $ Name $ " retries=" $ string(TRADER_MAX_RETRIES) $ " cooldown=" $ string(TRADER_GIVEUP_COOLDOWN));
+                EchelonLog("TRADER_GIVEUP retries=" $ string(TRADER_MAX_RETRIES) $ " cooldown=" $ string(TRADER_GIVEUP_COOLDOWN));
                 PickCombatStyle();
                 return;
             }

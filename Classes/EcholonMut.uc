@@ -11,6 +11,9 @@ const VANGUARD_OFFSET = 2000.0;
 const REARGUARD_OFFSET = 2000.0;
 const CHOKEPOINT_LATERAL_OFFSET = 1000.0;
 const NAV_SEARCH_RADIUS = 1500.0;
+const HUNT_ORDER_MAX_ZEDS = 15;
+const HUNT_ORDER_MIN_DIST_SQ = 1440000.0;
+const HUNT_ORDER_INTERVAL = 1.0;
 const MACRO_WAYPOINT_INTERVAL = 3.0;
 const OBJ_BAIL_COOLDOWN = 8.0;
 const PHASE_IDLE = 0;
@@ -65,6 +68,8 @@ var int MaxEmoteCount;
 var float NextVictoryDance;
 var bool bNewWave;
 var bool bObjectiveActive;
+var bool bHuntOrderActive;
+var float LastHuntOrderTime;
 var transient bool bTraderListInit;
 var array<PromotionRequest> PendingPromotions;
 var array<CachedHumanInfo> CachedHumans;
@@ -99,12 +104,37 @@ var() config bool bAllowBotCrouch;
 // Count bots as voters in the skip-trader vote (stock behaviour). Off by default: only human
 // players vote, and the vote passes when every human votes yes (EcholonVoteCollector).
 var() config bool bBotsCountInSkipTraderVote;
+// Bots get scoreboard pictures from the local avatar server (kit\Start-AvatarServer.bat). Off by default.
+var() config bool bBotAvatars;
+// Port of the local avatar server. 0 or less means 8765.
+var() config int AvatarServerPort;
+var transient int AvatarMatchId;
+// AvatarDL, AvatarPRI and AvatarApplied are parallel arrays, one slot per requested bot picture.
+var transient array<KFHTTPImageDownloader> AvatarDL;
+var transient array<PlayerReplicationInfo> AvatarPRI;
+var transient array<bool> AvatarApplied;
 var array<KFPawn_Human> RangedHealTargets;
 var array<float> RangedHealCooldownEnds;
 var transient array<string> AvailableBotNames;
 var transient array<Class<KFPerk> > PerkPool;
 var transient array<int> PerkPoolCounts;
 var float LastAuditLogTime;
+// Playtest mode (?Playtest=1 on the map URL): the human leaves play and watches the bots.
+// Spike for the automated playtest runner; see the playtest plan.
+var transient bool bPlaytest;
+var transient bool bPlaytestSpectating;
+var transient float PlaytestNextCamTime;
+var transient float PlaytestNextReportTime;
+var transient name PlaytestCamMode;           // 'ThirdPerson' or 'FirstPerson', kept across bot switches
+var transient int PlaytestLastZedCount;
+var transient float PlaytestZedCountSince;    // when AIAliveCount last changed (stuck-wave check)
+var transient int PlaytestWaves;             // wave cap for this match (0 = whole match)
+var transient int PlaytestBotsOverride;      // bot count override for this match only
+var transient int PlaytestWavesDone;         // waves ended so far
+var transient float PlaytestWaveStart;       // TimeSeconds when the current wave began
+var transient bool bPlaytestLastTrader;      // bTraderIsOpen at the previous tick (edge detection)
+var transient bool bPlaytestDone;            // PLAYTEST_DONE logged, the game is about to quit
+var transient bool bPlaytestReadyLogged;     // PLAYTEST_READY logged once
 
 function EchelonLog(string Msg)
 {
@@ -215,6 +245,11 @@ function MatchStarting()
 
     if (WorldInfo.NetMode == NM_Standalone)
     {
+        if (bBotAvatars)
+        {
+            AvatarMatchId = Rand(1000000000) + 1;
+            EchelonLog("AVATAR_ON match=" $ string(AvatarMatchId) $ " port=" $ string(AvatarPort()));
+        }
         for (I = 0; I < NumBots; ++I)
         {
             AddBot();
@@ -229,6 +264,292 @@ function MatchStarting()
     }
     SetTimer(0.1, true, 'CheckWave');
     InstallVoteCollector();
+}
+
+function InitMutator(string Options, out string ErrorMessage)
+{
+    super.InitMutator(Options, ErrorMessage);
+
+    bPlaytest = class'GameInfo'.static.ParseOption(Options, "Playtest") ~= "1";
+    if (bPlaytest)
+    {
+        // Our controller makes left/right click and the camera-mode key work on bots (see EcholonSpectatorPC).
+        WorldInfo.Game.PlayerControllerClass = class'EcholonSpectatorPC';
+        PlaytestCamMode = 'ThirdPerson';
+        PlaytestWaves = class'GameInfo'.static.GetIntOption(Options, "PlaytestWaves", 0);
+        PlaytestBotsOverride = class'GameInfo'.static.GetIntOption(Options, "PlaytestBots", 0);
+        if (PlaytestBotsOverride > 0)
+            NumBots = byte(PlaytestBotsOverride);
+        EchelonLog("PLAYTEST_START map=" $ WorldInfo.GetMapName(true) $ " waves=" $ string(PlaytestWaves) $ " bots=" $ string(NumBots));
+        SetTimer(1.0, true, 'PlaytestTick');
+    }
+}
+
+final function KFPlayerController GetPlaytestHuman()
+{
+    local KFPlayerController PC;
+
+    foreach WorldInfo.AllControllers(class'KFPlayerController', PC)
+    {
+        if (PC.IsLocalPlayerController())
+            return PC;
+    }
+    return None;
+}
+
+// Takes the human out of play: no pawn, spectator flags set, spectating state.
+// Runs again if the game hands the human a new pawn (e.g. a respawn at trader time).
+final function PlaytestMakeSpectator(KFPlayerController PC)
+{
+    local Pawn P;
+    local int LivingBefore;
+
+    LivingBefore = KF.GetLivingPlayerCount();
+    P = PC.Pawn;
+    if (P != None)
+    {
+        PC.UnPossess();
+        P.Destroy();
+    }
+
+    PC.PlayerReplicationInfo.bOnlySpectator = true;
+    PC.PlayerReplicationInfo.bIsSpectator = true;
+    PC.PlayerReplicationInfo.bOutOfLives = true;
+    PC.GotoState('Spectating');
+    KF.ForceLivingPlayerCount(byte(KF.NumBots));
+
+    EchelonLog("PLAYTEST_SPECTATE again=" $ string(bPlaytestSpectating) $ " living_before=" $ string(LivingBefore)
+        $ " living_after=" $ string(KF.GetLivingPlayerCount()) $ " wave=" $ string(KF.MyKFGRI.WaveNum));
+    bPlaytestSpectating = true;
+    PlaytestNextCamTime = 0.0;
+}
+
+// Points the human's camera at the next (Dir 1) or previous (Dir -1) living bot, in PlaytestCamMode.
+// Stock SpectateNextPlayer skips bots: KFGameInfo.CanSpectate only accepts PlayerController owners.
+// A manual switch (a click) pauses the 30 s auto-rotation for 60 s.
+final function PlaytestStepCamera(PlayerController PC, int Dir, optional bool bManual)
+{
+    local int I, Start, Count;
+    local EcholonBot B;
+
+    Count = ActiveBots.Length;
+    if (Count == 0 || PC == None)
+        return;
+
+    Start = (Dir < 0) ? Count - 1 : 0;
+    for (I = 0; I < Count; I++)
+    {
+        if (ActiveBots[I] != None && ActiveBots[I].Pawn != None && ActiveBots[I].Pawn == PC.ViewTarget)
+        {
+            Start = I + Dir;
+            break;
+        }
+    }
+
+    for (I = 0; I < Count; I++)
+    {
+        B = ActiveBots[(((Start + I * Dir) % Count) + Count) % Count];
+        if (B != None && B.Pawn != None && B.Pawn.IsAliveAndWell())
+        {
+            PC.SetViewTarget(B.Pawn);
+            PC.SetCameraMode(PlaytestCamMode);
+            PlaytestNextCamTime = WorldInfo.TimeSeconds + (bManual ? 60.0 : 30.0);
+            EchelonLog("PLAYTEST_CAMERA target=" $ B.LogTag() $ " mode=" $ string(PlaytestCamMode) $ " manual=" $ string(bManual));
+            return;
+        }
+    }
+}
+
+// Camera-mode key: first person <-> third person on the bot being watched.
+final function PlaytestToggleCamMode(PlayerController PC)
+{
+    if (PC == None)
+        return;
+    PlaytestCamMode = (PlaytestCamMode == 'FirstPerson') ? 'ThirdPerson' : 'FirstPerson';
+    PC.SetCameraMode(PlaytestCamMode);
+    PlaytestNextCamTime = WorldInfo.TimeSeconds + 60.0;
+    EchelonLog("PLAYTEST_CAMERA_MODE mode=" $ string(PlaytestCamMode));
+}
+
+// Stand-in VIP while no human is alive: the current anchor while it is a living squad leader,
+// else the first living squad leader by group. It stays a squad leader (no CAPTAIN, no demotion).
+final function EcholonBot PickLeaderAnchor()
+{
+    local EcholonBot Cur;
+    local int GroupIdx;
+
+    Cur = EcholonBot(VIPController);
+    if (Cur != None && !Cur.bDeleteMe && Cur.bIsGroupLeader && Cur.Pawn != None && Cur.Pawn.Health > 0)
+        return Cur;
+
+    for (GroupIdx = 0; GroupIdx < Fireteams.Length; GroupIdx++)
+    {
+        Cur = Fireteams[GroupIdx].Leader;
+        if (Cur != None && !Cur.bDeleteMe && Cur.Pawn != None && Cur.Pawn.Health > 0)
+            return Cur;
+    }
+    return None;
+}
+
+// Last zeds that stop dying (stuck behind geometry, etc.): after 180 s with 3 or fewer left and no
+// change in the count, log where they are and kill them so the run goes on.
+final function PlaytestCheckStuckWave()
+{
+    local KFPawn_Monster M;
+    local string Where;
+    local int N;
+
+    if (KF.AIAliveCount != PlaytestLastZedCount || KF.MyKFGRI.bTraderIsOpen || !KF.IsWaveActive())
+    {
+        PlaytestLastZedCount = KF.AIAliveCount;
+        PlaytestZedCountSince = WorldInfo.TimeSeconds;
+        return;
+    }
+    if (KF.AIAliveCount <= 0 || KF.AIAliveCount > 3 || !KF.SpawnManager.IsFinishedSpawning()
+        || WorldInfo.TimeSeconds - PlaytestZedCountSince < 180.0)
+        return;
+
+    N = 0;
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', M)
+    {
+        if (!M.IsAliveAndWell())
+            continue;
+        Where = Where $ (N > 0 ? "," : "") $ string(M.Class.Name) $ "@" $ CoordStr(M.Location);
+        N++;
+    }
+    EchelonLog("PLAYTEST_STUCK_WAVE wave=" $ string(KF.MyKFGRI.WaveNum) $ " zeds=" $ string(N) $ " stuck_for="
+        $ string(int(WorldInfo.TimeSeconds - PlaytestZedCountSince)) $ " where=" $ Where);
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', M)
+    {
+        if (M.IsAliveAndWell() && PlayerController(M.Controller) == None)
+            M.Died(None, None, M.Location);
+    }
+    PlaytestZedCountSince = WorldInfo.TimeSeconds;
+}
+
+final function int PlaytestCountBotsAlive()
+{
+    local int Count;
+    local EcholonBot B;
+
+    foreach WorldInfo.AllControllers(class'EcholonBot', B)
+    {
+        if (B.Pawn != None && B.Pawn.IsAliveAndWell())
+            Count++;
+    }
+    return Count;
+}
+
+// Logs PLAYTEST_WAVE_END on each wave end (trader opens, or the match ends) and PLAYTEST_DONE when the run is over.
+final function PlaytestCheckWaveEnd()
+{
+    local bool Over, Trader;
+    local int Alive;
+    local string Result, Reason;
+
+    if (bPlaytestDone)
+        return;
+
+    Over = KF.MyKFGRI.bMatchIsOver;
+    Trader = KF.MyKFGRI.bTraderIsOpen;
+
+    if (PlaytestWaveStart == 0.0)
+        PlaytestWaveStart = WorldInfo.TimeSeconds;
+
+    if ((Trader && !bPlaytestLastTrader) || Over)
+    {
+        PlaytestWavesDone++;
+        Alive = PlaytestCountBotsAlive();
+        Result = (Over && Alive == 0) ? "wipe" : "won";
+        EchelonLog("PLAYTEST_WAVE_END wave=" $ string(KF.MyKFGRI.WaveNum) $ " result=" $ Result $ " bots_alive=" $ string(Alive)
+            $ " duration=" $ string(int(WorldInfo.TimeSeconds - PlaytestWaveStart)));
+
+        if (Over)
+            Reason = (Alive == 0) ? "wipe" : "victory";
+        else if (PlaytestWaves > 0 && PlaytestWavesDone >= PlaytestWaves)
+            Reason = "waves";
+
+        if (Reason != "")
+        {
+            EchelonLog("PLAYTEST_DONE reason=" $ Reason $ " waves_done=" $ string(PlaytestWavesDone));
+            bPlaytestDone = true;
+            SetTimer(5.0, false, 'PlaytestQuit');
+        }
+    }
+
+    if (!Trader && bPlaytestLastTrader)
+        PlaytestWaveStart = WorldInfo.TimeSeconds;
+    bPlaytestLastTrader = Trader;
+}
+
+function PlaytestQuit()
+{
+    local PlayerController PC;
+
+    PC = WorldInfo.GetALocalPlayerController();
+    if (PC != None)
+        PC.ConsoleCommand("exit");
+}
+
+// Before the match begins the human sits in the ready-up lobby; mark them ready so the run needs no input.
+final function PlaytestAutoReady()
+{
+    local KFPlayerController PC;
+
+    PC = GetPlaytestHuman();
+    if (PC == None || PC.PlayerReplicationInfo == None || PC.PlayerReplicationInfo.bReadyToPlay)
+        return;
+
+    PC.PlayerReplicationInfo.bReadyToPlay = true;
+    if (!bPlaytestReadyLogged)
+    {
+        bPlaytestReadyLogged = true;
+        EchelonLog("PLAYTEST_READY map=" $ WorldInfo.GetMapName(true));
+    }
+}
+
+function PlaytestTick()
+{
+    local KFPlayerController PC;
+    local Pawn ViewPawn;
+    local int BotsAlive;
+
+    if (KF == None || KF.MyKFGRI == None)
+        return;
+
+    if (!KF.MyKFGRI.bMatchHasBegun)
+    {
+        PlaytestAutoReady();
+        return;
+    }
+
+    PC = GetPlaytestHuman();
+    if (PC == None)
+        return;
+
+    if (PC.Pawn != None)
+    {
+        PlaytestMakeSpectator(PC);
+    }
+
+    ViewPawn = Pawn(PC.ViewTarget);
+    if (WorldInfo.TimeSeconds >= PlaytestNextCamTime || ViewPawn == None || !ViewPawn.IsAliveAndWell())
+    {
+        PlaytestStepCamera(PC, 1);
+    }
+
+    PlaytestCheckStuckWave();
+    PlaytestCheckWaveEnd();
+
+    if (WorldInfo.TimeSeconds >= PlaytestNextReportTime)
+    {
+        PlaytestNextReportTime = WorldInfo.TimeSeconds + 10.0;
+        BotsAlive = PlaytestCountBotsAlive();
+        EchelonLog("PLAYTEST_HEARTBEAT wave=" $ string(KF.MyKFGRI.WaveNum) $ " trader=" $ string(KF.MyKFGRI.bTraderIsOpen)
+            $ " over=" $ string(KF.MyKFGRI.bMatchIsOver) $ " state=" $ string(KF.GetStateName())
+            $ " living=" $ string(KF.GetLivingPlayerCount()) $ " bots_alive=" $ string(BotsAlive)
+            $ " zeds_left=" $ string(KF.AIAliveCount) $ " human_state=" $ string(PC.GetStateName()));
+    }
 }
 
 // Swap the skip-trader vote for one that only counts humans (see bBotsCountInSkipTraderVote).
@@ -387,8 +708,8 @@ function InitializePlatoon()
             continue;
         if (Bot.bIsAlphaCommander)
             Bot.BotRank = LIEUTENANT;
-        else if (Bot == VIPController)
-            Bot.BotRank = CAPTAIN;
+        else if (Bot == VIPController && !Bot.bIsGroupLeader)
+            Bot.BotRank = CAPTAIN;  // a stand-in VIP is always a squad leader, so this no longer fires
     }
 
     SyncSquadLeaders();
@@ -557,6 +878,12 @@ function UpdateMacroWaypoints()
                     Fireteams[GroupIdx].Anchor = None;
                     GroupLeader.AssignedAnchor = None;
                 }
+                else if (VIP == GroupLeader)
+                {
+                    // This leader is the stand-in VIP itself (no human alive), so it moves freely.
+                    Fireteams[GroupIdx].Anchor = None;
+                    GroupLeader.AssignedAnchor = None;
+                }
                 else if (VIP != None && VIP.Pawn != None)
                 {
                     Fireteams[GroupIdx].Anchor = None;
@@ -653,27 +980,42 @@ function NavigationPoint FindNearestChokepoint(Controller VIP)
 }
 
 
+// The VIP is a living human whenever there is one. While no human is alive (dead and waiting for the
+// trader, or spectating in playtest mode) a living bot squad leader stands in as the anchor
+// (PickLeaderAnchor); it stays a squad leader. The VIP goes back to the human as soon as they respawn.
 function Controller GetVIPController()
 {
-    local Controller C;
-
-    if (VIPController != None && !VIPController.bDeleteMe
-        && VIPController.Pawn != None && VIPController.Pawn.Health > 0)
-    {
-        return VIPController;
-    }
+    local Controller C, NewVIP;
 
     foreach WorldInfo.AllControllers(class'Controller', C)
     {
         if (PlayerController(C) != None && C.Pawn != None && C.Pawn.Health > 0)
         {
-            VIPController = C;
-            return VIPController;
+            NewVIP = C;
+            break;
         }
     }
+    if (NewVIP == None)
+    {
+        NewVIP = PickLeaderAnchor();
+    }
 
-    VIPController = None;
-    return None;
+    if (NewVIP != VIPController)
+    {
+        EchelonLog("VIP_CHANGE new=" $ VIPTag(NewVIP) $ " old=" $ VIPTag(VIPController)
+            $ " kind=" $ (EcholonBot(NewVIP) != None ? "leader" : (NewVIP != None ? "human" : "none")));
+        VIPController = NewVIP;
+    }
+    return VIPController;
+}
+
+final function string VIPTag(Controller C)
+{
+    if (EcholonBot(C) != None)
+        return EcholonBot(C).LogTag();
+    if (C != None && C.PlayerReplicationInfo != None)
+        return "human(" $ C.PlayerReplicationInfo.PlayerName $ ")";
+    return "None";
 }
 
 function Pawn FindBossPawn()
@@ -900,24 +1242,12 @@ function CleanupRangedHealCooldowns()
     }
 }
 
+// The VIP died: a living human takes over, else a living squad leader stands in (see GetVIPController).
+// Before 2026-10-22 the best-scoring bot became VIP and alpha commander, was demoted from squad leader,
+// and kept the VIP even after the human respawned.
 function HandleVIPSuccession()
 {
-    local EcholonBot Best;
-
-    Best = FindBestCandidate(ActiveBots);
-    if (Best == None)
-    {
-        return;
-    }
-
-    VIPController = Best;
-    AlphaCommander = Best;
-    Best.bIsAlphaCommander = true;
-
-    if (Best.bIsGroupLeader)
-    {
-        DemoteGroupLeader(Best);
-    }
+    GetVIPController();
 }
 
 function HandleFireteamCasualty(EcholonBot DeadBot)
@@ -1276,7 +1606,86 @@ function CheckWave()
         }
     }
 
+    UpdateHuntOrders();
     EvaluateSquadPhase();
+}
+
+// Hunt order: when only a few zeds are left (alive plus still to spawn) and the map has no objective, each
+// squad leader is ordered toward the nearest leftover zed, and the whole squad follows (the bots reach it
+// through the objective pipeline: P5 / DoObjective / follow). Bots used to wait until a leftover zed came
+// within 1500 units, because Hunting only works on zeds a bot already sees.
+function UpdateHuntOrders()
+{
+    local KFGameReplicationInfo GRI;
+    local KFPawn_Monster Z, BestZ;
+    local EcholonBot L;
+    local NavigationPoint GP;
+    local float D, BestD;
+    local int Alive, i;
+    local bool bWant;
+
+    if (WorldInfo.TimeSeconds - LastHuntOrderTime < HUNT_ORDER_INTERVAL)
+        return;
+    LastHuntOrderTime = WorldInfo.TimeSeconds;
+
+    GRI = KFGameReplicationInfo(WorldInfo.GRI);
+    bWant = false;
+    if (GRI != None && !bObjectiveActive && NumGroups > 0 && GRI.bMatchHasBegun && !GRI.bMatchIsOver
+        && !GRI.bTraderIsOpen && !GRI.IsBossWave() && GRI.AIRemaining <= HUNT_ORDER_MAX_ZEDS)
+    {
+        foreach WorldInfo.AllPawns(class'KFPawn_Monster', Z)
+        {
+            if (Z.IsAliveAndWell())
+                Alive++;
+        }
+        bWant = (Alive > 0);
+    }
+
+    if (!bWant)
+    {
+        if (bHuntOrderActive)
+        {
+            bHuntOrderActive = false;
+            for (i = 0; i < SquadOrders.Length; i++)
+                SquadOrders[i].GoalNav = None;
+            EchelonLog("HUNT_ORDER_END");
+        }
+        return;
+    }
+
+    EnsureSquadOrderTable();
+    if (!bHuntOrderActive)
+        EchelonLog("HUNT_ORDER_START zeds=" $ string(Alive) $ " remaining=" $ string(GRI.AIRemaining));
+    bHuntOrderActive = true;
+
+    for (i = 0; i < Fireteams.Length && i < SquadOrders.Length; i++)
+    {
+        L = Fireteams[i].Leader;
+        SquadOrders[i].GoalNav = None;
+        if (L == None || L.Pawn == None || !L.Pawn.IsAliveAndWell())
+            continue;
+        BestZ = None;
+        BestD = 999999999.0;
+        foreach WorldInfo.AllPawns(class'KFPawn_Monster', Z)
+        {
+            if (!Z.IsAliveAndWell())
+                continue;
+            D = VSizeSq(Z.Location - L.Pawn.Location);
+            if (D < BestD)
+            {
+                BestD = D;
+                BestZ = Z;
+            }
+        }
+        // Closer than this the normal combat states already see the zed.
+        if (BestZ == None || BestD < HUNT_ORDER_MIN_DIST_SQ)
+            continue;
+        GP = FindNearestNavPoint(BestZ.Location, NAV_SEARCH_RADIUS);
+        if (GP == None)
+            continue;
+        SquadOrders[i].Leader = L;
+        SquadOrders[i].GoalNav = GP;
+    }
 }
 
 final function SetHoldObjective(Volume V)
@@ -1939,6 +2348,17 @@ final function NavigationPoint GetBotObjective(EcholonBot B)
 
     if (!bObjectiveActive)
     {
+        // Hunt order (no map objective): the squad's goal is the node nearest the leftover zed.
+        if (!bHuntOrderActive || B == None)
+        {
+            return None;
+        }
+        EnsureSquadOrderTable();
+        GroupIdx = B.GroupID - 1;
+        if (GroupIdx >= 0 && GroupIdx < SquadOrders.Length)
+        {
+            return SquadOrders[GroupIdx].GoalNav;
+        }
         return None;
     }
     if (B == None || B.Pawn == None)
@@ -2295,6 +2715,100 @@ final function Class<KFPerk> PickBotPerk()
     return Picked;
 }
 
+final function int AvatarPort()
+{
+    if (AvatarServerPort > 0)
+    {
+        return AvatarServerPort;
+    }
+    return 8765;
+}
+
+// Give the bot a fake net id (high word zero, so it never matches a real Steam account) and ask the
+// local avatar server for its picture. The scoreboard shows the KF2 logo until the download is done.
+final function AvatarRequest(PlayerReplicationInfo PRI)
+{
+    local KFHTTPImageDownloader DL;
+    local bool bStarted;
+
+    if (WorldInfo.NetMode != NM_Standalone || !bBotAvatars || AvatarMatchId <= 0 || PRI == None)
+    {
+        return;
+    }
+
+    PRI.UniqueId.Uid.A = 0;
+    PRI.UniqueId.Uid.B = 0x0EC00000 + PRI.PlayerID;
+    AvatarSetEntry(PRI.UniqueId, None);
+
+    DL = new(self) class'KFHTTPImageDownloader';
+    AvatarDL.AddItem(DL);
+    AvatarPRI.AddItem(PRI);
+    AvatarApplied.AddItem(false);
+
+    bStarted = DL.DownloadImageFromURL("http://127.0.0.1:" $ string(AvatarPort()) $ "/avatar/" $ string(AvatarMatchId) $ "/" $ string(PRI.PlayerID) $ ".png", AvatarDownloadDone);
+    EchelonLog("AVATAR_REQUEST pid=" $ string(PRI.PlayerID) $ " started=" $ string(bStarted));
+    if (!bStarted)
+    {
+        EchelonLog("AVATAR_FAIL pid=" $ string(PRI.PlayerID) $ " reason=start");
+    }
+}
+
+// No early exit: every entry with this id is updated.
+final function AvatarSetEntry(UniqueNetId Id, Texture2D Tex)
+{
+    local KFPlayerController PC;
+    local KFPlayerController.PlayerSteamAvatar Entry;
+    local int I;
+    local bool bFound;
+
+    PC = KFPlayerController(GetALocalPlayerController());
+    if (PC == None)
+    {
+        return;
+    }
+
+    for (I = 0; I < PC.AvatarList.Length; ++I)
+    {
+        if (PC.AvatarList[I].NetID == Id)
+        {
+            PC.AvatarList[I].Avatar = Tex;
+            bFound = true;
+        }
+    }
+    if (!bFound)
+    {
+        Entry.NetID = Id;
+        Entry.Avatar = Tex;
+        PC.AvatarList.AddItem(Entry);
+    }
+}
+
+// The download delegate does not say which downloader finished, so every pending one is checked.
+// Downloaders stay in AvatarDL for the whole match so their textures are not garbage-collected.
+function AvatarDownloadDone(bool bWasSuccessful)
+{
+    local int I;
+
+    for (I = 0; I < AvatarDL.Length; ++I)
+    {
+        if (AvatarApplied[I] || AvatarDL[I] == None || AvatarPRI[I] == None)
+        {
+            continue;
+        }
+        if (AvatarDL[I].TheTexture == None)
+        {
+            continue;
+        }
+        AvatarSetEntry(AvatarPRI[I].UniqueId, AvatarDL[I].TheTexture);
+        AvatarApplied[I] = true;
+        EchelonLog("AVATAR_SET pid=" $ string(AvatarPRI[I].PlayerID) $ " tex=" $ PathName(AvatarDL[I].TheTexture));
+    }
+    if (!bWasSuccessful)
+    {
+        EchelonLog("AVATAR_FAIL reason=download");
+    }
+}
+
 final function bool AddBot()
 {
     local EcholonBot B;
@@ -2320,6 +2834,7 @@ final function bool AddBot()
     {
         PRI.CurrentPerkClass = B.Perk;
         PRI.PlayerID = KF.GetNextPlayerID();
+        AvatarRequest(PRI);
     }
 
     KF.GenericPlayerInitialization(B);
@@ -2405,7 +2920,7 @@ final function RestartBot(EcholonBot NewPlayer, optional NavigationPoint StartSp
 
     if(NewPlayer.Pawn == None)
     {
-        EchelonLog("failed to spawn player at " $ string(StartSpot));
+        EchelonLog("SPAWN_FAIL start=" $ string(StartSpot));
         NewPlayer.GotoState('Dead');
     }
     else
@@ -2537,6 +3052,7 @@ function Mutate(string MutateString, PlayerController Sender)
             PMsg(Sender, ("-SetUseCustomNames <" $ string(bUseCustomBotNames)) $ "> = Use CustomBotNames instead of look-based names");
             PMsg(Sender, ("-SetBotsLevel <" $ string(bShowBotLevel)) $ "> = Show [Lv X] prefix on bot names");
             PMsg(Sender, ("-SetBotRole <" $ string(bShowBotRole)) $ "> = Show [Role] prefix on bot names");
+            PMsg(Sender, ("-SetBotAvatars <" $ string(bBotAvatars)) $ "> = Bots get scoreboard pictures from the local avatar server");
         }
         else if (Left(MutateString, 11) ~= "SetNumBots ")
         {
@@ -2597,6 +3113,12 @@ function Mutate(string MutateString, PlayerController Sender)
             bShowBotLevel = bool(Mid(MutateString, 13));
             SaveConfig();
             PMsg(Sender, "Bots show [Lv X] name prefix: " $ string(bShowBotLevel));
+        }
+        else if (Left(MutateString, 14) ~= "SetBotAvatars ")
+        {
+            bBotAvatars = bool(Mid(MutateString, 14));
+            SaveConfig();
+            PMsg(Sender, "Bots get avatar server pictures (new bots only): " $ string(bBotAvatars));
         }
         else if (Left(MutateString, 11) ~= "SetBotRole ")
         {
@@ -2849,14 +3371,7 @@ function RelocateBotsToAmmoCrates()
         Occupancy[Pick]++;
 
         AnchorPos = AmmoFactories[Pick].Location;
-        Spot = AnchorPos;
-        for (Tries = 0; Tries < 6; Tries++)
-        {
-            Spot = PickSquadSpawnPoint(AnchorPos, 60.0, 120.0);
-            if (FastTrace(Spot + vect(0, 0, 40), AnchorPos + vect(0, 0, 40)))
-                break;
-            Spot = AnchorPos;
-        }
+        Spot = PickRelocateSpot(AnchorPos, Bot.Pawn);
         Bot.Pawn.SetLocation(Spot);
         EchelonLog("SPAWN_SPREAD bot=" $ Bot.Name $ " crate=" $ string(Pick) $ " occupancy=" $ string(Occupancy[Pick]));
     }
@@ -2874,6 +3389,91 @@ function SpawnSquadAt(vector AnchorPos, int SquadIndex)
         GruntPos = PickSquadSpawnPoint(AnchorPos, 90.0, 150.0);
         SpawnBotWithRank(GRUNT, GruntPos);
     }
+}
+
+function bool RelocateSpotOk(vector Spot, Pawn P)
+{
+    local vector HitLoc, HitNorm, FloorLoc, Probe, Ext, FloorTop;
+    local float H, R;
+    local NavigationPoint N;
+
+    if (P == None)
+    {
+        return false;
+    }
+
+    if (Trace(HitLoc, HitNorm, Spot - vect(0,0,96), Spot + vect(0,0,32), false) == None)
+    {
+        EchelonLog("SPAWN_SPOT_REJECT reason=floor");
+        return false;
+    }
+    FloorLoc = HitLoc;
+
+    H = P.GetCollisionHeight();
+    R = P.GetCollisionRadius();
+    Probe = FloorLoc;
+    Probe.Z += H + 4.0;
+    Ext.X = R;
+    Ext.Y = R;
+    Ext.Z = H;
+    if (Trace(HitLoc, HitNorm, Probe + vect(0,0,2), Probe, true, Ext) != None)
+    {
+        EchelonLog("SPAWN_SPOT_REJECT reason=clearance");
+        return false;
+    }
+
+    FloorTop = FloorLoc + vect(0,0,32);
+    foreach WorldInfo.RadiusNavigationPoints(class'NavigationPoint', N, FloorLoc, 400.0)
+    {
+        if (FastTrace(N.Location, FloorTop) && Abs(N.Location.Z - FloorLoc.Z) <= 128.0)
+        {
+            return true;
+        }
+    }
+
+    EchelonLog("SPAWN_SPOT_REJECT reason=nav");
+    return false;
+}
+
+function vector PickRelocateSpot(vector AnchorPos, Pawn P)
+{
+    local int Tries;
+    local vector Spot;
+    local NavigationPoint N;
+    local PathNode BestNode;
+    local float BestDistSq;
+    local float DistSq;
+
+    for (Tries = 0; Tries < 8; Tries++)
+    {
+        Spot = PickSquadSpawnPoint(AnchorPos, 80.0, 160.0);
+        if (FastTrace(Spot + vect(0,0,40), AnchorPos + vect(0,0,40)) && RelocateSpotOk(Spot, P))
+        {
+            EchelonLog("SPAWN_SPOT result=ok tries=" $ string(Tries + 1));
+            return Spot;
+        }
+    }
+
+    BestNode = None;
+    BestDistSq = 999999999.0;
+    foreach WorldInfo.RadiusNavigationPoints(class'NavigationPoint', N, AnchorPos, 300.0)
+    {
+        if (PathNode(N) == None)
+            continue;
+        DistSq = VSizeSq(N.Location - AnchorPos);
+        if (DistSq < BestDistSq)
+        {
+            BestDistSq = DistSq;
+            BestNode = PathNode(N);
+        }
+    }
+
+    EchelonLog("SPAWN_SPOT result=fallback");
+    if (BestNode != None)
+        Spot = BestNode.Location;
+        Spot.Z += P.GetCollisionHeight();
+        return Spot;
+    return AnchorPos;
 }
 
 function vector PickSquadSpawnPoint(vector AnchorPos, float MinR, float MaxR)

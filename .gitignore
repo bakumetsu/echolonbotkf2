@@ -5,3 +5,7 @@ __pycache__/
 
 # The agent kit lives only on the developer PC.
 kit/
+
+# Local build output of avatars/Build-AvatarsExe.bat
+avatars/build/
+avatars/dist/
