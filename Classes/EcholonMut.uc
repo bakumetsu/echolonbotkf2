@@ -125,6 +125,9 @@ var transient bool bPlaytest;
 var transient bool bPlaytestSpectating;
 var transient float PlaytestNextCamTime;
 var transient float PlaytestNextReportTime;
+var transient name PlaytestCamMode;           // 'ThirdPerson' or 'FirstPerson', kept across bot switches
+var transient int PlaytestLastZedCount;
+var transient float PlaytestZedCountSince;    // when AIAliveCount last changed (stuck-wave check)
 
 function EchelonLog(string Msg)
 {
@@ -263,6 +266,9 @@ function InitMutator(string Options, out string ErrorMessage)
     bPlaytest = class'GameInfo'.static.ParseOption(Options, "Playtest") ~= "1";
     if (bPlaytest)
     {
+        // Our controller makes left/right click and the camera-mode key work on bots (see EcholonSpectatorPC).
+        WorldInfo.Game.PlayerControllerClass = class'EcholonSpectatorPC';
+        PlaytestCamMode = 'ThirdPerson';
         EchelonLog("PLAYTEST_START map=" $ WorldInfo.GetMapName(true) $ " bots=" $ string(NumBots));
         SetTimer(1.0, true, 'PlaytestTick');
     }
@@ -307,38 +313,106 @@ final function PlaytestMakeSpectator(KFPlayerController PC)
     PlaytestNextCamTime = 0.0;
 }
 
-// Points the human's camera at the next living bot, in third person.
+// Points the human's camera at the next (Dir 1) or previous (Dir -1) living bot, in PlaytestCamMode.
 // Stock SpectateNextPlayer skips bots: KFGameInfo.CanSpectate only accepts PlayerController owners.
-final function PlaytestNextCamera(KFPlayerController PC)
+// A manual switch (a click) pauses the 30 s auto-rotation for 60 s.
+final function PlaytestStepCamera(PlayerController PC, int Dir, optional bool bManual)
 {
     local int I, Start, Count;
     local EcholonBot B;
 
     Count = ActiveBots.Length;
-    if (Count == 0)
+    if (Count == 0 || PC == None)
         return;
 
-    Start = 0;
+    Start = (Dir < 0) ? Count - 1 : 0;
     for (I = 0; I < Count; I++)
     {
-        if (ActiveBots[I] != None && ActiveBots[I].Pawn == PC.ViewTarget)
+        if (ActiveBots[I] != None && ActiveBots[I].Pawn != None && ActiveBots[I].Pawn == PC.ViewTarget)
         {
-            Start = I + 1;
+            Start = I + Dir;
             break;
         }
     }
 
     for (I = 0; I < Count; I++)
     {
-        B = ActiveBots[(Start + I) % Count];
+        B = ActiveBots[(((Start + I * Dir) % Count) + Count) % Count];
         if (B != None && B.Pawn != None && B.Pawn.IsAliveAndWell())
         {
             PC.SetViewTarget(B.Pawn);
-            PC.SetCameraMode('ThirdPerson');
-            EchelonLog("PLAYTEST_CAMERA target=" $ B.LogTag());
+            PC.SetCameraMode(PlaytestCamMode);
+            PlaytestNextCamTime = WorldInfo.TimeSeconds + (bManual ? 60.0 : 30.0);
+            EchelonLog("PLAYTEST_CAMERA target=" $ B.LogTag() $ " mode=" $ string(PlaytestCamMode) $ " manual=" $ string(bManual));
             return;
         }
     }
+}
+
+// Camera-mode key: first person <-> third person on the bot being watched.
+final function PlaytestToggleCamMode(PlayerController PC)
+{
+    if (PC == None)
+        return;
+    PlaytestCamMode = (PlaytestCamMode == 'FirstPerson') ? 'ThirdPerson' : 'FirstPerson';
+    PC.SetCameraMode(PlaytestCamMode);
+    PlaytestNextCamTime = WorldInfo.TimeSeconds + 60.0;
+    EchelonLog("PLAYTEST_CAMERA_MODE mode=" $ string(PlaytestCamMode));
+}
+
+// The VIP anchor while the human spectates: the current anchor while it is a living squad leader,
+// else the first living squad leader by group. It stays a squad leader (no CAPTAIN, no demotion).
+final function EcholonBot PlaytestPickAnchor()
+{
+    local EcholonBot Cur;
+    local int GroupIdx;
+
+    Cur = EcholonBot(VIPController);
+    if (Cur != None && !Cur.bDeleteMe && Cur.bIsGroupLeader && Cur.Pawn != None && Cur.Pawn.Health > 0)
+        return Cur;
+
+    for (GroupIdx = 0; GroupIdx < Fireteams.Length; GroupIdx++)
+    {
+        Cur = Fireteams[GroupIdx].Leader;
+        if (Cur != None && !Cur.bDeleteMe && Cur.Pawn != None && Cur.Pawn.Health > 0)
+            return Cur;
+    }
+    return None;
+}
+
+// Last zeds that stop dying (stuck behind geometry, etc.): after 180 s with 3 or fewer left and no
+// change in the count, log where they are and kill them so the run goes on.
+final function PlaytestCheckStuckWave()
+{
+    local KFPawn_Monster M;
+    local string Where;
+    local int N;
+
+    if (KF.AIAliveCount != PlaytestLastZedCount || KF.MyKFGRI.bTraderIsOpen || !KF.IsWaveActive())
+    {
+        PlaytestLastZedCount = KF.AIAliveCount;
+        PlaytestZedCountSince = WorldInfo.TimeSeconds;
+        return;
+    }
+    if (KF.AIAliveCount <= 0 || KF.AIAliveCount > 3 || !KF.SpawnManager.IsFinishedSpawning()
+        || WorldInfo.TimeSeconds - PlaytestZedCountSince < 180.0)
+        return;
+
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', M)
+    {
+        if (!M.IsAliveAndWell())
+            continue;
+        Where = Where $ (N > 0 ? "," : "") $ string(M.Class.Name) $ "@" $ CoordStr(M.Location);
+        N++;
+    }
+    EchelonLog("PLAYTEST_STUCK_WAVE wave=" $ string(KF.MyKFGRI.WaveNum) $ " zeds=" $ string(N) $ " stuck_for="
+        $ string(int(WorldInfo.TimeSeconds - PlaytestZedCountSince)) $ " where=" $ Where);
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', M)
+    {
+        if (M.IsAliveAndWell() && PlayerController(M.Controller) == None)
+            M.Died(None, None, M.Location);
+    }
+    PlaytestZedCountSince = WorldInfo.TimeSeconds;
 }
 
 function PlaytestTick()
@@ -363,9 +437,10 @@ function PlaytestTick()
     ViewPawn = Pawn(PC.ViewTarget);
     if (WorldInfo.TimeSeconds >= PlaytestNextCamTime || ViewPawn == None || !ViewPawn.IsAliveAndWell())
     {
-        PlaytestNextCamera(PC);
-        PlaytestNextCamTime = WorldInfo.TimeSeconds + 30.0;
+        PlaytestStepCamera(PC, 1);
     }
+
+    PlaytestCheckStuckWave();
 
     if (WorldInfo.TimeSeconds >= PlaytestNextReportTime)
     {
@@ -538,7 +613,7 @@ function InitializePlatoon()
             continue;
         if (Bot.bIsAlphaCommander)
             Bot.BotRank = LIEUTENANT;
-        else if (Bot == VIPController)
+        else if (Bot == VIPController && !bPlaytest)
             Bot.BotRank = CAPTAIN;
     }
 
@@ -708,6 +783,12 @@ function UpdateMacroWaypoints()
                     Fireteams[GroupIdx].Anchor = None;
                     GroupLeader.AssignedAnchor = None;
                 }
+                else if (VIP == GroupLeader)
+                {
+                    // Playtest: this leader is the VIP anchor itself, so it moves freely.
+                    Fireteams[GroupIdx].Anchor = None;
+                    GroupLeader.AssignedAnchor = None;
+                }
                 else if (VIP != None && VIP.Pawn != None)
                 {
                     Fireteams[GroupIdx].Anchor = None;
@@ -807,6 +888,19 @@ function NavigationPoint FindNearestChokepoint(Controller VIP)
 function Controller GetVIPController()
 {
     local Controller C;
+    local EcholonBot Anchor;
+
+    if (bPlaytest)
+    {
+        Anchor = PlaytestPickAnchor();
+        if (Anchor != VIPController)
+        {
+            EchelonLog("PLAYTEST_ANCHOR new=" $ (Anchor != None ? Anchor.LogTag() : "None") $ " old="
+                $ (EcholonBot(VIPController) != None ? EcholonBot(VIPController).LogTag() : "None"));
+            VIPController = Anchor;
+        }
+        return VIPController;
+    }
 
     if (VIPController != None && !VIPController.bDeleteMe
         && VIPController.Pawn != None && VIPController.Pawn.Health > 0)
@@ -1054,6 +1148,12 @@ function CleanupRangedHealCooldowns()
 function HandleVIPSuccession()
 {
     local EcholonBot Best;
+
+    if (bPlaytest)
+    {
+        GetVIPController();  // picks the next living squad leader, no demotion
+        return;
+    }
 
     Best = FindBestCandidate(ActiveBots);
     if (Best == None)
