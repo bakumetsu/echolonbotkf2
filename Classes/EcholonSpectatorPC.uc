@@ -21,6 +21,24 @@ final function EcholonMut GetPlaytestMut()
     return PlaytestMut;
 }
 
+// Stock RecieveChatMessage puts "Spectator" in front of a spectator's message, but GetChatChannel has
+// already added "<Spectator>", so chat showed "Spectator <Spectator> Name: msg". Keep the channel tag only.
+function RecieveChatMessage(PlayerReplicationInfo PRI, string ChatMessage, name Type, optional float MsgLifeTime)
+{
+    if (MyGFxHUD == None || MyGFxHUD.HudChatBox == None)
+        return;
+
+    if (PRI != None && PRI.bAdmin)
+    {
+        ChatMessage = class'KFLocalMessage'.default.AdminString $ ChatMessage;
+        MyGFxHUD.HudChatBox.AddChatMessage(ChatMessage, class'KFLocalMessage'.default.PriorityColor);
+    }
+    else
+    {
+        MyGFxHUD.HudChatBox.AddChatMessage(ChatMessage, class'KFLocalMessage'.default.SayColor);
+    }
+}
+
 state Spectating
 {
     exec function SpectateNextPlayer()
