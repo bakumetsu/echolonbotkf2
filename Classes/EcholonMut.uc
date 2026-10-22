@@ -104,6 +104,15 @@ var() config bool bAllowBotCrouch;
 // Count bots as voters in the skip-trader vote (stock behaviour). Off by default: only human
 // players vote, and the vote passes when every human votes yes (EcholonVoteCollector).
 var() config bool bBotsCountInSkipTraderVote;
+// Bots get scoreboard pictures from the local avatar server (kit\Start-AvatarServer.bat). Off by default.
+var() config bool bBotAvatars;
+// Port of the local avatar server. 0 or less means 8765.
+var() config int AvatarServerPort;
+var transient int AvatarMatchId;
+// AvatarDL, AvatarPRI and AvatarApplied are parallel arrays, one slot per requested bot picture.
+var transient array<KFHTTPImageDownloader> AvatarDL;
+var transient array<PlayerReplicationInfo> AvatarPRI;
+var transient array<bool> AvatarApplied;
 var array<KFPawn_Human> RangedHealTargets;
 var array<float> RangedHealCooldownEnds;
 var transient array<string> AvailableBotNames;
@@ -220,6 +229,11 @@ function MatchStarting()
 
     if (WorldInfo.NetMode == NM_Standalone)
     {
+        if (bBotAvatars)
+        {
+            AvatarMatchId = Rand(1000000000) + 1;
+            EchelonLog("AVATAR_ON match=" $ string(AvatarMatchId) $ " port=" $ string(AvatarPort()));
+        }
         for (I = 0; I < NumBots; ++I)
         {
             AddBot();
@@ -2390,6 +2404,100 @@ final function Class<KFPerk> PickBotPerk()
     return Picked;
 }
 
+final function int AvatarPort()
+{
+    if (AvatarServerPort > 0)
+    {
+        return AvatarServerPort;
+    }
+    return 8765;
+}
+
+// Give the bot a fake net id (high word zero, so it never matches a real Steam account) and ask the
+// local avatar server for its picture. The scoreboard shows the KF2 logo until the download is done.
+final function AvatarRequest(PlayerReplicationInfo PRI)
+{
+    local KFHTTPImageDownloader DL;
+    local bool bStarted;
+
+    if (WorldInfo.NetMode != NM_Standalone || !bBotAvatars || AvatarMatchId <= 0 || PRI == None)
+    {
+        return;
+    }
+
+    PRI.UniqueId.Uid.A = 0;
+    PRI.UniqueId.Uid.B = 0x0EC00000 + PRI.PlayerID;
+    AvatarSetEntry(PRI.UniqueId, None);
+
+    DL = new(self) class'KFHTTPImageDownloader';
+    AvatarDL.AddItem(DL);
+    AvatarPRI.AddItem(PRI);
+    AvatarApplied.AddItem(false);
+
+    bStarted = DL.DownloadImageFromURL("http://127.0.0.1:" $ string(AvatarPort()) $ "/avatar/" $ string(AvatarMatchId) $ "/" $ string(PRI.PlayerID) $ ".png", AvatarDownloadDone);
+    EchelonLog("AVATAR_REQUEST pid=" $ string(PRI.PlayerID) $ " started=" $ string(bStarted));
+    if (!bStarted)
+    {
+        EchelonLog("AVATAR_FAIL pid=" $ string(PRI.PlayerID) $ " reason=start");
+    }
+}
+
+// No early exit: every entry with this id is updated.
+final function AvatarSetEntry(UniqueNetId Id, Texture2D Tex)
+{
+    local KFPlayerController PC;
+    local KFPlayerController.PlayerSteamAvatar Entry;
+    local int I;
+    local bool bFound;
+
+    PC = KFPlayerController(GetALocalPlayerController());
+    if (PC == None)
+    {
+        return;
+    }
+
+    for (I = 0; I < PC.AvatarList.Length; ++I)
+    {
+        if (PC.AvatarList[I].NetID == Id)
+        {
+            PC.AvatarList[I].Avatar = Tex;
+            bFound = true;
+        }
+    }
+    if (!bFound)
+    {
+        Entry.NetID = Id;
+        Entry.Avatar = Tex;
+        PC.AvatarList.AddItem(Entry);
+    }
+}
+
+// The download delegate does not say which downloader finished, so every pending one is checked.
+// Downloaders stay in AvatarDL for the whole match so their textures are not garbage-collected.
+function AvatarDownloadDone(bool bWasSuccessful)
+{
+    local int I;
+
+    for (I = 0; I < AvatarDL.Length; ++I)
+    {
+        if (AvatarApplied[I] || AvatarDL[I] == None || AvatarPRI[I] == None)
+        {
+            continue;
+        }
+        if (AvatarDL[I].TheTexture == None)
+        {
+            continue;
+        }
+        AvatarSetEntry(AvatarPRI[I].UniqueId, AvatarDL[I].TheTexture);
+        AvatarApplied[I] = true;
+        EchelonLog("AVATAR_SET pid=" $ string(AvatarPRI[I].PlayerID) $ " tex=" $ PathName(AvatarDL[I].TheTexture));
+    }
+    if (!bWasSuccessful)
+    {
+        EchelonLog("AVATAR_FAIL reason=download");
+    }
+}
+
 final function bool AddBot()
 {
     local EcholonBot B;
@@ -2415,6 +2523,7 @@ final function bool AddBot()
     {
         PRI.CurrentPerkClass = B.Perk;
         PRI.PlayerID = KF.GetNextPlayerID();
+        AvatarRequest(PRI);
     }
 
     KF.GenericPlayerInitialization(B);
@@ -2632,6 +2741,7 @@ function Mutate(string MutateString, PlayerController Sender)
             PMsg(Sender, ("-SetUseCustomNames <" $ string(bUseCustomBotNames)) $ "> = Use CustomBotNames instead of look-based names");
             PMsg(Sender, ("-SetBotsLevel <" $ string(bShowBotLevel)) $ "> = Show [Lv X] prefix on bot names");
             PMsg(Sender, ("-SetBotRole <" $ string(bShowBotRole)) $ "> = Show [Role] prefix on bot names");
+            PMsg(Sender, ("-SetBotAvatars <" $ string(bBotAvatars)) $ "> = Bots get scoreboard pictures from the local avatar server");
         }
         else if (Left(MutateString, 11) ~= "SetNumBots ")
         {
@@ -2692,6 +2802,12 @@ function Mutate(string MutateString, PlayerController Sender)
             bShowBotLevel = bool(Mid(MutateString, 13));
             SaveConfig();
             PMsg(Sender, "Bots show [Lv X] name prefix: " $ string(bShowBotLevel));
+        }
+        else if (Left(MutateString, 14) ~= "SetBotAvatars ")
+        {
+            bBotAvatars = bool(Mid(MutateString, 14));
+            SaveConfig();
+            PMsg(Sender, "Bots get avatar server pictures (new bots only): " $ string(bBotAvatars));
         }
         else if (Left(MutateString, 11) ~= "SetBotRole ")
         {
