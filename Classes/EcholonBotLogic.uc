@@ -1047,6 +1047,10 @@ function bool EvaluateSquadTether()
     if (Pawn == None || mut == None)
         return false;
 
+    // Blocked by the nav stuck ladder: hold or fight instead of tethering for a while.
+    if (WorldInfo.TimeSeconds < NavBlockedUntil)
+        return false;
+
     if (KFGRI != None && KFGRI.bTraderIsOpen && KFGRI.OpenedTrader != None
         && KFGRI.GetTraderTimeRemaining() > TRADER_REFORM_REMAINING)
     {
