@@ -109,6 +109,7 @@ var float NavGridOffUntil;            // grid disabled for this bot until this t
 var bool bNavGridPause;                // true while the grid must not steer (an emergency drop walks off a ledge)
 var int NavGridEvals;                 // tiles evaluated by this bot (for logs)
 var float NavGridLogTime;             // last time a bend log line was written (2 s throttle)
+var float NavGridArmedUntil;          // the grid steers only until this time, set when the stuck ladder fires
 var float FollowRampStart; // game time the pawn last started from a stop
 var float FollowRampUpTime; // seconds to ramp from min pct to full speed
 var float FollowRampMinPct; // minimum speed fraction at ramp start
@@ -538,7 +539,8 @@ function int NavGridRayClear(vector Dir, float RefZ, float Now, int MaxTiles, bo
             TY = NavGrid.TileOf(Loc.Y);
             Band = NavGrid.BandOf(RefZ);
             NavGrid.Lookup(TX, TY, Band, Now, FloorZ);
-            if (bHasPrev && Abs(FloorZ - PrevFloorZ) > 35.0)
+            // One tile apart: a 35 uu step plus a 45 deg slope still walks (stairs, ramps).
+            if (bHasPrev && Abs(FloorZ - PrevFloorZ) > 50.0)
             {
                 return I - 1;
             }
@@ -550,13 +552,16 @@ function int NavGridRayClear(vector Dir, float RefZ, float Now, int MaxTiles, bo
 }
 
 // Choose the walk direction, bending around lava when the wanted path is blocked.
-function vector NavGridSteer(vector WantDir)
+// Only steers for a few seconds after the stuck ladder fires (NavGridArmedUntil), only looks as far as
+// the move target (WantDist, 0 = unknown) and never turns more than 60 deg off the route, so a wall
+// behind a waypoint or a doorway no longer turns the bot sideways or backwards.
+function vector NavGridSteer(vector WantDir, optional float WantDist)
 {
     local float Now, RefZ, C0, BestScore, BestC, BestAngle;
     local vector BestDir, H, R;
-    local int I, C;
+    local int I, C, MaxTiles;
     local float Deg, Rad, CosA, SinA;
-    local int Angles[8];
+    local int Angles[4];
 
     Now = WorldInfo.TimeSeconds;
 
@@ -564,7 +569,7 @@ function vector NavGridSteer(vector WantDir)
     {
         return WantDir;
     }
-    if (Now < NavGridOffUntil)
+    if (Now < NavGridOffUntil || Now >= NavGridArmedUntil)
     {
         return WantDir;
     }
@@ -584,9 +589,15 @@ function vector NavGridSteer(vector WantDir)
         return NavGridDir;
     }
 
-    // Open space: wanted direction is clear, grid sleeps.
-    C0 = float(NavGridRayClear(WantDir, RefZ, Now, 8, true));
-    if (C0 >= 6.0)
+    MaxTiles = 8;
+    if (WantDist > 0.0)
+    {
+        MaxTiles = Clamp(int(WantDist / class'EcholonNavGrid'.const.NAV_TILE) + 1, 2, 8);
+    }
+
+    // Open space: wanted direction is clear up to the target (or 6 tiles), grid sleeps.
+    C0 = float(NavGridRayClear(WantDir, RefZ, Now, MaxTiles, true));
+    if (C0 >= float(Min(6, MaxTiles)))
     {
         NavGridKeepUntil = 0.0;
         return WantDir;
@@ -597,17 +608,13 @@ function vector NavGridSteer(vector WantDir)
     Angles[1] = -30;
     Angles[2] = 60;
     Angles[3] = -60;
-    Angles[4] = 90;
-    Angles[5] = -90;
-    Angles[6] = 120;
-    Angles[7] = -120;
 
     BestScore = -1000.0;
     BestC = -1.0;
     BestAngle = 0.0;
     BestDir = WantDir;
 
-    for (I = 0; I < 8; I++)
+    for (I = 0; I < 4; I++)
     {
         Deg = float(Angles[I]);
         Rad = Deg * 0.0174533;
@@ -616,8 +623,8 @@ function vector NavGridSteer(vector WantDir)
         H.X = WantDir.X * CosA - WantDir.Y * SinA;
         H.Y = WantDir.X * SinA + WantDir.Y * CosA;
         H.Z = 0.0;
-        C = NavGridRayClear(H, RefZ, Now, 8, true);
-        R.X = 10.0 * float(C) - Abs(Deg) * 0.1;
+        C = NavGridRayClear(H, RefZ, Now, MaxTiles, true);
+        R.X = 10.0 * float(C) - Abs(Deg) * 0.3;
         if (R.X > BestScore)
         {
             BestScore = R.X;
@@ -2565,7 +2572,7 @@ PathMove:
     }
     FollowOnMoveBegin(false);
     EchelonLog("NAV_ACCEL_NODE node=" $ string(FollowNode));
-    Pawn.Acceleration = FollowSeparationPush(HeadlessAvoidAdjust(NavGridSteer(FollowSteerDirBudgeted(FollowNode)))) * FMax(Pawn.GroundSpeed, 0.0001f);
+    Pawn.Acceleration = FollowSeparationPush(HeadlessAvoidAdjust(NavGridSteer(FollowSteerDirBudgeted(FollowNode), VSize2D(FollowNode.Location - Pawn.Location)))) * FMax(Pawn.GroundSpeed, 0.0001f);
     FollowApplySpeedCap();
     Sleep(FollowMinLoopSleep);
     Goto('Dispatch');
