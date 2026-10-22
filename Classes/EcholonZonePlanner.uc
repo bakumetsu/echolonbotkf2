@@ -675,7 +675,6 @@ final function PickSpots(out ZoneRec Z, array<NavigationPoint> Candidates)
     }
 }
 
-// True when N is a valid spot candidate (not a special marker).
 // True when a zed spawn volume centre lies within ZoneSpawnClear of the location.
 final function bool SpawnNear(vector L)
 {
@@ -691,6 +690,7 @@ final function bool SpawnNear(vector L)
     return false;
 }
 
+// True when N is a valid spot candidate (not a lift, ladder, teleporter or jump pad).
 final function bool GoodSpotNode(NavigationPoint N)
 {
     if (N == None)
