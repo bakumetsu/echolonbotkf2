@@ -174,6 +174,14 @@ var transient float LastNodeBlockTime;
 var int NodeBlockCount;
 var transient float NextAdjustTime;
 var transient float MovePauseTime;
+// One stuck ladder for every mover (nav redesign N5): progress = the pawn moved NAV_PROGRESS_MIN uu in NAV_PROBE_INTERVAL.
+var transient vector NavProbeLoc;
+var transient float NavProbeTime;
+var transient float NavStall;
+var transient int NavLevel;
+var transient NavigationPoint NavLastGood;
+var float NavBlockedUntil;
+var bool bNavTeleport;
 var transient float TempBlockTime;
 var transient float NextVictoryDance;
 var transient float NextDoshShareTime;
@@ -1262,6 +1270,8 @@ function Tick(float Delta)
         GlobalZedCount = CountNearbyZeds(GLOBAL_ZED_RADIUS);
     }
 
+    NavProgressCheck();
+
     // Adjusting movement
     if (bAdjusting)
     {
@@ -1333,6 +1343,147 @@ function Tick(float Delta)
                 {
                     ProcessMoveToward();
                 }
+            }
+        }
+    }
+}
+
+// Progress check for MoveTo/MoveToward and the follow mover. 0.75 s without progress backs off (not in follow, which
+// has its own ladder), 1.5 s strikes the edge and ends the move so the hub replans, 3 s walks back to the last good
+// node, 6 s reports Blocked (the hub skips tethering for 10 s), 15 s teleports to the last good node when no human sees the bot.
+final function NavProgressCheck()
+{
+    local float IterNow, IterH;
+    local bool bFollow, bMoving, bSeen;
+    local vector IterDir;
+    local ReachSpec IterSpec;
+    local NavigationPoint IterEnd;
+    local PlayerController IterPC;
+
+    if (Pawn == None)
+    {
+        return;
+    }
+    IterNow = WorldInfo.TimeSeconds;
+    if (IterNow - NavProbeTime < 0.75)
+    {
+        return;
+    }
+    bFollow = IsInState('FollowingLeader');
+    bMoving = (bFollow && bFollowMoveActive) || (!bFollow && MoveFlags != 0);
+    if (!bMoving || Pawn.Physics == PHYS_Falling || (Enemy != None && Enemy.IsAliveAndWell() && LineOfSightTo(Enemy)))
+    {
+        NavStall = 0.0;
+        NavLevel = 0;
+        NavProbeLoc = Pawn.Location;
+        NavProbeTime = IterNow;
+        return;
+    }
+    if (VSize(Pawn.Location - NavProbeLoc) >= 48.0)
+    {
+        if (NavStall > 0.0)
+        {
+            EchelonLog("NAV_RECOVER level=" $ string(NavLevel) $ " ok=1");
+        }
+        NavStall = 0.0;
+        NavLevel = 0;
+        if (Pawn.Anchor != None && VSizeSq(Pawn.Location - Pawn.Anchor.Location) < 14400.0)
+        {
+            NavLastGood = Pawn.Anchor;
+        }
+        NavProbeLoc = Pawn.Location;
+        NavProbeTime = IterNow;
+        return;
+    }
+    NavStall += IterNow - NavProbeTime;
+    NavProbeTime = IterNow;
+
+    if (NavLevel < 1 && NavStall >= 0.75)
+    {
+        NavLevel = 1;
+        if (!bFollow)
+        {
+            if (NavLastGood != None)
+            {
+                IterDir = NavLastGood.Location - Pawn.Location;
+            }
+            else
+            {
+                IterDir = -vector(Pawn.Rotation);
+            }
+            IterDir.Z = 0.0;
+            if (VSizeSq(IterDir) < 1.0)
+            {
+                IterDir = VRand();
+                IterDir.Z = 0.0;
+            }
+            bAdjusting = true;
+            AdjustPosition.Position = Pawn.Location + (Normal(IterDir) * 64.0);
+            EchelonLog("NAV_STUCK level=1 state=" $ string(GetStateName()) $ " stalled=" $ string(NavStall));
+        }
+    }
+    if (NavLevel < 2 && NavStall >= 1.5)
+    {
+        NavLevel = 2;
+        if (!bFollow)
+        {
+            IterEnd = NavigationPoint(MoveTarget);
+            if (MoveFlags == 2 && IterEnd != None && Pawn.Anchor != None && Pawn.Anchor != IterEnd)
+            {
+                IterSpec = Pawn.Anchor.GetReachSpecTo(IterEnd);
+                FollowStrikeEdge(IterSpec);
+            }
+            EchelonLog("NAV_STUCK level=2 state=" $ string(GetStateName()) $ " target=" $ string(MoveTarget));
+            EndMoveTime = IterNow - 1.0;
+        }
+    }
+    if (NavLevel < 3 && NavStall >= 3.0)
+    {
+        NavLevel = 3;
+        EchelonLog("NAV_STUCK level=3 state=" $ string(GetStateName()) $ " lastgood=" $ string(NavLastGood));
+        if (!bFollow && NavLastGood != None)
+        {
+            MoveTowardX(NavLastGood, None, false);
+        }
+    }
+    if (NavLevel < 4 && NavStall >= 6.0)
+    {
+        NavLevel = 4;
+        NavBlockedUntil = IterNow + 10.0;
+        EchelonLog("NAV_BLOCKED state=" $ string(GetStateName()) $ " stalled=" $ string(NavStall));
+        if (bFollow)
+        {
+            bFollowExitPending = true;
+        }
+        else
+        {
+            AbortMove();
+            HubFail("NavBlocked");
+            EndMoveTime = IterNow - 1.0;
+        }
+    }
+    if (NavLevel < 5 && NavStall >= 15.0)
+    {
+        NavLevel = 5;
+        if (bNavTeleport && NavLastGood != None)
+        {
+            foreach WorldInfo.AllControllers(class'PlayerController', IterPC)
+            {
+                if (IterPC.Pawn != None && IterPC.Pawn.IsAliveAndWell() && IterPC.LineOfSightTo(Pawn))
+                {
+                    bSeen = true;
+                }
+            }
+            if (!bSeen)
+            {
+                IterH = Pawn.GetCollisionHeight();
+                IterDir = NavLastGood.Location;
+                IterDir.Z += IterH;
+                Pawn.SetLocation(IterDir);
+                EchelonLog("NAV_TELEPORT to=" $ string(NavLastGood));
+                NavStall = 0.0;
+                NavLevel = 0;
+                NavProbeLoc = Pawn.Location;
             }
         }
     }
@@ -4733,6 +4884,7 @@ function UpdateHoldAreaDrift()
 
 defaultproperties
 {
+    bNavTeleport=true
     bIsPlayer=true
     bNotifyApex=true
     CurrentFormation=StaggeredColumn

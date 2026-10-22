@@ -545,6 +545,9 @@ function PlaytestTick()
         return;
     }
 
+    // Before the human lookup: after a defeat the local controller can be gone, and the run must still end.
+    PlaytestCheckWaveEnd();
+
     PC = GetPlaytestHuman();
     if (PC == None)
         return;
@@ -561,7 +564,6 @@ function PlaytestTick()
     }
 
     PlaytestCheckStuckWave();
-    PlaytestCheckWaveEnd();
 
     if (WorldInfo.TimeSeconds >= PlaytestNextReportTime)
     {
