@@ -220,8 +220,8 @@ function PostBeginPlay()
         HealCylinderHeight = 300.0;
         HealMinHealthPct = 60.0;
         bEnableFastTraceHealing = true;
-        NavGridSquads = 1;
-        bNavGridDebug = true;
+        NavGridSquads = 0;
+        bNavGridDebug = false;
         _Separator7 = "--- HEALING SETTINGS ---";
         ConfigVer = CUR_CONFIGVER;
         SaveConfig();
