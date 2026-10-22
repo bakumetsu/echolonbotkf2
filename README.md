@@ -26,9 +26,11 @@ Navigation settings in that file: `NavGridSquads` (default 0; 0 = the floor-is-l
 
 ## Playtest mode
 
-Add `?Playtest=1` to the map URL and the human becomes a spectator who watches the bots. Options: `PlaytestWaves` (wave cap) and `PlaytestBots` (bot count). The game logs `PLAYTEST_` lines and quits when the run is done. Details are in `docs/ARCHITECTURE.md` (EcholonMut and EcholonSpectatorPC).
+Add `?Playtest=1` to the map URL and the human becomes a spectator who watches the bots. Options: `PlaytestWaves` (wave cap) and `PlaytestBots` (bot count). `?SkipTrader=1` (only read with `?Playtest=1`) skips the rest of the trader time once every living bot has shopped. `?RemoteShop=1` makes the bots buy from where they stand when the trader opens (also works without `Playtest=1`; the ini key `bRemoteShop` does the same, and `?RemoteShop=0` forces it off). The game logs `PLAYTEST_` lines and quits when the run is done. Details are in `docs/ARCHITECTURE.md` (EcholonMut and EcholonSpectatorPC).
 
-With the local kit, run `python kit\tools\playtest_runner.py --map KF-BioticsLab --waves 2 --matches 2 --bots 6`.
+Spectator camera: left/right click is the previous/next bot, Space toggles free fly (WASD and mouse), middle click cycles third person, first person and orbit, and the mouse wheel zooms in third person and orbit. The camera only changes bot when the watched bot dies or on a click. `EcholonSpectatorPC` is now the player controller in every game, so a human who dies in normal play gets the same camera; a living player is unchanged. Known limitations are listed in `docs/ARCHITECTURE.md` under "Known limitations and open items".
+
+With the local kit, run `python kit\tools\playtest_runner.py --map KF-BioticsLab --waves 2 --matches 2 --bots 6`. The runner adds `?SkipTrader=1` by default (`--no-skip-trader` turns it off); `--remote-shop` adds `?RemoteShop=1`.
 
 ## Docs before every push
 
