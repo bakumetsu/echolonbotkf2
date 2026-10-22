@@ -276,6 +276,12 @@ var transient bool bShotProbeClear;
 var transient rotator AimRot;
 var transient float LastAimTime;
 var transient float AimReadyTime;
+var float LastHubCheckTime;     // game time of the last PickCombatStyle (hub) call made from FightEnemy.FinishedMove
+var float CombatHubGap;         // seconds between hub checks while FightEnemy keeps the same enemy
+var float LastRepickLog;        // game time of the last COMBAT_REPICK log line (throttle 2 s)
+var float ZeroMoveMinDist;      // 2D distance under which a combat move is not started
+var float BashMaxDistSq;        // squared distance for a bash
+var float BashInterval;         // seconds between bashes
 var transient bool bAimInit;
 var transient Actor AimLastTarget;
 var transient bool bOffsetCached;
@@ -832,7 +838,10 @@ function bool FireWeaponAt(Actor inActor)
 	if (inActor != AimLastTarget)
 	{
 		AimLastTarget = inActor;
-		AimReadyTime = WorldInfo.TimeSeconds + AIM_REACT_MIN + (FRand() * AIM_REACT_RANGE);
+		if ((Normal(inActor.Location - Pawn.Location) dot vector(Rotation)) < 0.9659)
+		{
+			AimReadyTime = WorldInfo.TimeSeconds + AIM_REACT_MIN + (FRand() * AIM_REACT_RANGE);
+		}
 	}
 	if (Pawn.IsFiring())
 	{
@@ -861,8 +870,10 @@ function bool FireWeaponAt(Actor inActor)
 		{
 			W.StartFire(BOTFM_PRIMARY);
 		}
-		else if (VSizeSq(inActor.Location - Pawn.Location) < 40000.0)
+		else if (VSizeSq(inActor.Location - Pawn.Location) < BashMaxDistSq && WorldInfo.TimeSeconds >= NextBashTime)
 		{
+			NextBashTime = WorldInfo.TimeSeconds + BashInterval;
+			EchelonLog("COMBAT_BASH dist=" $ string(int(VSize(inActor.Location - Pawn.Location))));
 			W.StartFire(BOTFM_BASH);
 		}
 		else
@@ -1044,8 +1055,13 @@ simulated function GetPlayerViewPoint(out Vector out_Location, out Rotator out_R
     }
 }
 
-final function MoveToX(Vector Dest, optional Actor ViewFocus, optional bool bSerpent = true)
+final function MoveToX(Vector Dest, optional Actor ViewFocus, optional bool bSerpent = true, optional name Src)
 {
+    if (IsInState('FightEnemy') && VSize2D(Dest - Pawn.Location) < ZeroMoveMinDist)
+    {
+        ZeroMoveHold(Src, "to");
+        return;
+    }
     bAdjusting = false;
     MoveFlags = 1;
     SetDestinationPosition(Dest);
@@ -1061,15 +1077,19 @@ final function MoveToX(Vector Dest, optional Actor ViewFocus, optional bool bSer
     }
 }
 
-final function MoveTowardX(Actor Dest, optional Actor ViewFocus, optional bool bSerpent = true)
+final function MoveTowardX(Actor Dest, optional Actor ViewFocus, optional bool bSerpent = true, optional name Src)
 {
+    if (IsInState('FightEnemy') && Dest != None && Pawn.ReachedDestination(Dest))
+    {
+        ZeroMoveHold(Src, "toward");
+        return;
+    }
     bAdjusting = false;
     MoveFlags = 2;
     MoveTarget = Dest;
     bSerpentineMove = bSerpent;
     PrevMovePos = Pawn.Location;
     MovePauseTime = WorldInfo.TimeSeconds;
-
     if (Dest != None)
     {
         SetDestinationPosition(Dest.Location);
@@ -1077,16 +1097,22 @@ final function MoveTowardX(Actor Dest, optional Actor ViewFocus, optional bool b
         Focus = Dest;
         EndMoveTime = (WorldInfo.TimeSeconds + (VSize(Dest.Location - Pawn.Location) / Pawn.GroundSpeed)) + 0.75;
     }
-
     if (ViewFocus != None)
     {
         Focus = ViewFocus;
     }
-
     if (bSerpent)
     {
         bSerpentLeft = (Rand(2) == 0);
     }
+}
+
+final function ZeroMoveHold(name Src, string Kind)
+{
+    MoveFlags = 0;
+    Pawn.Acceleration = vect(0, 0, 0);
+    EchelonLog("COMBAT_ZERO_MOVE src=" $ string(Src) $ " kind=" $ Kind);
+    SetTimer(0.25, false, 'CombatRepick');
 }
 
 final function StrafeTowardPoint(Vector Dest)
@@ -3501,23 +3527,38 @@ final function bool IsInEffectiveRange(Actor T)
 	return VSizeSq(T.Location - Pawn.Location) <= RangeCacheSq;
 }
 
+// A random unit vector in the horizontal plane (VRand() has a vertical part that makes zero-length or floor-bound moves).
+final function vector RandDir2D()
+{
+    local vector V;
+
+    V = VRand();
+    V.Z = 0.0;
+    if (VSizeSq(V) < 0.01)
+    {
+        V.X = 1.0;
+        V.Y = 0.0;
+    }
+    return Normal(V);
+}
+
 final function CloseToEffectiveRange()
 {
     if (BotRank == GRUNT)
     {
-        MoveToX(Pawn.Location + (Normal2D(Enemy.Location - Pawn.Location) * 250.0), Enemy);
+        MoveToX(Pawn.Location + (Normal2D(Enemy.Location - Pawn.Location) * 250.0), Enemy, true, 'CloseRange1');
     }
     else if (WalkReachable(Enemy))
     {
-        MoveTowardX(Enemy, Enemy);
+        MoveTowardX(Enemy, Enemy, true, 'CloseRange2');
     }
     else if (BuildPathToward(Enemy))
     {
-        MoveTowardX(MoveTarget, Enemy);
+        MoveTowardX(MoveTarget, Enemy, true, 'CloseRange3');
     }
     else
     {
-        MoveToX(Pawn.Location + (Normal2D(Enemy.Location - Pawn.Location) * 300.0), Enemy);
+        MoveToX(Pawn.Location + (Normal2D(Enemy.Location - Pawn.Location) * 300.0), Enemy, true, 'CloseRange4');
     }
 }
 
@@ -4390,7 +4431,7 @@ function GruntPickCombatStyle()
     if (bGruntMeleeStyle)
     {
         ApplyCrouch(false);
-        MoveTowardX(Enemy);
+        MoveTowardX(Enemy, None, true, 'Grunt1');
         return;
     }
 
@@ -4402,7 +4443,7 @@ function GruntPickCombatStyle()
         strafeDir = Normal(toEnemy Cross vect(0,0,1));
         if (FRand() < 0.5)
             strafeDir = -strafeDir;
-        MoveToX(Pawn.Location + (strafeDir * 150.0));
+        MoveToX(Pawn.Location + (strafeDir * 150.0), None, true, 'Grunt2');
     }
     else
     {
@@ -4957,6 +4998,10 @@ function UpdateHoldAreaDrift()
 
 defaultproperties
 {
+    CombatHubGap=0.5
+    ZeroMoveMinDist=50.0
+    BashMaxDistSq=5625.0
+    BashInterval=1.5
     bNavTeleport=true
     NavTeleportAfter=5.0
     NavNextTeleportTry=0.0
