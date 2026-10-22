@@ -45,6 +45,7 @@ var array<int> Queue;
 var int QHead;
 var bool bFloodInit;
 var int ReachedCount;
+var int StarvedFrames;
 
 const PH_COLLECT = 0;
 const PH_FLOOD = 1;
@@ -69,6 +70,7 @@ final function Begin(EcholonMut M, float Now)
     bFloodInit = false;
     QHead = 0;
     ReachedCount = 0;
+    StarvedFrames = 0;
     Queue.Length = 0;
     NodeHash.Length = 0;
 }
@@ -175,6 +177,14 @@ final function StepFlood(float Now)
 
     if (!bFloodInit)
     {
+        // The node hash has 8192 slots; a bigger map cannot be indexed, so skip the list instead of looping.
+        if (AllNodes.Length > 6000)
+        {
+            Mut.EchelonLog("ZONE_SKIP reason=too_many_nodes nodes=" $ string(AllNodes.Length));
+            Phase = PH_DONE;
+            bDone = true;
+            return;
+        }
         // --- one-shot init ---
         Reached.Length = AllNodes.Length;
         for (i = 0; i < AllNodes.Length; i++)
@@ -317,10 +327,14 @@ final function StepZones(float Now)
     }
 
     // --- Budget gate ---
-    if (Mut.NavBudget != None && Mut.NavBudget.UsLeft(class'EcholonNavBudget'.const.NAV_PRIO_SCAN, Now) < 20.0 * Mut.NavMeter.UnitTraceUs)
+    // Wait for a free slice, but never starve: after 10 busy frames in a row do the zone anyway.
+    if (Mut.NavBudget != None && StarvedFrames < 10
+        && Mut.NavBudget.UsLeft(class'EcholonNavBudget'.const.NAV_PRIO_SCAN, Now) < 20.0 * Mut.NavMeter.UnitTraceUs)
     {
+        StarvedFrames++;
         return;
     }
+    StarvedFrames = 0;
 
     // --- Step 1: copy zone, check merged ---
     Z = Zones[Cursor];
@@ -673,7 +687,7 @@ final function bool GoodSpotNode(NavigationPoint N)
 }
 
 // True when N belongs to zone Z (pool membership or radial check).
-final function bool ZoneHas(ZoneRec Z, NavigationPoint N)
+final function bool ZoneHas(out ZoneRec Z, NavigationPoint N)
 {
     if (Z.Src == 0)
     {
