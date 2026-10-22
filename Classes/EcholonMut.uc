@@ -40,6 +40,10 @@ struct CachedHumanInfo { var KFPawn_Human HumanPawn; var vector Loc; var vector 
 var transient array<EcholonWeaponInfo> TraderList;
 var transient EcholonNavMeter NavMeter;       // nav cost counter, shared by all bots (N6)
 var transient EcholonNavBudget NavBudget;     // per-frame nav budget, shared by all bots (N7)
+var transient EcholonNavScan NavScan;         // start-of-match link scan state and bad links (N8)
+var transient float NavScanR;                 // body radius used by the scan
+var transient float NavScanH;                 // body half height used by the scan
+var transient float NavScanKnee;              // trace height above the floor (knee), set in NavScanBegin
 var config int ConfigVer;
 var config string _Separator1;
 var() config byte NumBots;
@@ -228,6 +232,7 @@ function PostBeginPlay()
     SetTimer(3.0, true, 'CacheHumans');
     NavMeter = new class'EcholonBot.EcholonNavMeter';
     NavBudget = new class'EcholonBot.EcholonNavBudget';
+    NavScan = new class'EcholonBot.EcholonNavScan';
     SetTimer(15.0, false, 'NavBenchmarkRun');
 }
 
@@ -242,13 +247,209 @@ function NavBenchmarkRun()
         {
             ActiveBots[I].NavBenchmark();
             EchelonLog(NavMeter.UnitCostMessage());
+            NavScanBegin();
             return;
         }
     }
     SetTimer(10.0, false, 'NavBenchmarkRun');
 }
 
-// Closes the nav meter's frame and logs its report every 30 s (N6).
+// Probe body dimensions, fill the node list and start the start-of-match link scan (N8).
+function NavScanBegin()
+{
+    local int i;
+    local NavigationPoint N;
+
+    if (NavScan == None || NavScan.bActive || NavScan.bDone)
+    {
+        return;
+    }
+    NavScanR = 36.0;
+    NavScanH = 86.0;
+    NavScanKnee = 40.0;
+    for (i = 0; i < ActiveBots.Length; i++)
+    {
+        if (ActiveBots[i] != None && ActiveBots[i].Pawn != None)
+        {
+            NavScanR = ActiveBots[i].Pawn.GetCollisionRadius() * 0.9;
+            NavScanH = ActiveBots[i].Pawn.GetCollisionHeight();
+            break;
+        }
+    }
+    foreach WorldInfo.AllActors(class'NavigationPoint', N)
+    {
+        NavScan.Nodes.AddItem(N);
+    }
+    NavScan.Begin(WorldInfo.TimeSeconds);
+    EchelonLog("NAV_SCAN_START nodes=" $ string(NavScan.Nodes.Length));
+}
+
+// Per-frame budgeted step: process up to 25 links or until the scan budget is spent.
+function NavScanStep()
+{
+    local float Now;
+    local ReachSpec Spec;
+    local NavigationPoint From;
+    local int Why;
+    local int TraceCount;
+    local int Count;
+    local string WhyName;
+    Now = WorldInfo.TimeSeconds;
+    Count = 0;
+    while (Count < 25)
+    {
+        if (NavBudget != None && NavBudget.UsLeft(class'EcholonNavBudget'.const.NAV_PRIO_SCAN, Now) < 6.0 * NavMeter.UnitTraceUs)
+        {
+            break;
+        }
+        if (!NavScan.NextSpec(Spec, From))
+        {
+            EchelonLog(NavScan.Summary(Now));
+            break;
+        }
+        Count++;
+        NavScan.Links++;
+        Why = NavScanCheck(Spec, From, TraceCount);
+        NavScan.Traces += TraceCount;
+        if (NavBudget != None)
+        {
+            NavBudget.TakeUs(class'EcholonNavBudget'.const.NAV_PRIO_SCAN, TraceCount * NavMeter.UnitTraceUs, Now);
+        }
+        if (Why == 1 || Why == 2 || Why == 3)
+        {
+            NavScan.AddBad(Spec);
+            if (Why == 3)
+            {
+                NavScan.Special++;
+            }
+            if (NavScan.BadLogged < 150)
+            {
+                NavScan.BadLogged++;
+                if (Why == 1)
+                {
+                    WhyName = "blocked";
+                }
+                else if (Why == 2)
+                {
+                    WhyName = "nofloor";
+                }
+                else
+                {
+                    WhyName = "special";
+                }
+                EchelonLog("NAV_SCAN_BAD from=" $ string(From) $ " to=" $ string(Spec.GetEnd()) $ " why=" $ WhyName $ " at=" $ string(int(From.Location.X)) $ "," $ string(int(From.Location.Y)) $ "," $ string(int(From.Location.Z)));
+            }
+        }
+        else if (Why == 4)
+        {
+            NavScan.Drops++;
+        }
+        else if (Why == 5)
+        {
+            NavScan.Doors++;
+        }
+    }
+}
+
+// Z of the floor under Loc (up to 300 uu down); the node's own Z minus the body half height if there is none.
+function float NavScanFloorZ(vector Loc)
+{
+    local vector HitLoc;
+    local vector HitNorm;
+    local vector Down;
+
+    Down = Loc;
+    Down.Z -= 300.0;
+    if (Trace(HitLoc, HitNorm, Down, Loc, false) != None)
+    {
+        return HitLoc.Z;
+    }
+    return Loc.Z - NavScanH;
+}
+
+// Trace one link for body-block, no-floor, zed-only, drop, and door conditions.
+function int NavScanCheck(ReachSpec Spec, NavigationPoint From, out int TraceCount)
+{
+    local NavigationPoint To;
+    local vector Dir;
+    local float Dist;
+    local vector A;
+    local vector B;
+    local vector Ext;
+    local vector HitLoc;
+    local vector HitNorm;
+    local vector Pt;
+    local vector Probe;
+    local Actor Hit;
+    local float FloorA;
+    local float FloorB;
+    local int K;
+
+    TraceCount = 0;
+    if (Spec == None || Spec.GetEnd() == None)
+    {
+        return 0;
+    }
+    To = Spec.GetEnd();
+    if (Spec.IsA('KFDoorReachSpec'))
+    {
+        return 5;
+    }
+    if (Spec.IsA('KFLeapReachSpec') || Spec.IsA('FloorToWallReachSpec') || Spec.IsA('WallReachSpec') || Spec.IsA('WallToFloorReachSpec') || Spec.IsA('MantleReachSpec') || Spec.IsA('CeilingReachSpec') || Spec.IsA('FloorToCeilingReachSpec') || Spec.IsA('LadderReachSpec') || Spec.IsA('WallTransReachSpec') || Spec.CollisionRadius < NavScanR / 0.9)
+    {
+        return 3;
+    }
+    if (float(Spec.MaxLandingVelocity) > NavScan.MaxLanding)
+    {
+        NavScan.MaxLanding = float(Spec.MaxLandingVelocity);
+    }
+    if (Spec.MaxLandingVelocity > 0 || To.Location.Z < From.Location.Z - 128.0)
+    {
+        return 4;
+    }
+    Dir = To.Location - From.Location;
+    Dir.Z = 0;
+    Dist = VSize(Dir);
+    if (Dist < 120.0)
+    {
+        return 0;
+    }
+    Dir = Normal(Dir);
+    // Heights come from the floor under each node: node Z is not a fixed height above the floor.
+    FloorA = NavScanFloorZ(From.Location);
+    FloorB = NavScanFloorZ(To.Location);
+    TraceCount += 2;
+    Ext.X = NavScanR;
+    Ext.Y = NavScanR;
+    Ext.Z = 8.0;
+    A = From.Location + Dir * 30.0;
+    A.Z = FloorA + NavScanKnee;
+    B = To.Location - Dir * 30.0;
+    B.Z = FloorB + NavScanKnee;
+    TraceCount++;
+    Hit = Trace(HitLoc, HitNorm, B, A, true, Ext);
+    if (Hit != None && Pawn(Hit) == None && KFDoorActor(Hit) == None)
+    {
+        return 1;
+    }
+    K = 1;
+    while (K * 100.0 < Dist)
+    {
+        Pt = From.Location + Dir * (K * 100.0);
+        Pt.Z = Lerp(FloorA, FloorB, (K * 100.0) / Dist) + NavScanKnee;
+        Probe = Pt;
+        Probe.Z = Probe.Z - NavScanKnee - 80.0;
+        TraceCount++;
+        if (Trace(HitLoc, HitNorm, Probe, Pt, false) == None)
+        {
+            return 2;
+        }
+        K++;
+    }
+    return 0;
+}
+
+// Closes the nav meter's frame and logs its report every 30 s (N6); steps the link scan (N8).
 event Tick(float DeltaTime)
 {
     local string NavReport;
@@ -261,6 +462,10 @@ event Tick(float DeltaTime)
         {
             EchelonLog(NavReport $ " " $ NavBudget.TakeDeniedCounts());
         }
+    }
+    if (NavScan != None && NavScan.bActive)
+    {
+        NavScanStep();
     }
 }
 
@@ -654,6 +859,7 @@ function RegisterBot(EcholonBot NewBot)
     NewBot.mut = self;
     NewBot.NavMeter = NavMeter;
     NewBot.NavBudget = NavBudget;
+    NewBot.NavScan = NavScan;
     NewBot.WdLastHubContactTime = WorldInfo.TimeSeconds;
 }
 
