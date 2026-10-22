@@ -9,6 +9,7 @@ class EcholonNavMeter extends Object transient;
 
 var int FrameTraces, FrameSearches, FrameReaches;
 var float UnitTraceUs, UnitSearchUs, UnitReachUs;
+var bool bBenchmarked;                                  // true once NavBenchmark has set measured unit costs
 var float WindowStart;
 var float ReportInterval;
 var int WindowFrames, WindowTraces, WindowSearches, WindowReaches;
@@ -49,6 +50,7 @@ final function SetUnitCosts(float TraceUs, float SearchUs, float ReachUs)
     {
         UnitReachUs = ReachUs;
     }
+    bBenchmarked = true;
 }
 
 final function string UnitCostMessage()
@@ -92,7 +94,7 @@ final function string EndFrame(float Now)
     }
 
     Bench = 0;
-    if (UnitTraceUs > 0 || UnitSearchUs > 0 || UnitReachUs > 0)
+    if (bBenchmarked)
     {
         Bench = 1;
     }
@@ -121,4 +123,7 @@ final function string EndFrame(float Now)
 defaultproperties
 {
     ReportInterval=30.0
+    UnitTraceUs=3.0
+    UnitSearchUs=40.0
+    UnitReachUs=17.0
 }

@@ -39,6 +39,7 @@ struct CachedHumanInfo { var KFPawn_Human HumanPawn; var vector Loc; var vector 
 
 var transient array<EcholonWeaponInfo> TraderList;
 var transient EcholonNavMeter NavMeter;       // nav cost counter, shared by all bots (N6)
+var transient EcholonNavBudget NavBudget;     // per-frame nav budget, shared by all bots (N7)
 var config int ConfigVer;
 var config string _Separator1;
 var() config byte NumBots;
@@ -226,6 +227,7 @@ function PostBeginPlay()
     SetTimer(WAVE_POLL_INTERVAL, true, 'PollWaveStart');
     SetTimer(3.0, true, 'CacheHumans');
     NavMeter = new class'EcholonBot.EcholonNavMeter';
+    NavBudget = new class'EcholonBot.EcholonNavBudget';
     SetTimer(15.0, false, 'NavBenchmarkRun');
 }
 
@@ -257,7 +259,7 @@ event Tick(float DeltaTime)
         NavReport = NavMeter.EndFrame(WorldInfo.TimeSeconds);
         if (NavReport != "")
         {
-            EchelonLog(NavReport);
+            EchelonLog(NavReport $ " " $ NavBudget.TakeDeniedCounts());
         }
     }
 }
@@ -651,6 +653,7 @@ function RegisterBot(EcholonBot NewBot)
         ActiveBots.AddItem(NewBot);
     NewBot.mut = self;
     NewBot.NavMeter = NavMeter;
+    NewBot.NavBudget = NavBudget;
     NewBot.WdLastHubContactTime = WorldInfo.TimeSeconds;
 }
 

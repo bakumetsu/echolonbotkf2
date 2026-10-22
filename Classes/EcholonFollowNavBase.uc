@@ -99,6 +99,11 @@ var Actor FollowNode;
 var float FollowWaitTime;
 var EFollowStatus FollowStatus;
 var EcholonNavMeter NavMeter;      // shared nav cost counter, set by EcholonMut.RegisterBot
+var EcholonNavBudget NavBudget;    // shared per-frame nav budget, set by EcholonMut.RegisterBot
+var vector FollowSteerCachePoint;  // last steer point computed
+var Actor FollowSteerCacheNode;    // the route node that point was computed for
+var float FollowSteerCacheTime;    // when it was computed
+var float FollowSteerCacheMaxAge;  // how long a cached steer point may be reused when the budget is out
 // Special edges (leap, climb, mantle) this bot found on a planned route; kept out of later routes.
 var array<ReachSpec> FollowSpecialSpecs;
 // Direct-steer only when the leader is within this height; above it, a ledge or balcony is likely in between.
@@ -266,6 +271,76 @@ function FollowWatchdogBegin()
 function bool FollowCheckExit()
 {
     return false;
+}
+
+// ---------------------------------------------------------------- nav budget (N7)
+// True when a route search is permitted this frame.
+
+function bool NavAllowSearch()
+{
+    if (NavBudget == None)
+    {
+        return true;
+    }
+    return NavBudget.TakeSearch(WorldInfo.TimeSeconds);
+}
+
+// True when a reachability check is permitted this frame.
+function bool NavAllowReach()
+{
+    if (NavBudget == None || NavMeter == None)
+    {
+        return true;
+    }
+    return NavBudget.TakeUs(class'EcholonNavBudget'.const.NAV_PRIO_STEER, NavMeter.UnitReachUs, WorldInfo.TimeSeconds);
+}
+
+// Budgeted follow-steer direction; caches the steer point and falls back to a
+// direct horizontal vector when feeler traces are denied.
+function vector FollowSteerDirBudgeted(Actor Current)
+{
+    local vector P;
+    local vector Dir;
+    local float Now;
+    local bool bCacheUsable;
+
+    Now = WorldInfo.TimeSeconds;
+
+    // Obtain the steer point.
+    if (NavBudget == None || NavMeter == None)
+    {
+        P = FollowSteerPoint(Current);
+    }
+    else
+    {
+        bCacheUsable = (FollowSteerCacheNode == Current && Now - FollowSteerCacheTime <= FollowSteerCacheMaxAge);
+
+        if (NavBudget.TakeUs(class'EcholonNavBudget'.const.NAV_PRIO_STEER, 9.0 * NavMeter.UnitTraceUs, Now) || !bCacheUsable)
+        {
+            P = FollowSteerPoint(Current);
+            FollowSteerCachePoint = P;
+            FollowSteerCacheNode = Current;
+            FollowSteerCacheTime = Now;
+        }
+        else
+        {
+            P = FollowSteerCachePoint;
+        }
+    }
+
+    // Feelers: prefer real traces; fall back to a cheap horizontal direction.
+    if (NavBudget == None || NavMeter == None || NavBudget.TakeUs(class'EcholonNavBudget'.const.NAV_PRIO_STEER, 2.0 * NavMeter.UnitTraceUs, Now))
+    {
+        return FollowFeelDir(P);
+    }
+
+    Dir = P - Pawn.Location;
+    Dir.Z = 0.0;
+    if (VSize(Dir) > 0.0)
+    {
+        return Normal(Dir);
+    }
+    return Normal(P - Pawn.Location);
 }
 
 // ---------------------------------------------------------------- nav cost counting (N6)
@@ -667,6 +742,12 @@ function bool FollowCheckReachable(bool bForceNow)
         return bFollowReachStable;
     }
 
+    if (!bForceNow && bFollowReachKnown && !NavAllowReach())
+    {
+        FollowNextReachCheckTime = IterNow + 0.02;
+        return bFollowReachStable;
+    }
+
     IterReach = WalkReachable(FollowLeaderPawn);
     // ActorReachable may count a jump up to a ledge; this mover can't jump it, so make it path instead.
     if (IterReach && Abs(FollowLeaderPawn.Location.Z - Pawn.Location.Z) > FollowDirectMaxZ)
@@ -894,6 +975,11 @@ function bool FollowBuildPath()
     }
 
     FollowCrumbGoal = FollowPickCrumbFrom(EcholonFollowNavBase(FollowLeaderCtrl));
+    if (!NavAllowSearch())
+    {
+        FollowNextPathTime = IterNow;
+        return false;
+    }
     IterFirst = None;
     if (FollowCrumbGoal != None)
     {
@@ -2062,7 +2148,7 @@ PathMove:
     }
     FollowOnMoveBegin(false);
     EchelonLog("NAV_ACCEL_NODE node=" $ string(FollowNode));
-    Pawn.Acceleration = FollowFeelDir(FollowSteerPoint(FollowNode)) * FMax(Pawn.GroundSpeed, 0.0001f);
+    Pawn.Acceleration = FollowSteerDirBudgeted(FollowNode) * FMax(Pawn.GroundSpeed, 0.0001f);
     Sleep(FollowMinLoopSleep);
     Goto('Dispatch');
 
@@ -2170,6 +2256,7 @@ defaultproperties
     FollowResumeMargin=96.0
     FollowZTolerance=128.0
     FollowWatchdogPeriod=0.25
+    FollowSteerCacheMaxAge=0.4
     FollowPhaseJitter=0.03
     FollowReachIntervalDirect=0.25
     FollowReachIntervalPath=0.5
