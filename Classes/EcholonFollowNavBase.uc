@@ -116,6 +116,13 @@ var float FollowBadMaxTime;
 var ReachSpec FollowLadderSpec;
 var int FollowLadderCount;
 var float FollowBackoffDist;
+// Path follower (nav redesign N2): lookahead, pass-through arrival, wall feelers.
+var int FollowLookahead;
+var float FollowArriveRadius;
+var float FollowFeelerAngle;
+var float FollowFeelerPush;
+var float FollowKneeHeight;
+var float FollowFloorDrop;
 
 
 // Log id for this bot: "EcholonBot_3(Widow)", the in-game name without its rank tag. kit/tools/log_reader.py reads it.
@@ -602,6 +609,11 @@ function bool FollowIsWalkableSpec(ReachSpec Spec)
     {
         return true;
     }
+    // Gaps narrower than this pawn are for zeds; treat them like special edges.
+    if (Pawn != None && Spec.CollisionRadius < Pawn.GetCollisionRadius())
+    {
+        return false;
+    }
     return !(Spec.IsA('KFLeapReachSpec') || Spec.IsA('FloorToWallReachSpec') || Spec.IsA('WallReachSpec')
         || Spec.IsA('WallToFloorReachSpec') || Spec.IsA('MantleReachSpec') || Spec.IsA('CeilingReachSpec')
         || Spec.IsA('FloorToCeilingReachSpec') || Spec.IsA('LadderReachSpec') || Spec.IsA('WallTransReachSpec'));
@@ -743,6 +755,144 @@ function bool FollowBuildPath()
     return true;
 }
 
+// True when the pawn cylinder can walk in a line from From to To (both pawn-centre positions): a swept
+// extent trace at knee height is clear and there is floor within FollowFloorDrop under the middle and the end.
+function bool FollowWalkClear(vector From, vector To)
+{
+    local vector Ext, HitLoc, HitNorm, A, B, Mid, Probe;
+    local float R, H;
+
+    if (Pawn == None)
+    {
+        return false;
+    }
+    R = Pawn.GetCollisionRadius();
+    H = Pawn.GetCollisionHeight();
+    Ext.X = R;
+    Ext.Y = R;
+    Ext.Z = 8.0;
+    A = From;
+    A.Z = From.Z - H + FollowKneeHeight;
+    B = To;
+    B.Z = To.Z - H + FollowKneeHeight;
+    if (Trace(HitLoc, HitNorm, B, A, true, Ext) != None)
+    {
+        return false;
+    }
+    Mid = (From + To) * 0.5;
+    Probe = Mid;
+    Probe.Z -= H + FollowFloorDrop;
+    if (Trace(HitLoc, HitNorm, Probe, Mid, false) == None)
+    {
+        return false;
+    }
+    Probe = To;
+    Probe.Z -= H + FollowFloorDrop;
+    if (Trace(HitLoc, HitNorm, Probe, To, false) == None)
+    {
+        return false;
+    }
+    return true;
+}
+
+// Where to aim while walking the route: the furthest of the next FollowLookahead nodes that passes
+// FollowWalkClear from the pawn and is reached over walkable edges only; else the current node.
+function vector FollowSteerPoint(Actor Current)
+{
+    local int IterIdx, IterLast, IterBest;
+    local Actor IterNode, IterPrev;
+    local NavigationPoint IterStart;
+
+    if (Current == None)
+    {
+        return Pawn.Location;
+    }
+    IterBest = FollowRouteIdx;
+    IterLast = Min(FollowRouteIdx + FollowLookahead - 1, FollowRoute.Length - 1);
+    IterPrev = Current;
+    for (IterIdx = FollowRouteIdx + 1; IterIdx <= IterLast; IterIdx++)
+    {
+        IterNode = FollowRoute[IterIdx];
+        IterStart = NavigationPoint(IterPrev);
+        if (IterNode == None || IterStart == None || NavigationPoint(IterNode) == None
+            || !FollowIsWalkableSpec(IterStart.GetReachSpecTo(NavigationPoint(IterNode))))
+        {
+            break;
+        }
+        if (FollowWalkClear(Pawn.Location, IterNode.Location))
+        {
+            IterBest = IterIdx;
+        }
+        IterPrev = IterNode;
+    }
+    if (IterBest < FollowRoute.Length && FollowRoute[IterBest] != None)
+    {
+        return FollowRoute[IterBest].Location;
+    }
+    return Current.Location;
+}
+
+// Heading to Target with a small push away from a wall seen by a feeler 35 degrees to either side.
+function vector FollowFeelDir(vector Target)
+{
+    local vector Dir, Left, Right, Side, Start, HitLoc, HitNorm;
+    local float R, Ang, Len;
+    local bool bHitL, bHitR;
+
+    Dir = Target - Pawn.Location;
+    Dir.Z = 0.0;
+    if (VSizeSq(Dir) < 1.0)
+    {
+        return Normal(Target - Pawn.Location);
+    }
+    Dir = Normal(Dir);
+    R = Pawn.GetCollisionRadius();
+    Len = R * 1.5 + R;
+    Ang = FollowFeelerAngle * 0.0174533;
+    Side.X = -Dir.Y;
+    Side.Y = Dir.X;
+    Side.Z = 0.0;
+    Left = Normal(Dir * Cos(Ang) + Side * Sin(Ang));
+    Right = Normal(Dir * Cos(Ang) - Side * Sin(Ang));
+    Start = Pawn.Location;
+    Start.Z = Start.Z - Pawn.GetCollisionHeight() + FollowKneeHeight;
+    bHitL = (Trace(HitLoc, HitNorm, Start + Left * Len, Start, false) != None);
+    bHitR = (Trace(HitLoc, HitNorm, Start + Right * Len, Start, false) != None);
+    if (bHitL && !bHitR)
+    {
+        Dir = Normal(Dir - Side * FollowFeelerPush);
+    }
+    else if (bHitR && !bHitL)
+    {
+        Dir = Normal(Dir + Side * FollowFeelerPush);
+    }
+    return Dir;
+}
+
+// True once the pawn has walked past Node along the edge from the previous route node while the next
+// node is in a clear line (stops orbiting a node that is already behind the pawn).
+function bool FollowPassedNode(int Idx)
+{
+    local vector A, B, Seg;
+    local float SegLenSq, T;
+
+    if (Idx <= 0 || Idx + 1 >= FollowRoute.Length || FollowRoute[Idx - 1] == None
+        || FollowRoute[Idx] == None || FollowRoute[Idx + 1] == None)
+    {
+        return false;
+    }
+    A = FollowRoute[Idx - 1].Location;
+    B = FollowRoute[Idx].Location;
+    Seg = B - A;
+    SegLenSq = VSizeSq(Seg);
+    if (SegLenSq < 1.0)
+    {
+        return false;
+    }
+    T = ((Pawn.Location - A) dot Seg) / SegLenSq;
+    return (T > 1.0 && VSizeSq(Pawn.Location - B) < 40000.0 && FollowWalkClear(Pawn.Location, FollowRoute[Idx + 1].Location));
+}
+
 function Actor FollowGetNextNode()
 {
     local Actor IterNode;
@@ -764,7 +914,9 @@ function Actor FollowGetNextNode()
             continue;
         }
 
-        if (!Pawn.ReachedDestination(IterNode))
+        if (!Pawn.ReachedDestination(IterNode) && !FollowPassedNode(FollowRouteIdx)
+            && !(Abs(Pawn.Location.Z - IterNode.Location.Z) < Pawn.GetCollisionHeight()
+                && VSizeSq(Pawn.Location - IterNode.Location) < FMax(Pawn.GetCollisionRadius(), FollowArriveRadius) * FMax(Pawn.GetCollisionRadius(), FollowArriveRadius)))
         {
             return IterNode;
         }
@@ -1523,7 +1675,7 @@ PathMove:
     }
     FollowOnMoveBegin(false);
     EchelonLog("NAV_ACCEL_NODE node=" $ string(FollowNode));
-    Pawn.Acceleration = Normal(FollowNode.Location - Pawn.Location) * FMax(Pawn.GroundSpeed, 0.0001f);
+    Pawn.Acceleration = FollowFeelDir(FollowSteerPoint(FollowNode)) * FMax(Pawn.GroundSpeed, 0.0001f);
     Sleep(FollowMinLoopSleep);
     Goto('Dispatch');
 
@@ -1664,4 +1816,10 @@ defaultproperties
     FollowBadBaseTime=20.0
     FollowBadMaxTime=120.0
     FollowBackoffDist=64.0
+    FollowLookahead=3
+    FollowArriveRadius=48.0
+    FollowFeelerAngle=35.0
+    FollowFeelerPush=0.6
+    FollowKneeHeight=40.0
+    FollowFloorDrop=80.0
 }
