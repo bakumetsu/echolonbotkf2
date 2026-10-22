@@ -41,6 +41,9 @@ var transient array<EcholonWeaponInfo> TraderList;
 var transient EcholonNavMeter NavMeter;       // nav cost counter, shared by all bots (N6)
 var transient EcholonNavBudget NavBudget;     // per-frame nav budget, shared by all bots (N7)
 var transient EcholonNavScan NavScan;         // start-of-match link scan state and bad links (N8)
+var transient EcholonNavGrid NavGrid;         // shared floor-is-lava tile table (N10)
+var() config int NavGridSquads;               // 0 = lava grid for every squad, N = only squad N (1 = first), -1 = off
+var() config bool bNavGridDebug;              // log an ASCII map of the grid around squad 1's leader every 20 s
 var transient float NavScanR;                 // body radius used by the scan
 var transient float NavScanH;                 // body half height used by the scan
 var transient float NavScanKnee;              // trace height above the floor (knee), set in NavScanBegin
@@ -217,6 +220,8 @@ function PostBeginPlay()
         HealCylinderHeight = 300.0;
         HealMinHealthPct = 60.0;
         bEnableFastTraceHealing = true;
+        NavGridSquads = 1;
+        bNavGridDebug = true;
         _Separator7 = "--- HEALING SETTINGS ---";
         ConfigVer = CUR_CONFIGVER;
         SaveConfig();
@@ -233,6 +238,12 @@ function PostBeginPlay()
     NavMeter = new class'EcholonBot.EcholonNavMeter';
     NavBudget = new class'EcholonBot.EcholonNavBudget';
     NavScan = new class'EcholonBot.EcholonNavScan';
+    NavGrid = new class'EcholonBot.EcholonNavGrid';
+    NavGrid.Clear();
+    if (bNavGridDebug)
+    {
+        SetTimer(20.0, true, 'NavGridDump');
+    }
     SetTimer(15.0, false, 'NavBenchmarkRun');
 }
 
@@ -447,6 +458,78 @@ function int NavScanCheck(ReachSpec Spec, NavigationPoint From, out int TraceCou
         K++;
     }
     return 0;
+}
+
+// True when the lava grid steers this bot: NavGridSquads 0 = everyone, N = members of squad N, -1 = nobody.
+function bool NavGridAppliesTo(EcholonBot B)
+{
+    local int GroupIdx;
+
+    if (NavGridSquads < 0 || B == None)
+    {
+        return false;
+    }
+    if (NavGridSquads == 0)
+    {
+        return true;
+    }
+    GroupIdx = NavGridSquads - 1;
+    return GroupIdx < Fireteams.Length && Fireteams[GroupIdx].Members.Find(B) != INDEX_NONE;
+}
+
+// Debug: logs a 21 x 21 tile map (north up) around squad 1's leader: B bot, . safe, # lava, ? unknown.
+function NavGridDump()
+{
+    local EcholonBot Ldr;
+    local int I, DX, DY, TX0, TY0, Band, St;
+    local float FloorZ;
+    local string Row;
+
+    if (Fireteams.Length == 0)
+    {
+        return;
+    }
+    Ldr = Fireteams[0].Leader;
+    if (Ldr == None || Ldr.Pawn == None)
+    {
+        for (I = 0; I < Fireteams[0].Members.Length && (Ldr == None || Ldr.Pawn == None); I++)
+        {
+            Ldr = Fireteams[0].Members[I];
+        }
+    }
+    if (Ldr == None || Ldr.Pawn == None)
+    {
+        return;
+    }
+    TX0 = NavGrid.TileOf(Ldr.Pawn.Location.X);
+    TY0 = NavGrid.TileOf(Ldr.Pawn.Location.Y);
+    Band = NavGrid.BandOf(Ldr.Pawn.Location.Z - Ldr.Pawn.GetCollisionHeight());
+    EchelonLog("NAV_GRID_MAP squad=1 leader=" $ string(Ldr.Name) $ " tile=" $ string(TX0) $ "," $ string(TY0));
+    for (DY = 10; DY >= -10; DY--)
+    {
+        Row = "";
+        for (DX = -10; DX <= 10; DX++)
+        {
+            St = NavGrid.Lookup(TX0 + DX, TY0 + DY, Band, WorldInfo.TimeSeconds, FloorZ);
+            if (DX == 0 && DY == 0)
+            {
+                Row $= "B";
+            }
+            else if (St == class'EcholonNavGrid'.const.NAV_SAFE)
+            {
+                Row $= ".";
+            }
+            else if (St == class'EcholonNavGrid'.const.NAV_LAVA)
+            {
+                Row $= "#";
+            }
+            else
+            {
+                Row $= "?";
+            }
+        }
+        EchelonLog("NAV_GRID_ROW dy=" $ string(DY) $ " " $ Row);
+    }
 }
 
 // Closes the nav meter's frame and logs its report every 30 s (N6); steps the link scan (N8).
@@ -860,6 +943,7 @@ function RegisterBot(EcholonBot NewBot)
     NewBot.NavMeter = NavMeter;
     NewBot.NavBudget = NavBudget;
     NewBot.NavScan = NavScan;
+    NewBot.NavGrid = NavGrid;
     NewBot.WdLastHubContactTime = WorldInfo.TimeSeconds;
 }
 

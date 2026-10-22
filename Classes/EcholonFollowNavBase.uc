@@ -101,6 +101,13 @@ var EFollowStatus FollowStatus;
 var EcholonNavMeter NavMeter;      // shared nav cost counter, set by EcholonMut.RegisterBot
 var EcholonNavBudget NavBudget;    // shared per-frame nav budget, set by EcholonMut.RegisterBot
 var EcholonNavScan NavScan;        // start-of-match link scan result (bad links), set by EcholonMut.RegisterBot
+var EcholonNavGrid NavGrid;           // shared tile table, set by EcholonMut.RegisterBot
+var bool bNavGridOn;                  // true while the grid steers this bot (set by the owner class)
+var vector NavGridDir;                // last direction the grid chose
+var float NavGridKeepUntil;           // keep NavGridDir until this game time unless it becomes blocked
+var float NavGridOffUntil;            // grid disabled for this bot until this time (suspect data)
+var int NavGridEvals;                 // tiles evaluated by this bot (for logs)
+var float NavGridLogTime;             // last time a bend log line was written (2 s throttle)
 var float FollowRampStart; // game time the pawn last started from a stop
 var float FollowRampUpTime; // seconds to ramp from min pct to full speed
 var float FollowRampMinPct; // minimum speed fraction at ramp start
@@ -392,6 +399,254 @@ function vector FollowSeparationPush(vector Dir)
     Result = Dir + Push * FollowSeparationGain;
     Result.Z = Dir.Z;
     return Normal(Result);
+}
+
+// ---------------------------------------------------------------- floor is lava grid (N10)
+// Evaluate one tile with up to 6 traces and store the result in NavGrid.
+function int NavGridEval(int TX, int TY, float RefZ, float Now)
+{
+    local vector C, Top, Bottom, P, End, HitLoc, HitNorm, Dir;
+    local float Floor;
+    local int TileState, I;
+    local Actor HitActor;
+
+    C.X = (TX + 0.5) * class'EcholonNavGrid'.const.NAV_TILE;
+    C.Y = (TY + 0.5) * class'EcholonNavGrid'.const.NAV_TILE;
+    C.Z = 0.0;
+    Floor = RefZ;
+
+    // 1. Floor trace
+    Top.X = C.X;
+    Top.Y = C.Y;
+    Top.Z = RefZ + 70.0;
+    Bottom.X = C.X;
+    Bottom.Y = C.Y;
+    Bottom.Z = RefZ - 110.0;
+    NavCountTrace();
+    HitActor = Trace(HitLoc, HitNorm, Bottom, Top, false);
+    if (HitActor == None || HitNorm.Z < 0.7)
+    {
+        TileState = class'EcholonNavGrid'.const.NAV_LAVA;
+        NavGrid.Store(TX, TY, NavGrid.BandOf(RefZ), TileState, Floor, 0.0);
+        NavGridEvals++;
+        return TileState;
+    }
+    Floor = HitLoc.Z;
+
+    // 2. Body trace in four horizontal directions
+    TileState = class'EcholonNavGrid'.const.NAV_SAFE;
+    for (I = 0; I < 4; I++)
+    {
+        Dir.X = 0.0;
+        Dir.Y = 0.0;
+        Dir.Z = 0.0;
+        if (I == 0) { Dir.X = 1.0; }
+        else if (I == 1) { Dir.X = -1.0; }
+        else if (I == 2) { Dir.Y = 1.0; }
+        else { Dir.Y = -1.0; }
+        P.X = C.X;
+        P.Y = C.Y;
+        P.Z = Floor + 40.0;
+        End.X = P.X + Dir.X * 36.0;
+        End.Y = P.Y + Dir.Y * 36.0;
+        End.Z = P.Z;
+        NavCountTrace();
+        HitActor = Trace(HitLoc, HitNorm, End, P, true);
+        if (HitActor != None)
+        {
+            if (Pawn(HitActor) == None && KFDoorActor(HitActor) == None)
+            {
+                TileState = class'EcholonNavGrid'.const.NAV_LAVA;
+                break;
+            }
+        }
+    }
+
+    // 3. Ceiling trace
+    if (TileState == class'EcholonNavGrid'.const.NAV_SAFE)
+    {
+        Bottom.X = C.X;
+        Bottom.Y = C.Y;
+        Bottom.Z = Floor + 8.0;
+        Top.X = C.X;
+        Top.Y = C.Y;
+        Top.Z = Floor + 150.0;
+        NavCountTrace();
+        HitActor = Trace(HitLoc, HitNorm, Top, Bottom, false);
+        if (HitActor != None)
+        {
+            TileState = class'EcholonNavGrid'.const.NAV_LAVA;
+        }
+    }
+
+    NavGrid.Store(TX, TY, NavGrid.BandOf(RefZ), TileState, Floor, 0.0);
+    NavGridEvals++;
+    return TileState;
+}
+
+// Return the cached (or freshly evaluated) state of the tile containing Loc.
+function int NavGridTile(vector Loc, float RefZ, float Now, optional bool bEval)
+{
+    local int TX, TY, Band, TileState;
+    local float FloorZ;
+
+    TX = NavGrid.TileOf(Loc.X);
+    TY = NavGrid.TileOf(Loc.Y);
+    Band = NavGrid.BandOf(RefZ);
+    TileState = NavGrid.Lookup(TX, TY, Band, Now, FloorZ);
+    if (TileState == class'EcholonNavGrid'.const.NAV_UNKNOWN && bEval)
+    {
+        if (NavBudget == None || NavMeter == None || NavBudget.TakeUs(class'EcholonNavBudget'.const.NAV_PRIO_GRID, 6.0 * NavMeter.UnitTraceUs, Now))
+        {
+            return NavGridEval(TX, TY, RefZ, Now);
+        }
+    }
+    return TileState;
+}
+
+// Walk tile centres along Dir; return count of consecutive clear tiles.
+function int NavGridRayClear(vector Dir, float RefZ, float Now, int MaxTiles, bool bEval)
+{
+    local int I, TileState, TX, TY, Band;
+    local float FloorZ, PrevFloorZ;
+    local bool bHasPrev;
+    local vector Loc;
+
+    PrevFloorZ = 0.0;
+    bHasPrev = false;
+
+    for (I = 1; I <= MaxTiles; I++)
+    {
+        Loc.X = Pawn.Location.X + Dir.X * I * class'EcholonNavGrid'.const.NAV_TILE;
+        Loc.Y = Pawn.Location.Y + Dir.Y * I * class'EcholonNavGrid'.const.NAV_TILE;
+        Loc.Z = RefZ;
+        TileState = NavGridTile(Loc, RefZ, Now, bEval);
+        if (TileState == class'EcholonNavGrid'.const.NAV_LAVA)
+        {
+            return I - 1;
+        }
+        if (TileState == class'EcholonNavGrid'.const.NAV_SAFE)
+        {
+            TX = NavGrid.TileOf(Loc.X);
+            TY = NavGrid.TileOf(Loc.Y);
+            Band = NavGrid.BandOf(RefZ);
+            NavGrid.Lookup(TX, TY, Band, Now, FloorZ);
+            if (bHasPrev && Abs(FloorZ - PrevFloorZ) > 35.0)
+            {
+                return I - 1;
+            }
+            PrevFloorZ = FloorZ;
+            bHasPrev = true;
+        }
+    }
+    return MaxTiles;
+}
+
+// Choose the walk direction, bending around lava when the wanted path is blocked.
+function vector NavGridSteer(vector WantDir)
+{
+    local float Now, RefZ, C0, BestScore, BestC, BestAngle;
+    local vector BestDir, H, R;
+    local int I, C;
+    local float Deg, Rad, CosA, SinA;
+    local int Angles[8];
+
+    Now = WorldInfo.TimeSeconds;
+
+    if (NavGrid == None || !bNavGridOn || Pawn == None)
+    {
+        return WantDir;
+    }
+    if (Now < NavGridOffUntil)
+    {
+        return WantDir;
+    }
+    if (NavGrid.Suspect())
+    {
+        NavGridOffUntil = Now + 60.0;
+        NavGrid.ResetCounters();
+        EchelonLog("NAV_GRID_SUSPECT lava_pct=high");
+        return WantDir;
+    }
+
+    RefZ = Pawn.Location.Z - Pawn.GetCollisionHeight();
+
+    // Keep: re-use the last bend direction if still clear.
+    if (Now < NavGridKeepUntil && NavGridRayClear(NavGridDir, RefZ, Now, 3, false) >= 3)
+    {
+        return NavGridDir;
+    }
+
+    // Open space: wanted direction is clear, grid sleeps.
+    C0 = float(NavGridRayClear(WantDir, RefZ, Now, 8, true));
+    if (C0 >= 6.0)
+    {
+        NavGridKeepUntil = 0.0;
+        return WantDir;
+    }
+
+    // Try rotated headings.
+    Angles[0] = 30;
+    Angles[1] = -30;
+    Angles[2] = 60;
+    Angles[3] = -60;
+    Angles[4] = 90;
+    Angles[5] = -90;
+    Angles[6] = 120;
+    Angles[7] = -120;
+
+    BestScore = -1000.0;
+    BestC = -1.0;
+    BestAngle = 0.0;
+    BestDir = WantDir;
+
+    for (I = 0; I < 8; I++)
+    {
+        Deg = float(Angles[I]);
+        Rad = Deg * 0.0174533;
+        CosA = Cos(Rad);
+        SinA = Sin(Rad);
+        H.X = WantDir.X * CosA - WantDir.Y * SinA;
+        H.Y = WantDir.X * SinA + WantDir.Y * CosA;
+        H.Z = 0.0;
+        C = NavGridRayClear(H, RefZ, Now, 8, true);
+        R.X = 10.0 * float(C) - Abs(Deg) * 0.1;
+        if (R.X > BestScore)
+        {
+            BestScore = R.X;
+            BestC = float(C);
+            BestAngle = Deg;
+            BestDir = H;
+        }
+    }
+
+    if (BestC < C0 + 2.0)
+    {
+        return WantDir;
+    }
+
+    NavGridDir = BestDir;
+    NavGridKeepUntil = Now + 0.5;
+    if (Now - NavGridLogTime >= 2.0)
+    {
+        EchelonLog("NAV_GRID_BEND clear0=" $ string(int(C0)) $ " clear=" $ string(int(BestC)) $ " angle=" $ string(int(BestAngle)));
+        NavGridLogTime = Now;
+    }
+    return BestDir;
+}
+
+// Marks the tile 1.5 tiles ahead of the pawn along unit Dir as lava for 60 s (a spot where a bot got stuck).
+function NavGridMarkStuck(vector Dir)
+{
+    local vector Loc;
+
+    if (NavGrid == None || !bNavGridOn || Pawn == None || VSizeSq(Dir) < 0.25)
+    {
+        return;
+    }
+    Loc = Pawn.Location + Dir * 57.0;
+    NavGrid.Store(NavGrid.TileOf(Loc.X), NavGrid.TileOf(Loc.Y), NavGrid.BandOf(Pawn.Location.Z - Pawn.GetCollisionHeight()),
+        class'EcholonNavGrid'.const.NAV_LAVA, 0.0, WorldInfo.TimeSeconds + 60.0);
 }
 
 // ---------------------------------------------------------------- nav budget (N7)
@@ -2303,7 +2558,7 @@ PathMove:
     }
     FollowOnMoveBegin(false);
     EchelonLog("NAV_ACCEL_NODE node=" $ string(FollowNode));
-    Pawn.Acceleration = FollowSeparationPush(FollowSteerDirBudgeted(FollowNode)) * FMax(Pawn.GroundSpeed, 0.0001f);
+    Pawn.Acceleration = FollowSeparationPush(NavGridSteer(FollowSteerDirBudgeted(FollowNode))) * FMax(Pawn.GroundSpeed, 0.0001f);
     FollowApplySpeedCap();
     Sleep(FollowMinLoopSleep);
     Goto('Dispatch');

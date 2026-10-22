@@ -1112,6 +1112,7 @@ final function StrafeTowardPoint(Vector Dest)
             X = Normal(X - (Y * 0.5));
         }
     }
+    X = NavGridSteer(X);
     Pawn.Acceleration = X * 2000.0;
 }
 
@@ -1149,7 +1150,7 @@ final function ProcessMoveTo()
         }
         else
         {
-            Pawn.Acceleration = DestinationPosition.Position - Pawn.Location;
+            Pawn.Acceleration = NavGridSteer(Normal2D(DestinationPosition.Position - Pawn.Location)) * 2000.0;
         }
     }
 }
@@ -1175,7 +1176,7 @@ final function ProcessMoveToward()
         }
         else
         {
-            Pawn.Acceleration = MoveTarget.Location - Pawn.Location;
+            Pawn.Acceleration = NavGridSteer(Normal2D(MoveTarget.Location - Pawn.Location)) * 2000.0;
         }
     }
 }
@@ -1424,6 +1425,23 @@ final function NavTryTeleport(float IterNow)
     }
 }
 
+// Asks the mutator whether the lava grid applies to this bot (NavGridSquads config) and logs a change.
+final function NavGridRefresh()
+{
+    local bool bWas;
+
+    if (mut == None || NavGrid == None)
+    {
+        return;
+    }
+    bWas = bNavGridOn;
+    bNavGridOn = mut.NavGridAppliesTo(EcholonBot(self));
+    if (bNavGridOn != bWas)
+    {
+        EchelonLog("NAV_GRID_BOT on=" $ string(bNavGridOn));
+    }
+}
+
 // Progress check for MoveTo/MoveToward and the follow mover. 0.75 s without progress backs off (not in follow, which
 // has its own ladder), 1.5 s strikes the edge and ends the move so the hub replans, 3 s walks back to the last good
 // node, 6 s reports Blocked (the hub skips tethering for 10 s), 5 s of stall teleports to the last good node when neither the bot
@@ -1445,6 +1463,7 @@ final function NavProgressCheck()
     {
         return;
     }
+    NavGridRefresh();
     bFollow = IsInState('FollowingLeader');
     bMoving = (bFollow && bFollowMoveActive) || (!bFollow && MoveFlags != 0);
     if (!bMoving || Pawn.Physics == PHYS_Falling || (Enemy != None && Enemy.IsAliveAndWell() && LineOfSightTo(Enemy)))
@@ -1501,6 +1520,7 @@ final function NavProgressCheck()
     if (NavLevel < 2 && NavStall >= 1.5)
     {
         NavLevel = 2;
+        NavGridMarkStuck(Normal2D(Pawn.Acceleration));
         if (!bFollow)
         {
             IterEnd = NavigationPoint(MoveTarget);
