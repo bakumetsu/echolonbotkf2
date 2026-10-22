@@ -758,11 +758,18 @@ function bool FollowCheckExit()
         && KFGRI.OpenedTrader != None
         && NextShoppingTime < WorldInfo.TimeSeconds)
     {
-        FollowExitState = 'GoShopping';
-        bFollowExitPending = true;
-        EchelonLog("FOLLOWGATE_EVAL slot=" $ string(FollowSlotIndex) $ " result=GoShopping");
-        WdLastHubContactTime = WorldInfo.TimeSeconds;
-        return true;
+        if (mut != None && mut.bRemoteShopActive)
+        {
+            RemoteShop();   // buys on the spot, the bot keeps following
+        }
+        else
+        {
+            FollowExitState = 'GoShopping';
+            bFollowExitPending = true;
+            EchelonLog("FOLLOWGATE_EVAL slot=" $ string(FollowSlotIndex) $ " result=GoShopping");
+            WdLastHubContactTime = WorldInfo.TimeSeconds;
+            return true;
+        }
     }
 
     if (mut != None
