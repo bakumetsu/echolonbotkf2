@@ -98,6 +98,7 @@ var EFollowAction FollowAction;
 var Actor FollowNode;
 var float FollowWaitTime;
 var EFollowStatus FollowStatus;
+var EcholonNavMeter NavMeter;      // shared nav cost counter, set by EcholonMut.RegisterBot
 // Special edges (leap, climb, mantle) this bot found on a planned route; kept out of later routes.
 var array<ReachSpec> FollowSpecialSpecs;
 // Direct-steer only when the leader is within this height; above it, a ledge or balcony is likely in between.
@@ -265,6 +266,149 @@ function FollowWatchdogBegin()
 function bool FollowCheckExit()
 {
     return false;
+}
+
+// ---------------------------------------------------------------- nav cost counting (N6)
+// The engine's Clock/UnClock return 0 in the retail game, so nav cost is estimated: each trace, route
+// search and reachability check is counted per frame in the shared EcholonNavMeter, which multiplies
+// the counts by unit costs measured once by NavBenchmark.
+function NavCountTrace()
+{
+    if (NavMeter != None)
+    {
+        NavMeter.CountTrace(1);
+    }
+}
+
+function NavCountSearch()
+{
+    if (NavMeter != None)
+    {
+        NavMeter.CountSearch();
+    }
+}
+
+function NavCountReach()
+{
+    if (NavMeter != None)
+    {
+        NavMeter.CountReach();
+    }
+}
+
+// One-time per-match micro-benchmark: measures unit cost of a trace, a reach check,
+// and a path search on this pawn, then stores results in NavMeter.
+function NavBenchmark()
+{
+    local float TraceUs, ReachUs, SearchUs, TotalMs;
+    local float R, Angle;
+    local int Elapsed;
+    local int StartMs, EndMs;
+    local int Y, Mo, Dw, D, H, Mi, S, Ms;
+    local int I, NodeCount;
+    local vector StartPoint, EndPoint, Extent, HitLoc, HitNorm;
+    local NavigationPoint N;
+    local array<NavigationPoint> Nodes;
+
+    if (Pawn == None)
+    {
+        return;
+    }
+    if (NavMeter == None)
+    {
+        return;
+    }
+
+    TraceUs = 0;
+    ReachUs = 0;
+    SearchUs = 0;
+    TotalMs = 0;
+
+    // TRACES: 6000 collision traces in 8 rotating directions
+    R = Pawn.GetCollisionRadius();
+    StartPoint = Pawn.Location;
+    Extent.X = R;
+    Extent.Y = R;
+    Extent.Z = 8.0;
+
+    GetSystemTime(Y, Mo, Dw, D, H, Mi, S, Ms);
+    StartMs = ((H * 60 + Mi) * 60 + S) * 1000 + Ms;
+
+    for (I = 0; I < 6000; I++)
+    {
+        Angle = float(I % 8) * 0.785398;
+        EndPoint = StartPoint;
+        EndPoint.X += Cos(Angle) * 400.0;
+        EndPoint.Y += Sin(Angle) * 400.0;
+        Trace(HitLoc, HitNorm, EndPoint, StartPoint, true, Extent);
+    }
+
+    GetSystemTime(Y, Mo, Dw, D, H, Mi, S, Ms);
+    EndMs = ((H * 60 + Mi) * 60 + S) * 1000 + Ms;
+
+    if (EndMs >= StartMs)
+    {
+        Elapsed = EndMs - StartMs;
+        TraceUs = float(Elapsed) * 1000.0 / 6000.0;
+        TotalMs += float(Elapsed);
+    }
+
+    // Collect up to 12 navigation points near the pawn
+    NodeCount = 0;
+    foreach WorldInfo.RadiusNavigationPoints(class'NavigationPoint', N, Pawn.Location, 2500.0)
+    {
+        if (NodeCount < 12)
+        {
+            Nodes.AddItem(N);
+            NodeCount++;
+        }
+    }
+
+    if (NodeCount >= 2)
+    {
+        // REACH: 400 reachability checks cycling through the nodes
+        GetSystemTime(Y, Mo, Dw, D, H, Mi, S, Ms);
+        StartMs = ((H * 60 + Mi) * 60 + S) * 1000 + Ms;
+
+        for (I = 0; I < 400; I++)
+        {
+            ActorReachable(Nodes[I % NodeCount]);
+        }
+
+        GetSystemTime(Y, Mo, Dw, D, H, Mi, S, Ms);
+        EndMs = ((H * 60 + Mi) * 60 + S) * 1000 + Ms;
+
+        if (EndMs >= StartMs)
+        {
+            Elapsed = EndMs - StartMs;
+            ReachUs = float(Elapsed) * 1000.0 / 400.0;
+            TotalMs += float(Elapsed);
+        }
+
+        // SEARCH: 300 path searches cycling through the nodes
+        GetSystemTime(Y, Mo, Dw, D, H, Mi, S, Ms);
+        StartMs = ((H * 60 + Mi) * 60 + S) * 1000 + Ms;
+
+        for (I = 0; I < 300; I++)
+        {
+            FollowPlanBegin();
+            FindPathToward(Nodes[I % NodeCount]);
+            FollowPlanEnd();
+        }
+
+        GetSystemTime(Y, Mo, Dw, D, H, Mi, S, Ms);
+        EndMs = ((H * 60 + Mi) * 60 + S) * 1000 + Ms;
+
+        if (EndMs >= StartMs)
+        {
+            Elapsed = EndMs - StartMs;
+            SearchUs = float(Elapsed) * 1000.0 / 300.0;
+            TotalMs += float(Elapsed);
+        }
+    }
+
+    NavMeter.SetUnitCosts(TraceUs, SearchUs, ReachUs);
+    EchelonLog("NAV_BENCH traces=6000 reach=400 search=300 total_ms=" $ string(TotalMs));
 }
 
 function FollowWatchdog()
@@ -595,6 +739,7 @@ function bool WalkReachable(Actor Other)
     local bool bReach;
 
     FollowPlanBegin();
+    NavCountReach();
     bReach = ActorReachable(Other);
     FollowPlanEnd();
     return bReach;
@@ -605,6 +750,7 @@ function bool WalkPointReachable(vector Dest)
     local bool bReach;
 
     FollowPlanBegin();
+    NavCountReach();
     bReach = PointReachable(Dest);
     FollowPlanEnd();
     return bReach;
@@ -683,6 +829,7 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
         FollowBadEdgesBlock(IterMinStrikes, IterBlocked);
         FollowSquadEdgesBlock(IterMinStrikes, IterBlocked);
         FollowPlanBegin();
+        NavCountSearch();
         if (Goal != None)
         {
             IterFirst = FindPathToward(Goal);
@@ -805,6 +952,7 @@ function bool FollowWalkClear(vector From, vector To)
     A.Z = From.Z - H + FollowKneeHeight;
     B = To;
     B.Z = To.Z - H + FollowKneeHeight;
+    NavCountTrace();
     if (Trace(HitLoc, HitNorm, B, A, true, Ext) != None)
     {
         return false;
@@ -812,12 +960,14 @@ function bool FollowWalkClear(vector From, vector To)
     Mid = (From + To) * 0.5;
     Probe = Mid;
     Probe.Z -= H + FollowFloorDrop;
+    NavCountTrace();
     if (Trace(HitLoc, HitNorm, Probe, Mid, false) == None)
     {
         return false;
     }
     Probe = To;
     Probe.Z -= H + FollowFloorDrop;
+    NavCountTrace();
     if (Trace(HitLoc, HitNorm, Probe, To, false) == None)
     {
         return false;
@@ -886,7 +1036,9 @@ function vector FollowFeelDir(vector Target)
     Right = Normal(Dir * Cos(Ang) - Side * Sin(Ang));
     Start = Pawn.Location;
     Start.Z = Start.Z - Pawn.GetCollisionHeight() + FollowKneeHeight;
+    NavCountTrace();
     bHitL = (Trace(HitLoc, HitNorm, Start + Left * Len, Start, false) != None);
+    NavCountTrace();
     bHitR = (Trace(HitLoc, HitNorm, Start + Right * Len, Start, false) != None);
     if (bHitL && !bHitR)
     {
