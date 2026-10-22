@@ -104,6 +104,18 @@ var array<ReachSpec> FollowSpecialSpecs;
 var float FollowDirectMaxZ;
 var bool bFollowSavedCanJump;
 var int FollowPlanDepth;  // nesting guard so an inner Begin/End can't lose the saved bCanJump
+// Bad-edge memory (nav redesign N1): edges this bot failed to walk. Parallel arrays, max FollowBadEdgeMax rows.
+// A row is blocked (ReachSpec.BlockedBy) only for the length of this bot's own search; rows expire by time.
+var array<ReachSpec> FollowBadSpecs;
+var array<float> FollowBadUntil;
+var array<int> FollowBadStrikes;
+var int FollowBadEdgeMax;
+var float FollowBadBaseTime;
+var float FollowBadMaxTime;
+// Stuck ladder state for the edge being walked: level 1 backs off and retries it, level 2 strikes it.
+var ReachSpec FollowLadderSpec;
+var int FollowLadderCount;
+var float FollowBackoffDist;
 
 
 // Log id for this bot: "EcholonBot_3(Widow)", the in-game name without its rank tag. kit/tools/log_reader.py reads it.
@@ -634,8 +646,9 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
     local array<ReachSpec> IterBlocked;
     local ReachSpec IterSpec;
     local Actor IterFirst;
-    local int IterPass, IterIdx;
+    local int IterPass, IterIdx, IterMinStrikes;
 
+    IterMinStrikes = 1;
     for (IterPass = 0; IterPass < 4; IterPass++)
     {
         IterBlocked.Length = 0;
@@ -647,6 +660,7 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
                 IterBlocked.AddItem(FollowSpecialSpecs[IterIdx]);
             }
         }
+        FollowBadEdgesBlock(IterMinStrikes, IterBlocked);
         FollowPlanBegin();
         if (Goal != None)
         {
@@ -663,6 +677,13 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
         }
         if (IterFirst == None)
         {
+            if (IterMinStrikes == 1 && FollowBadSpecs.Length > 0)
+            {
+                EchelonLog("NAV_PATH_RELAX bad=" $ string(FollowBadSpecs.Length));
+                IterMinStrikes = 2;
+                IterPass--;
+                continue;
+            }
             return None;
         }
         IterSpec = FollowFindSpecialEdge();
@@ -941,7 +962,11 @@ function FollowOnStuck(Name IterCause)
     EchelonLog("NAV_STUCK cause=" $ string(IterCause) $ " retries=" $ string(FollowRetries) $ " node=" $ string(FollowNode));
 
     FollowRepathPauseUntil = IterNow + 0.25 + FRand() + FollowSlotPhase();
-    bFollowRouteStale = true;
+    // Ladder level 1 backs off and retries the same edge, so the route stays; level 2 strikes the edge and replans.
+    if (!FollowLadderStuck(IterCause))
+    {
+        bFollowRouteStale = true;
+    }
 
     if (bFollowDirectActive)
     {
@@ -965,6 +990,169 @@ function FollowOnStuck(Name IterCause)
     }
     FollowStuckRefTime = IterNow;
     FollowRequestDispatch();
+}
+
+function ReachSpec FollowCurrentEdge()
+{
+	local NavigationPoint StartNode, EndNode;
+
+	if (Pawn == None || FollowNode == None)
+	{
+		return None;
+	}
+
+	EndNode = NavigationPoint(FollowNode);
+	if (EndNode == None)
+	{
+		return None;
+	}
+
+	StartNode = None;
+	if (FollowRouteIdx > 0 && FollowRouteIdx < FollowRoute.Length)
+	{
+		StartNode = NavigationPoint(FollowRoute[FollowRouteIdx - 1]);
+	}
+	if (StartNode == None)
+	{
+		StartNode = Pawn.Anchor;
+	}
+
+	if (StartNode == None || StartNode == EndNode)
+	{
+		return None;
+	}
+
+	return StartNode.GetReachSpecTo(EndNode);
+}
+
+function FollowStrikeEdge(ReachSpec Spec)
+{
+    local int I, J;
+    local float Penalty;
+
+    if (Spec == None)
+        return;
+
+    I = FollowBadSpecs.Find(Spec);
+    if (I >= 0)
+    {
+        FollowBadStrikes[I]++;
+    }
+    else
+    {
+        if (FollowBadSpecs.Length >= FollowBadEdgeMax)
+        {
+            J = 0;
+            for (I = 1; I < FollowBadSpecs.Length; I++)
+            {
+                if (FollowBadUntil[I] < FollowBadUntil[J])
+                    J = I;
+            }
+            FollowBadSpecs.Remove(J, 1);
+            FollowBadUntil.Remove(J, 1);
+            FollowBadStrikes.Remove(J, 1);
+        }
+        FollowBadSpecs.AddItem(Spec);
+        FollowBadUntil.AddItem(0.0);
+        FollowBadStrikes.AddItem(1);
+        I = FollowBadSpecs.Length - 1;
+    }
+
+    Penalty = FollowBadBaseTime;
+    for (J = 1; J < FollowBadStrikes[I]; J++)
+        Penalty *= 2.0;
+    if (Penalty > FollowBadMaxTime)
+        Penalty = FollowBadMaxTime;
+
+    FollowBadUntil[I] = WorldInfo.TimeSeconds + Penalty;
+
+    EchelonLog("NAV_STRIKE edge=" $ string(Spec.Start) $ "->" $ string(Spec.GetEnd()) $ " strikes=" $ string(FollowBadStrikes[I]) $ " until=" $ string(FollowBadUntil[I]));
+}
+
+function FollowBadEdgesBlock(int MinStrikes, out array<ReachSpec> OutBlocked)
+{
+    local int i;
+
+    // Drop expired rows
+    for (i = FollowBadSpecs.Length - 1; i >= 0; i--)
+    {
+        if (FollowBadSpecs[i] == None || FollowBadUntil[i] <= WorldInfo.TimeSeconds)
+        {
+            FollowBadSpecs.Remove(i, 1);
+            FollowBadUntil.Remove(i, 1);
+            FollowBadStrikes.Remove(i, 1);
+        }
+    }
+
+    if (Pawn == None)
+    {
+        return;
+    }
+
+    // Block live edges meeting threshold
+    for (i = 0; i < FollowBadSpecs.Length; i++)
+    {
+        if (FollowBadStrikes[i] >= MinStrikes && FollowBadSpecs[i].BlockedBy == None)
+        {
+            FollowBadSpecs[i].BlockedBy = Pawn;
+            OutBlocked.AddItem(FollowBadSpecs[i]);
+        }
+    }
+}
+
+function bool FollowLadderStuck(Name IterCause)
+{
+    local ReachSpec Spec;
+    local vector Dir;
+
+    if (Pawn == None)
+        return false;
+
+    if (IterCause == 'Pawn')
+        return false;
+
+    Spec = FollowCurrentEdge();
+    if (Spec == None)
+    {
+        FollowLadderSpec = None;
+        FollowLadderCount = 0;
+        return false;
+    }
+
+    if (Spec != FollowLadderSpec)
+    {
+        FollowLadderSpec = Spec;
+        FollowLadderCount = 0;
+    }
+
+    FollowLadderCount++;
+
+    if (FollowLadderCount == 1)
+    {
+        Dir = Spec.Start.Location - Pawn.Location;
+        Dir.Z = 0;
+        if (VSize(Dir) < 1.0)
+        {
+            Dir = -vector(Pawn.Rotation);
+            Dir.Z = 0;
+            Dir = Dir / FMax(VSize(Dir), 0.0001);
+        }
+        else
+        {
+            Dir = Dir / VSize(Dir);
+        }
+        FollowEscapeNormal = Dir;
+        bFollowEscaping = true;
+        FollowEscapeUntil = WorldInfo.TimeSeconds + (FollowBackoffDist / FMax(Pawn.GroundSpeed, 1.0));
+        EchelonLog("NAV_LADDER level=1 edge=" $ string(Spec.Start) $ "->" $ string(Spec.GetEnd()) $ " cause=" $ string(IterCause));
+        return true;
+    }
+
+    FollowStrikeEdge(Spec);
+    FollowLadderSpec = None;
+    FollowLadderCount = 0;
+    EchelonLog("NAV_LADDER level=2 edge=" $ string(Spec.Start) $ "->" $ string(Spec.GetEnd()) $ " cause=" $ string(IterCause));
+    return false;
 }
 
 function bool FollowTryBlockNode(Actor IterNodeActor)
@@ -1472,4 +1660,8 @@ defaultproperties
     FollowRetriesGiveUpAt=10
     FollowRetryResetDist=384.0
     FollowGiveUpHold=2.0
+    FollowBadEdgeMax=32
+    FollowBadBaseTime=20.0
+    FollowBadMaxTime=120.0
+    FollowBackoffDist=64.0
 }

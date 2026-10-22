@@ -1313,14 +1313,9 @@ function Tick(float Delta)
         }
         else
         {
-            if (VSizeSq(PrevMovePos - Pawn.Location) < 2500.0 * Delta)
-            {
-                if (WorldInfo.TimeSeconds - MovePauseTime > 0.5)
-                {
-                    Pawn.DoJump(false);
-                }
-            }
-            else
+            // No hop when the pawn stops moving (nav redesign N1): jumping against a wall was the wall-jumping.
+            // The wall-hit sidestep in NotifyHitWall and the follow mover's stuck ladder handle it.
+            if (VSizeSq(PrevMovePos - Pawn.Location) >= 2500.0 * Delta)
             {
                 PrevMovePos = Pawn.Location;
                 MovePauseTime = WorldInfo.TimeSeconds;
@@ -1697,15 +1692,8 @@ event bool NotifyHitWall(Vector HitNormal, Actor Wall)
         {
             if ((NextAdjustTime < WorldInfo.TimeSeconds) && Pawn.Physics == 1)
             {
-                if (Rand(3) == 0)
-                {
-                    Pawn.DoJump(false);
-                }
-                else
-                {
-                    bAdjusting = true;
-                    AdjustPosition.Position = (Pawn.Location + (HitNormal * 80.0)) + (VRand() * 50.0);
-                }
+                bAdjusting = true;
+                AdjustPosition.Position = (Pawn.Location + (HitNormal * 80.0)) + (VRand() * 50.0);
             }
         }
         else
