@@ -106,6 +106,7 @@ var bool bNavGridOn;                  // true while the grid steers this bot (se
 var vector NavGridDir;                // last direction the grid chose
 var float NavGridKeepUntil;           // keep NavGridDir until this game time unless it becomes blocked
 var float NavGridOffUntil;            // grid disabled for this bot until this time (suspect data)
+var bool bNavGridPause;                // true while the grid must not steer (an emergency drop walks off a ledge)
 var int NavGridEvals;                 // tiles evaluated by this bot (for logs)
 var float NavGridLogTime;             // last time a bend log line was written (2 s throttle)
 var float FollowRampStart; // game time the pawn last started from a stop
@@ -559,7 +560,7 @@ function vector NavGridSteer(vector WantDir)
 
     Now = WorldInfo.TimeSeconds;
 
-    if (NavGrid == None || !bNavGridOn || Pawn == None)
+    if (NavGrid == None || !bNavGridOn || Pawn == None || bNavGridPause)
     {
         return WantDir;
     }

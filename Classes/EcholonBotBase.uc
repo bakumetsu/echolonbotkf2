@@ -276,6 +276,12 @@ var transient bool bShotProbeClear;
 var transient rotator AimRot;
 var transient float LastAimTime;
 var transient float AimReadyTime;
+var bool bRetreatDropping;             // true from the decision to jump until landing (or 3 s)
+var float RetreatDropStartTime;        // when the drop began
+var float RetreatDropStartZ;           // pawn Z when the drop began
+var vector RetreatDropDir;             // horizontal unit direction of the jump
+var vector RetreatDropLand;            // where the bot expects to land
+var float RetreatDropCooldown;         // no new drop before this game time (default: set to Now + 20.0 after a drop)
 var float LookSweepUntil;    // idle sweep stays active until this game time (LookModeSweep refreshes)
 var int LookBaseYaw;         // centre yaw of the idle sweep
 var int LookCurYaw;          // yaw the bot currently looks at (smoothed)
