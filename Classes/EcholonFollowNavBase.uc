@@ -1440,6 +1440,10 @@ function bool FollowIsWalkableSpec(ReachSpec Spec)
     {
         return true;
     }
+    if (MapData != None && MapData.VerdictOf(Spec) == class'EcholonMapData'.const.VK_PROVEN)
+    {
+        return true;   // a survey bot of this size walked it
+    }
     // Gaps narrower than this pawn are for zeds; treat them like special edges.
     if (Pawn != None && Spec.CollisionRadius < Pawn.GetCollisionRadius())
     {
@@ -1493,7 +1497,8 @@ function FollowScanEdgesBlock(out array<ReachSpec> OutBlocked)
     }
     for (I = 0; I < NavScan.BadSpecs.Length; I++)
     {
-        if (NavScan.BadSpecs[I] != None && NavScan.BadSpecs[I].BlockedBy == None)
+        if (NavScan.BadSpecs[I] != None && NavScan.BadSpecs[I].BlockedBy == None
+            && !(MapData != None && MapData.VerdictOf(NavScan.BadSpecs[I]) == class'EcholonMapData'.const.VK_PROVEN))
         {
             NavScan.BadSpecs[I].BlockedBy = Pawn;
             OutBlocked.AddItem(NavScan.BadSpecs[I]);
@@ -1712,6 +1717,34 @@ function string FollowSurveyStepName(int Level)
     return "bad_wall";
 }
 
+// NAV_PROVEN_ROUTE: the route in RouteCache uses a window or shortcut link that only the survey proved walkable.
+function FollowLogProvenOnRoute()
+{
+    local NavigationPoint IterPrev, IterNav;
+    local ReachSpec IterSpec;
+    local int IterIdx;
+
+    IterPrev = Pawn.Anchor;
+    for (IterIdx = 0; IterIdx < RouteCache.Length; IterIdx++)
+    {
+        IterNav = RouteCache[IterIdx];
+        if (IterNav == None)
+        {
+            break;
+        }
+        if (IterPrev != None && IterPrev != IterNav)
+        {
+            IterSpec = IterPrev.GetReachSpecTo(IterNav);
+            if (IterSpec != None && MapData.VerdictOf(IterSpec) == class'EcholonMapData'.const.VK_PROVEN)
+            {
+                MapData.ProvenUsed++;
+                EchelonLog("NAV_PROVEN_ROUTE from=" $ string(IterPrev) $ " to=" $ string(IterNav) $ " goal=" $ FollowGoalText());
+            }
+        }
+        IterPrev = IterNav;
+    }
+}
+
 // "x,y,z" of a point for the logs.
 function string FollowVecText(vector V)
 {
@@ -1761,7 +1794,8 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest, optional bool bLa
         IterCSurvey = 0;
         for (IterIdx = 0; IterIdx < FollowSpecialSpecs.Length && !bLast; IterIdx++)
         {
-            if (FollowSpecialSpecs[IterIdx] != None && FollowSpecialSpecs[IterIdx].BlockedBy == None)
+            if (FollowSpecialSpecs[IterIdx] != None && FollowSpecialSpecs[IterIdx].BlockedBy == None
+                && !(MapData != None && MapData.VerdictOf(FollowSpecialSpecs[IterIdx]) == class'EcholonMapData'.const.VK_PROVEN))
             {
                 FollowSpecialSpecs[IterIdx].BlockedBy = Pawn;
                 IterBlocked.AddItem(FollowSpecialSpecs[IterIdx]);
@@ -1858,11 +1892,19 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest, optional bool bLa
         }
         if (bLast)
         {
+            if (MapData != None && MapData.ProvenCount > 0)
+            {
+                FollowLogProvenOnRoute();
+            }
             return IterFirst;   // the last search accepts special links; they are not remembered
         }
         IterSpec = FollowFindSpecialEdge();
         if (IterSpec == None)
         {
+            if (MapData != None && MapData.ProvenCount > 0)
+            {
+                FollowLogProvenOnRoute();
+            }
             return IterFirst;
         }
         if (FollowSpecialSpecs.Find(IterSpec) == INDEX_NONE && FollowSpecialSpecs.Length < 64)
