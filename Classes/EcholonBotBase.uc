@@ -1660,6 +1660,16 @@ final function bool MarkDoorPath(KFDoorActor door)
     return true;
 }
 
+// True when a walkable route to Goal exists. Used by the zone planner before it commits squads to a zone.
+final function bool ProbeRoute(Actor Goal)
+{
+    if (Goal == None || Pawn == None)
+    {
+        return false;
+    }
+    return FollowFindWalkablePath(Goal, vect(0, 0, 0)) != None;
+}
+
 final function bool BuildPathToward(Actor Other)
 {
     local int I;

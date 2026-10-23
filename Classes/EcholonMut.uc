@@ -31,7 +31,15 @@ struct FireteamData { var array<EcholonBot> Members; var EcholonBot Leader; var 
 
 struct NavNodeBlock { var name Node; var EcholonBot Owner; var float ExpiresAt; };
 
-struct SquadOrder { var int SquadID; var EcholonBot Leader; var KFMapObjective_DoshHold Zone; var vector GoalPoint; var NavigationPoint GoalNav; var array<int> Slots; var int Phase; var float StartTime; var float ObjectiveBailUntil; var array<NavNodeBlock> NodeBlacklist; var array<vector> SlotLocs; var float SquadSeedAngle; };
+struct SquadDeal
+{
+    var int Role;
+    var NavigationPoint LeaderNav;
+    var vector LeaderSpot;
+    var array<vector> FollowerSpots;
+    var int Shortage;
+};
+struct SquadOrder { var int SquadID; var EcholonBot Leader; var KFMapObjective_DoshHold Zone; var vector GoalPoint; var NavigationPoint GoalNav; var array<int> Slots; var int Phase; var float StartTime; var float ObjectiveBailUntil; var array<NavNodeBlock> NodeBlacklist; var array<vector> SlotLocs; var float SquadSeedAngle; var int Role; };
 
 struct PromotionRequest { var EcholonBot DeadOfficer; var EcholonBot Replacement; var EBotRank OldRank; var float Score; };
 
@@ -51,6 +59,9 @@ var() config float ZonePodRadius;             // first radius tried around a tra
 var() config float ZonePodRadiusMax;          // largest radius tried around a trader pod
 var() config float ZonePodStep;               // radius growth per try
 var() config float ZoneSpawnClear;            // a zone with a zed spawn volume this close is not usable
+var() config float ZoneMinDist;               // zone pick band: nearest distance from the squads (uu)
+var() config float ZoneMaxDist;               // zone pick band: farthest distance (uu)
+var() config float ZoneWideDist;              // widened band when the first one is empty (uu)
 var() config float ZoneMergeDist;             // a pod this close to a Dosh Hold zone merges into it
 var transient EcholonNavGrid NavGrid;         // shared floor-is-lava tile table (N10)
 var() config int NavGridSquads;               // 0 = lava grid for every squad, N = only squad N (1 = first), -1 = off
@@ -90,6 +101,22 @@ var bool bNewWave;
 var bool bObjectiveActive;
 var bool bZoneActive;                         // a planner zone (not a map objective) owns the squad goals; never true together with bObjectiveActive
 var int ActiveZoneId;
+var transient int ZoneActiveIdx;              // index of the active zone in ZonePlanner.Zones
+var transient vector ZoneCenterLoc;           // centre and radius of the active zone (for "inside")
+var transient float ZoneRadiusVal;
+var transient float ZoneStartTime;
+var transient bool bZonePickPending;          // a zone pick is waiting for a free nav slice (ZonePickStep)
+var transient bool bZoneNoMoreThisWave;       // a hunt started: no new zone for the rest of the wave
+var transient string ZonePickReason;
+var transient int ZoneTries;
+var transient float ZoneRetryAt;
+var transient array<int> ZoneTriedIds;
+var transient array<int> RecentZones;         // ids of the last 2 zones used, kept across waves
+var transient float LastZoneTrackTime;
+var transient array<vector> ZoneTrackLoc;
+var transient array<float> ZoneTrackBad;
+var transient array<bool> ZoneTrackTurned;
+var transient array<vector> ZoneTravelLoc;
 var float LastHoldTravelTime;
 var bool bHuntOrderActive;
 var float LastHuntOrderTime;
@@ -279,7 +306,21 @@ function PostBeginPlay()
         ZoneConfigVer = 1;
         SaveConfig();
     }
+    if (ZoneConfigVer < 2)
+    {
+        ZoneMinDist = 1500.0;
+        ZoneMaxDist = 4000.0;
+        ZoneWideDist = 6000.0;
+        ZoneConfigVer = 2;
+        SaveConfig();
+    }
     // A zone value cleared by hand reads 0: use the built-in default.
+    if (ZoneMinDist <= 0.0)
+        ZoneMinDist = 1500.0;
+    if (ZoneMaxDist <= 0.0)
+        ZoneMaxDist = 4000.0;
+    if (ZoneWideDist <= 0.0)
+        ZoneWideDist = 6000.0;
     if (ZoneMinSpots <= 0)
         ZoneMinSpots = 6;
     if (ZoneSpotSpacing <= 0.0)
@@ -1262,6 +1303,12 @@ function PollWaveStart()
         LastPolledWaveNum = KFGRI.WaveNum;
         InitializePlatoon();
         RelocateBotsToAmmoCrates();
+        if (bZoneActive)
+        {
+            EndZone("wave_end");
+        }
+        bZoneNoMoreThisWave = false;
+        ZoneQueuePick("wave_start");
     }
 }
 
@@ -1515,6 +1562,15 @@ function UpdateMacroWaypoints()
         GroupLeader = Fireteams[GroupIdx].Leader;
         if (GroupLeader == None)
         {
+            continue;
+        }
+
+        if (bZoneActive && SquadOrders.Length > GroupIdx && SquadOrders[GroupIdx].GoalNav != None)
+        {
+            // While a zone is active the tether anchor is the squad's role spot, so the tether and the zone pull the same way.
+            Fireteams[GroupIdx].Anchor = SquadOrders[GroupIdx].GoalNav;
+            GroupLeader.AssignedAnchor = SquadOrders[GroupIdx].GoalNav;
+            PropagateAnchorToFollowers(GroupIdx);
             continue;
         }
 
@@ -2259,6 +2315,18 @@ function CheckWave()
         }
     }
 
+    if (bZoneActive || bZonePickPending)
+    {
+        if (KF.MyKFGRI.bTraderIsOpen)
+        {
+            EndZone("trader");
+        }
+        else if (KF.MyKFGRI.IsBossWave())
+        {
+            EndZone("boss");
+        }
+    }
+
     UpdateHuntOrders();
     EvaluateSquadPhase();
 }
@@ -2310,6 +2378,12 @@ function UpdateHuntOrders()
         return;
     }
 
+    if (bZoneActive)
+    {
+        EndZone("hunt");
+    }
+    bZoneNoMoreThisWave = true;
+    ZoneCancelPick();
     EnsureSquadOrderTable();
     if (!bHuntOrderActive)
         EchelonLog("HUNT_ORDER_START zeds=" $ string(Alive) $ " remaining=" $ string(GRI.AIRemaining));
@@ -2353,6 +2427,12 @@ final function SetHoldObjective(Volume V)
     local EcholonBot L;
     local EcholonBot B;
 
+    // A real map objective always wins over a planner zone.
+    if (bZoneActive)
+    {
+        EndZone("objective");
+    }
+    ZoneCancelPick();
     ValidPoints.Length = 0;
     foreach WorldInfo.AllNavigationPoints(Class'Engine.NavigationPoint', N)
     {
@@ -2454,6 +2534,11 @@ final function EndObjective()
     {
         B.FinishObjective();
     }
+    if (KF != None && KF.MyKFGRI != None && KF.MyKFGRI.AIRemaining > HUNT_ORDER_MAX_ZEDS && !KF.MyKFGRI.bTraderIsOpen
+        && !KF.MyKFGRI.IsBossWave())
+    {
+        ZoneQueuePick("objective_end");
+    }
 }
 
 function NavigationPoint NearestValidPoint(vector Loc)
@@ -2517,6 +2602,13 @@ function InheritSquadOrder(int GroupIdx, EcholonBot NewLeader)
     if (GroupIdx < 0 || GroupIdx >= SquadOrders.Length)
         return;
 
+    if (bZoneActive)
+    {
+        // The new leader takes the squad's spot and role: deal the zone again for the living squads.
+        ZoneDeal("leader");
+        return;
+    }
+
     O = SquadOrders[GroupIdx];
     if (O.GoalNav == None)
     {
@@ -2557,6 +2649,10 @@ function SampleSquadSlots(int GroupIdx)
     local array<bool> bAlive;
     local float Angle, R0, DMin, Dist, BestDist;
     local int N, i, j, BestIdx;
+
+    // A zone deals its own spots (ZoneDeal); the ring sampling is for real objectives.
+    if (bZoneActive)
+        return;
 
     if (GroupIdx < 0 || GroupIdx >= SquadOrders.Length)
         return;
@@ -2741,6 +2837,12 @@ function vector GetSlotLocation(EcholonBot B)
     return SquadOrders[GroupIdx].SlotLocs[SlotIdx];
 }
 
+// True when the location is inside the active zone: within its radius (2D) and less than 200 uu above or below the centre.
+function bool ZoneInside(vector L)
+{
+    return VSize2D(L - ZoneCenterLoc) <= ZoneRadiusVal + 100.0 && Abs(L.Z - ZoneCenterLoc.Z) < 200.0;
+}
+
 function LogHoldTravel()
 {
     local int i;
@@ -2761,6 +2863,18 @@ function LogHoldTravel()
             continue;
         if (O.Phase != PHASE_ENROUTE && O.Phase != PHASE_HOLDING)
             continue;
+
+        if (bZoneActive)
+        {
+            if (ZoneTravelLoc.Length != SquadOrders.Length)
+                ZoneTravelLoc.Length = SquadOrders.Length;
+            if (O.Phase == PHASE_ENROUTE)
+            {
+                EchelonLog("ZONE_TRAVEL squad=" $ string(i + 1) $ " left=" $ string(int(VSize(O.Leader.Pawn.Location - O.GoalPoint))) $ " moved=" $ string(int(VSize(O.Leader.Pawn.Location - ZoneTravelLoc[i]))));
+            }
+            ZoneTravelLoc[i] = O.Leader.Pawn.Location;
+            continue;
+        }
 
         if (O.Zone != None && O.Zone.Encompasses(O.Leader.Pawn))
             bIn = 1;
@@ -2783,9 +2897,13 @@ function EvaluateSquadPhase()
     local int i;
     local int MemberIdx;
 
-    if (WorldInfo == None || !bObjectiveActive)
+    if (WorldInfo == None || !HasHoldGoals())
         return;
 
+    if (bZoneActive)
+    {
+        ZoneTrack();
+    }
     LogHoldTravel();
     GoalRadiusSq = 9216.0;
 
@@ -2800,7 +2918,11 @@ function EvaluateSquadPhase()
         if (O.Phase != PHASE_ENROUTE && O.Phase != PHASE_HOLDING)
             continue;
 
-        if (O.Zone != None)
+        if (bZoneActive)
+        {
+            LeaderInside = ZoneInside(O.Leader.Pawn.Location);
+        }
+        else if (O.Zone != None)
         {
             LeaderInside = O.Zone.Encompasses(O.Leader.Pawn);
         }
@@ -2819,7 +2941,12 @@ function EvaluateSquadPhase()
                 continue;
             if (M.Pawn == None || M.Pawn.Health <= 0)
                 continue;
-            if (O.Zone != None)
+            if (bZoneActive)
+            {
+                if (ZoneInside(M.Pawn.Location))
+                    MemberInside = true;
+            }
+            else if (O.Zone != None)
             {
                 if (O.Zone.Encompasses(M.Pawn))
                     MemberInside = true;
@@ -2836,6 +2963,10 @@ function EvaluateSquadPhase()
             O.Phase = PHASE_HOLDING;
             SquadOrders[i] = O;
             EchelonLog("HOLD_PHASE squad=" $ string(i + 1) $ " phase=HOLDING");
+            if (bZoneActive)
+            {
+                EchelonLog("ZONE_ARRIVE squad=" $ string(i + 1) $ " role=" $ string(O.Role) $ " secs=" $ string(int(WorldInfo.TimeSeconds - O.StartTime)));
+            }
         }
         else if (O.Phase == PHASE_HOLDING && !LeaderInside)
         {
@@ -3053,6 +3184,386 @@ function int MoveSquadMembers(int FromIdx, int ToIdx)
 
     ConsolidateFireteams();
     return Fireteams[ToIdx].Members.Length;
+}
+
+
+// ---------------------------------------------------------------------------------------------
+// Zone hold (Hold and Relocate zones, step 3): the planner picks one zone per wave and every squad
+// goes there with a role. bZoneActive says a zone owns the squad goals (see HasHoldGoals).
+// ---------------------------------------------------------------------------------------------
+
+// Ask for a zone pick; ZonePickStep does it over the next frames (one route search at a time).
+function ZoneQueuePick(string Reason)
+{
+    if (ZonePlanner == None || bZoneActive || bZoneNoMoreThisWave)
+    {
+        return;
+    }
+    bZonePickPending = true;
+    ZonePickReason = Reason;
+    ZoneTries = 0;
+    ZoneTriedIds.Length = 0;
+    ZoneRetryAt = 0.0;
+    if (!IsTimerActive('ZonePickStep'))
+    {
+        SetTimer(0.5, true, 'ZonePickStep');
+    }
+}
+
+function ZoneCancelPick()
+{
+    bZonePickPending = false;
+    ClearTimer('ZonePickStep');
+}
+
+// Timer: choose a zone at random in the distance band, check one route, commit or try the next.
+function ZonePickStep()
+{
+    local KFGameReplicationInfo GRI;
+    local EcholonBot L, Core;
+    local vector Ref;
+    local int i, n, Pick, ZIdx;
+    local float Now, D;
+    local array<int> Excl, Cands;
+    local string BandName, RecentStr;
+
+    if (!bZonePickPending)
+    {
+        ClearTimer('ZonePickStep');
+        return;
+    }
+    GRI = KFGameReplicationInfo(WorldInfo.GRI);
+    if (GRI == None || bZoneActive || bObjectiveActive || bHuntOrderActive || bZoneNoMoreThisWave
+        || GRI.bTraderIsOpen || GRI.IsBossWave() || !GRI.bMatchHasBegun || GRI.bMatchIsOver)
+    {
+        ZoneCancelPick();
+        return;
+    }
+    Now = WorldInfo.TimeSeconds;
+    if (ZonePlanner == None || !ZonePlanner.bDone || Now < ZoneRetryAt)
+    {
+        return;
+    }
+
+    n = 0;
+    Core = None;
+    Ref = vect(0, 0, 0);
+    for (i = 0; i < Fireteams.Length; i++)
+    {
+        L = Fireteams[i].Leader;
+        if (L == None || L.Pawn == None || L.Pawn.Health <= 0)
+        {
+            continue;
+        }
+        Ref += L.Pawn.Location;
+        n++;
+        if (Core == None)
+        {
+            Core = L;
+        }
+    }
+    if (n == 0)
+    {
+        return;
+    }
+    Ref = Ref / float(n);
+
+    for (i = 0; i < RecentZones.Length; i++)
+    {
+        Excl.AddItem(RecentZones[i]);
+    }
+    for (i = 0; i < ZoneTriedIds.Length; i++)
+    {
+        Excl.AddItem(ZoneTriedIds[i]);
+    }
+
+    BandName = "30-80";
+    Cands = ZonePlanner.CandidateZones(Ref, ZoneMinDist, ZoneMaxDist, Excl);
+    if (Cands.Length == 0)
+    {
+        BandName = "120";
+        Cands = ZonePlanner.CandidateZones(Ref, ZoneMinDist, ZoneWideDist, Excl);
+    }
+    if (Cands.Length == 0)
+    {
+        BandName = "nearest";
+        ZIdx = ZonePlanner.NearestUsable(Ref, Excl);
+        if (ZIdx >= 0)
+        {
+            Cands.AddItem(ZIdx);
+        }
+    }
+    if (Cands.Length == 0)
+    {
+        if (ZoneTries == 0)
+        {
+            EchelonLog("ZONE_NONE reason=no_usable");
+            ZoneCancelPick();
+        }
+        else
+        {
+            EchelonLog("ZONE_NONE reason=no_route");
+            ZoneTries = 0;
+            ZoneTriedIds.Length = 0;
+            ZoneRetryAt = Now + 10.0;
+        }
+        return;
+    }
+
+    // Fully random among the candidates (user decision), then one route check through the nav budget.
+    if (NavBudget != None && !NavBudget.TakeSearch(Now))
+    {
+        return;
+    }
+    Pick = Cands[Rand(Cands.Length)];
+    ZoneTries++;
+    if (Core != None && (ZonePlanner.Zones[Pick].Spots.Length == 0 || !Core.ProbeRoute(ZonePlanner.Zones[Pick].Spots[0])))
+    {
+        ZoneTriedIds.AddItem(ZonePlanner.Zones[Pick].Id);
+        if (ZoneTries >= 3)
+        {
+            EchelonLog("ZONE_NONE reason=no_route");
+            ZoneTries = 0;
+            ZoneTriedIds.Length = 0;
+            ZoneRetryAt = Now + 10.0;
+        }
+        return;
+    }
+
+    D = VSize(ZonePlanner.Zones[Pick].Center - Ref);
+    RecentStr = "";
+    for (i = 0; i < RecentZones.Length; i++)
+    {
+        if (i > 0)
+        {
+            RecentStr = RecentStr $ ",";
+        }
+        RecentStr = RecentStr $ string(RecentZones[i]);
+    }
+    EchelonLog("ZONE_PICK zone=" $ string(ZonePlanner.Zones[Pick].Id) $ " src=" $ ZoneSrcName(ZonePlanner.Zones[Pick].Src) $ " dist=" $ string(int(D)) $ " band=" $ BandName $ " tries=" $ string(ZoneTries) $ " recent=" $ RecentStr $ " reason=" $ ZonePickReason);
+    ZoneCommit(Pick);
+}
+
+function string ZoneSrcName(byte Src)
+{
+    if (Src == 0)
+    {
+        return "dosh";
+    }
+    return "pod";
+}
+
+// Make the picked zone the active hold and deal the roles.
+function ZoneCommit(int ZIdx)
+{
+    ZoneCancelPick();
+    bZoneActive = true;
+    bZoneNoMoreThisWave = false;
+    ZoneActiveIdx = ZIdx;
+    ActiveZoneId = ZonePlanner.Zones[ZIdx].Id;
+    ZoneCenterLoc = ZonePlanner.Zones[ZIdx].Center;
+    ZoneRadiusVal = ZonePlanner.Zones[ZIdx].Radius;
+    ZoneStartTime = WorldInfo.TimeSeconds;
+    RecentZones.AddItem(ActiveZoneId);
+    while (RecentZones.Length > 2)
+    {
+        RecentZones.Remove(0, 1);
+    }
+    ZoneDeal("");
+}
+
+// Deal roles and spots of the active zone to the living squads (Why is empty for the first deal).
+function ZoneDeal(string Why)
+{
+    local int i, j, N;
+    local array<int> Counts;
+    local array<SquadDeal> Deals;
+    local SquadOrder O;
+    local EcholonBot Ldr;
+    local string RoleName;
+    local NavigationPoint PrevNav;
+    local EcholonBot PrevLeader;
+    local int PrevPhase;
+    local float PrevStart;
+
+    if (!bZoneActive || ZonePlanner == None)
+    {
+        return;
+    }
+    EnsureSquadOrderTable();
+    for (i = 0; i < Fireteams.Length; i++)
+    {
+        N = 0;
+        for (j = 0; j < Fireteams[i].Members.Length; j++)
+        {
+            if (Fireteams[i].Members[j] != None && Fireteams[i].Members[j].Pawn != None && Fireteams[i].Members[j].Pawn.Health > 0)
+            {
+                N++;
+            }
+        }
+        Counts.AddItem(N);
+    }
+    Deals = ZonePlanner.DealSpots(ZoneActiveIdx, Counts);
+    if (Why != "")
+    {
+        EchelonLog("ZONE_REDEAL reason=" $ Why);
+    }
+    for (i = 0; i < Fireteams.Length && i < SquadOrders.Length && i < Deals.Length; i++)
+    {
+        O = SquadOrders[i];
+        PrevNav = O.GoalNav;
+        PrevLeader = O.Leader;
+        PrevPhase = O.Phase;
+        PrevStart = O.StartTime;
+        O.SquadID = i + 1;
+        O.Zone = None;
+        O.Role = Deals[i].Role;
+        O.Slots.Length = 0;
+        O.SlotLocs.Length = 0;
+        O.ObjectiveBailUntil = 0.0;
+        Ldr = Fireteams[i].Leader;
+        if (Counts[i] == 0 || Ldr == None || Ldr.Pawn == None || Ldr.Pawn.Health <= 0 || Deals[i].LeaderNav == None)
+        {
+            O.Leader = None;
+            O.GoalNav = None;
+            O.GoalPoint = vect(0, 0, 0);
+            O.Phase = PHASE_IDLE;
+            SquadOrders[i] = O;
+            continue;
+        }
+        O.Leader = Ldr;
+        O.GoalNav = Deals[i].LeaderNav;
+        O.GoalPoint = Deals[i].LeaderSpot;
+        O.Phase = PHASE_ENROUTE;
+        O.StartTime = WorldInfo.TimeSeconds;
+        // A re-deal that leaves this squad's leader and spot alone must not restart its arrival clock.
+        if (Why != "" && PrevNav == O.GoalNav && PrevLeader == Ldr && (PrevPhase == PHASE_ENROUTE || PrevPhase == PHASE_HOLDING))
+        {
+            O.Phase = PrevPhase;
+            O.StartTime = PrevStart;
+        }
+        for (j = 0; j < Deals[i].FollowerSpots.Length; j++)
+        {
+            O.Slots.AddItem(j);
+            O.SlotLocs.AddItem(Deals[i].FollowerSpots[j]);
+        }
+        SquadOrders[i] = O;
+        if (Deals[i].Role == 0)
+        {
+            RoleName = "core";
+        }
+        else if (Deals[i].Role == 1)
+        {
+            RoleName = "entry";
+        }
+        else
+        {
+            RoleName = "reserve";
+        }
+        EchelonLog("ZONE_ROLE squad=" $ string(i + 1) $ " role=" $ RoleName $ " leader=" $ string(Ldr.Name) $ " spot=" $ CoordStr(O.GoalPoint) $ " slots=" $ string(O.SlotLocs.Length) $ " short=" $ string(Deals[i].Shortage));
+    }
+    for (i = 0; i < ActiveBots.Length; i++)
+    {
+        if (ActiveBots[i] != None)
+        {
+            ActiveBots[i].ObjectiveGoal = None;
+        }
+    }
+}
+
+// The zone is over: clear goals, slots and roles and hand the squads back to the legacy anchors.
+function EndZone(string Reason)
+{
+    local int i;
+    local EcholonBot B;
+
+    ZoneCancelPick();
+    if (!bZoneActive)
+    {
+        return;
+    }
+    EchelonLog("ZONE_END zone=" $ string(ActiveZoneId) $ " reason=" $ Reason $ " held=" $ string(int(WorldInfo.TimeSeconds - ZoneStartTime)));
+    bZoneActive = false;
+    ActiveZoneId = 0;
+    for (i = 0; i < SquadOrders.Length; i++)
+    {
+        SquadOrders[i].Leader = None;
+        SquadOrders[i].Zone = None;
+        SquadOrders[i].GoalNav = None;
+        SquadOrders[i].GoalPoint = vect(0, 0, 0);
+        SquadOrders[i].Slots.Length = 0;
+        SquadOrders[i].SlotLocs.Length = 0;
+        SquadOrders[i].Role = 0;
+        SquadOrders[i].ObjectiveBailUntil = 0.0;
+        SquadOrders[i].Phase = PHASE_IDLE;
+    }
+    ZoneTrackLoc.Length = 0;
+    ZoneTrackBad.Length = 0;
+    ZoneTrackTurned.Length = 0;
+    ZoneTravelLoc.Length = 0;
+    foreach WorldInfo.AllControllers(class'EcholonBot', B)
+    {
+        B.FinishObjective();
+    }
+}
+
+// Every 0.5 s while a zone is active: log a ZONE_TURN when a leader walks away from its spot for 1 s.
+function ZoneTrack()
+{
+    local int i;
+    local SquadOrder O;
+    local vector Mv, ToGoal;
+    local float Now, CosA;
+
+    Now = WorldInfo.TimeSeconds;
+    if (Now - LastZoneTrackTime < 0.5)
+    {
+        return;
+    }
+    LastZoneTrackTime = Now;
+    if (ZoneTrackLoc.Length != SquadOrders.Length)
+    {
+        ZoneTrackLoc.Length = SquadOrders.Length;
+        ZoneTrackBad.Length = SquadOrders.Length;
+        ZoneTrackTurned.Length = SquadOrders.Length;
+    }
+    for (i = 0; i < SquadOrders.Length; i++)
+    {
+        O = SquadOrders[i];
+        if (O.Leader == None || O.Leader.Pawn == None || O.Phase != PHASE_ENROUTE)
+        {
+            ZoneTrackBad[i] = 0.0;
+            ZoneTrackTurned[i] = false;
+            ZoneTrackLoc[i] = vect(0, 0, 0);
+            continue;
+        }
+        Mv = O.Leader.Pawn.Location - ZoneTrackLoc[i];
+        Mv.Z = 0.0;
+        ToGoal = O.GoalPoint - O.Leader.Pawn.Location;
+        ToGoal.Z = 0.0;
+        if (ZoneTrackLoc[i] != vect(0, 0, 0) && VSize(Mv) > 40.0 && VSize(ToGoal) > 100.0)
+        {
+            CosA = (Mv dot ToGoal) / (VSize(Mv) * VSize(ToGoal));
+            if (CosA < -0.5)
+            {
+                if (ZoneTrackBad[i] == 0.0)
+                {
+                    ZoneTrackBad[i] = Now;
+                }
+                else if (Now - ZoneTrackBad[i] >= 1.0 && !ZoneTrackTurned[i])
+                {
+                    ZoneTrackTurned[i] = true;
+                    EchelonLog("ZONE_TURN squad=" $ string(i + 1));
+                }
+            }
+            else
+            {
+                ZoneTrackBad[i] = 0.0;
+                ZoneTrackTurned[i] = false;
+            }
+        }
+        ZoneTrackLoc[i] = O.Leader.Pawn.Location;
+    }
 }
 
 // True when squads have a hold goal: a real map objective or a planner zone.
@@ -3964,6 +4475,10 @@ function CacheHumanPositions()
 
 function vector GetObjectiveLocation()
 {
+    if (bZoneActive)
+    {
+        return ZoneCenterLoc;
+    }
     if (bObjectiveActive && PrevObjective != None)
     {
         return PrevObjective.Location;

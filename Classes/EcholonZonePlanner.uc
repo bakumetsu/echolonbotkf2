@@ -951,3 +951,371 @@ final function StepCollect()
     // Advance to flood-fill phase.
     Phase = PH_FLOOD;
 }
+
+final function int PrimaryEntry(int ZoneIdx)
+{
+    local ZoneRec Z;
+    local int e, s;
+    local int NearestIdx;
+    local float NearestDist;
+    local array<int> EntryCounts;
+    local int BestIdx;
+    local int BestCount;
+    local int BestLinks;
+    local int NumEntries;
+
+    Z = Zones[ZoneIdx];
+    NumEntries = Z.Entries.Length;
+    if (NumEntries == 0)
+        return -1;
+
+    // count nearest-entry hits per entry
+    for (e = 0; e < NumEntries; e++)
+        EntryCounts.AddItem(0);
+
+    for (s = 0; s < SpawnLocs.Length; s++)
+    {
+        NearestIdx = 0;
+        NearestDist = VSize(SpawnLocs[s] - Z.Entries[0].Loc);
+        for (e = 1; e < NumEntries; e++)
+        {
+            if (VSize(SpawnLocs[s] - Z.Entries[e].Loc) < NearestDist)
+            {
+                NearestDist = VSize(SpawnLocs[s] - Z.Entries[e].Loc);
+                NearestIdx = e;
+            }
+        }
+        EntryCounts[NearestIdx]++;
+    }
+
+    // best: highest count, tie -> larger Links, tie -> lower index
+    BestIdx = 0;
+    BestCount = EntryCounts[0];
+    BestLinks = Z.Entries[0].Links;
+    for (e = 1; e < NumEntries; e++)
+    {
+        if (EntryCounts[e] > BestCount)
+        {
+            BestIdx = e;
+            BestCount = EntryCounts[e];
+            BestLinks = Z.Entries[e].Links;
+        }
+        else if (EntryCounts[e] == BestCount && Z.Entries[e].Links > BestLinks)
+        {
+            BestIdx = e;
+            BestLinks = Z.Entries[e].Links;
+        }
+    }
+    return BestIdx;
+}
+
+final function array<EcholonMut.SquadDeal> DealSpots(int ZoneIdx, array<int> MemberCounts)
+{
+    local ZoneRec Z;
+    local array<EcholonMut.SquadDeal> Result;
+    local array<bool> bTaken;
+    local int i, j, k;
+    local int NumSquads;
+    local int NumSpots;
+    local int pe;
+    local int PickNum;
+    local int BestIdx;
+    local float BestDist;
+    local vector Target;
+    local vector CoreLeader;
+    local vector EntryLeader;
+    local vector ReserveTarget;
+    local EcholonMut.SquadDeal Deal;
+    local EcholonMut.SquadDeal EmptyDeal;
+    local bool bCoreDealt;
+    local bool bEntryDealt;
+
+    if (MemberCounts.Length == 0)
+    {
+        return Result;
+    }
+
+    Z = Zones[ZoneIdx];
+    NumSquads = MemberCounts.Length;
+    NumSpots = Z.Spots.Length;
+
+    // default deals with correct Role
+    for (i = 0; i < NumSquads; i++)
+    {
+        Deal = EmptyDeal;
+        if (i == 0)
+            Deal.Role = 0;
+        else if (i == 1)
+            Deal.Role = 1;
+        else
+            Deal.Role = 2;
+        Result.AddItem(Deal);
+    }
+
+    // no spots -> Shortage = MemberCounts[i], LeaderNav already None
+    if (NumSpots == 0)
+    {
+        for (i = 0; i < NumSquads; i++)
+        {
+            Deal = Result[i];
+            Deal.Shortage = MemberCounts[i];
+            Result[i] = Deal;
+        }
+        return Result;
+    }
+
+    for (i = 0; i < NumSpots; i++)
+        bTaken.AddItem(false);
+
+    bCoreDealt = (MemberCounts[0] > 0);
+    bEntryDealt = (NumSquads > 1 && MemberCounts[1] > 0);
+
+    // --- Squad 0: Core ---
+    if (MemberCounts[0] > 0)
+    {
+        Target = Z.Center;
+        PickNum = 0;
+        for (j = 0; j < MemberCounts[0]; j++)
+        {
+            BestIdx = -1;
+            BestDist = 999999.0;
+            for (i = 0; i < NumSpots; i++)
+            {
+                if (!bTaken[i] && VSize2D(Z.Spots[i].Location - Target) < BestDist)
+                {
+                    BestDist = VSize2D(Z.Spots[i].Location - Target);
+                    BestIdx = i;
+                }
+            }
+            if (BestIdx == -1)
+            {
+                // no free spot: nearest regardless
+                BestIdx = 0;
+                BestDist = VSize2D(Z.Spots[0].Location - Target);
+                for (i = 1; i < NumSpots; i++)
+                {
+                    if (VSize2D(Z.Spots[i].Location - Target) < BestDist)
+                    {
+                        BestDist = VSize2D(Z.Spots[i].Location - Target);
+                        BestIdx = i;
+                    }
+                }
+                Deal = Result[0];
+                Deal.Shortage++;
+                Result[0] = Deal;
+            }
+            else
+            {
+                bTaken[BestIdx] = true;
+            }
+
+            Deal = Result[0];
+            if (PickNum == 0)
+            {
+                Deal.LeaderNav = Z.Spots[BestIdx];
+                Deal.LeaderSpot = Z.Spots[BestIdx].Location;
+                CoreLeader = Deal.LeaderSpot;
+            }
+            else
+            {
+                Deal.FollowerSpots.AddItem(Z.Spots[BestIdx].Location);
+            }
+            Result[0] = Deal;
+            PickNum++;
+        }
+    }
+
+    // --- Squad 1: Entry ---
+    if (NumSquads > 1 && MemberCounts[1] > 0)
+    {
+        pe = PrimaryEntry(ZoneIdx);
+        if (pe >= 0 && Z.Entries[pe].Inside != None)
+            Target = Z.Entries[pe].Inside.Location;
+        else if (pe >= 0)
+            Target = Z.Entries[pe].Loc;
+        else
+            Target = Z.Center;
+
+        PickNum = 0;
+        for (j = 0; j < MemberCounts[1]; j++)
+        {
+            BestIdx = -1;
+            BestDist = 999999.0;
+            for (i = 0; i < NumSpots; i++)
+            {
+                if (!bTaken[i] && VSize2D(Z.Spots[i].Location - Target) < BestDist)
+                {
+                    BestDist = VSize2D(Z.Spots[i].Location - Target);
+                    BestIdx = i;
+                }
+            }
+            if (BestIdx == -1)
+            {
+                BestIdx = 0;
+                BestDist = VSize2D(Z.Spots[0].Location - Target);
+                for (i = 1; i < NumSpots; i++)
+                {
+                    if (VSize2D(Z.Spots[i].Location - Target) < BestDist)
+                    {
+                        BestDist = VSize2D(Z.Spots[i].Location - Target);
+                        BestIdx = i;
+                    }
+                }
+                Deal = Result[1];
+                Deal.Shortage++;
+                Result[1] = Deal;
+            }
+            else
+            {
+                bTaken[BestIdx] = true;
+            }
+
+            Deal = Result[1];
+            if (PickNum == 0)
+            {
+                Deal.LeaderNav = Z.Spots[BestIdx];
+                Deal.LeaderSpot = Z.Spots[BestIdx].Location;
+                EntryLeader = Deal.LeaderSpot;
+            }
+            else
+            {
+                Deal.FollowerSpots.AddItem(Z.Spots[BestIdx].Location);
+            }
+            Result[1] = Deal;
+            PickNum++;
+        }
+    }
+
+    // --- Squads 2+: Reserve ---
+    for (i = 2; i < NumSquads; i++)
+    {
+        if (MemberCounts[i] > 0)
+        {
+            if (bCoreDealt && bEntryDealt)
+                ReserveTarget = (CoreLeader + EntryLeader) * 0.5;
+            else if (bCoreDealt)
+                ReserveTarget = CoreLeader;
+            else
+                ReserveTarget = Z.Center;
+            Target = ReserveTarget;
+
+            PickNum = 0;
+            for (j = 0; j < MemberCounts[i]; j++)
+            {
+                BestIdx = -1;
+                BestDist = 999999.0;
+                for (k = 0; k < NumSpots; k++)
+                {
+                    if (!bTaken[k] && VSize2D(Z.Spots[k].Location - Target) < BestDist)
+                    {
+                        BestDist = VSize2D(Z.Spots[k].Location - Target);
+                        BestIdx = k;
+                    }
+                }
+                if (BestIdx == -1)
+                {
+                    BestIdx = 0;
+                    BestDist = VSize2D(Z.Spots[0].Location - Target);
+                    for (k = 1; k < NumSpots; k++)
+                    {
+                        if (VSize2D(Z.Spots[k].Location - Target) < BestDist)
+                        {
+                            BestDist = VSize2D(Z.Spots[k].Location - Target);
+                            BestIdx = k;
+                        }
+                    }
+                    Deal = Result[i];
+                    Deal.Shortage++;
+                    Result[i] = Deal;
+                }
+                else
+                {
+                    bTaken[BestIdx] = true;
+                }
+
+                Deal = Result[i];
+                if (PickNum == 0)
+                {
+                    Deal.LeaderNav = Z.Spots[BestIdx];
+                    Deal.LeaderSpot = Z.Spots[BestIdx].Location;
+                }
+                else
+                {
+                    Deal.FollowerSpots.AddItem(Z.Spots[BestIdx].Location);
+                }
+                Result[i] = Deal;
+                PickNum++;
+            }
+        }
+    }
+
+    return Result;
+}
+
+final function array<int> CandidateZones(vector Ref, float MinD, float MaxD, array<int> Exclude)
+{
+    local array<int> Result;
+    local int i, j;
+    local ZoneRec Z;
+    local bool bExcluded;
+    local float D;
+
+    for (i = 0; i < Zones.Length; i++)
+    {
+        Z = Zones[i];
+        if (!Z.bUsable)
+            continue;
+        bExcluded = false;
+        for (j = 0; j < Exclude.Length; j++)
+        {
+            if (Exclude[j] == Z.Id)
+            {
+                bExcluded = true;
+                break;
+            }
+        }
+        if (bExcluded)
+            continue;
+        D = VSize(Z.Center - Ref);
+        if (D >= MinD && D <= MaxD)
+            Result.AddItem(i);
+    }
+    return Result;
+}
+
+final function int NearestUsable(vector Ref, array<int> Exclude)
+{
+    local int i, j;
+    local ZoneRec Z;
+    local bool bExcluded;
+    local float D;
+    local int BestIdx;
+    local float BestDist;
+
+    BestIdx = -1;
+    BestDist = 999999999.0;
+    for (i = 0; i < Zones.Length; i++)
+    {
+        Z = Zones[i];
+        if (!Z.bUsable)
+            continue;
+        bExcluded = false;
+        for (j = 0; j < Exclude.Length; j++)
+        {
+            if (Exclude[j] == Z.Id)
+            {
+                bExcluded = true;
+                break;
+            }
+        }
+        if (bExcluded)
+            continue;
+        D = VSize(Z.Center - Ref);
+        if (D < BestDist)
+        {
+            BestDist = D;
+            BestIdx = i;
+        }
+    }
+    return BestIdx;
+}
