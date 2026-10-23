@@ -1660,6 +1660,32 @@ final function bool MarkDoorPath(KFDoorActor door)
     return true;
 }
 
+// True when a walkable route to Goal exists. Used by the zone planner before it commits squads to a zone.
+final function bool ProbeRoute(Actor Goal)
+{
+    local array<NavigationPoint> SavedRoute;
+    local array<ReachSpec> SavedSpecial;
+    local Actor SavedGoal;
+    local float SavedDist;
+    local bool bOk;
+
+    if (Goal == None || Pawn == None)
+    {
+        return false;
+    }
+    // The probe runs on a live leader: keep the route it is following (and what it learned about special edges).
+    SavedRoute = RouteCache;
+    SavedSpecial = FollowSpecialSpecs;
+    SavedGoal = RouteGoal;
+    SavedDist = RouteDist;
+    bOk = (FollowFindWalkablePath(Goal, vect(0, 0, 0)) != None);
+    RouteCache = SavedRoute;
+    FollowSpecialSpecs = SavedSpecial;
+    RouteGoal = SavedGoal;
+    RouteDist = SavedDist;
+    return bOk;
+}
+
 final function bool BuildPathToward(Actor Other)
 {
     local int I;

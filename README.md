@@ -24,7 +24,7 @@ The compiled package lands in `KFGame\Unpublished\BrewedPC\Script\EcholonBot.u`,
 
 Navigation settings in that file: `NavGridSquads` (default 0; 0 = the floor-is-lava grid may steer every squad, but only for a few seconds after a bot stalls; N = only squad N, -1 = off) and `bNavGridDebug` (default false; logs an ASCII map of the grid). At match start the bots scan every path link and block bad ones; nav cost is counted and shared per frame, and the logs show it as `NAV_COST`, `NAV_SCAN` and `NAV_GRID_*` lines.
 
-Zone planner (logging only, no bot behaviour change): at match start the mutator lists Dosh Hold zones and trader pods and rates each as usable or not, logged as `ZONE_*` lines. Settings: `bZonePlanner` and the `Zone*` values in the same ini; see `docs/ARCHITECTURE.md`.
+Zone planner: at match start the mutator lists Dosh Hold zones and trader pods and rates each as usable or not, logged as `ZONE_*` lines. In normal waves the squads also hold a randomly picked usable zone (squad 1 core, squad 2 entry, others reserve) until the hunt order, the trader or a boss ends it. Settings: `bZonePlanner` and the `Zone*` values in the same ini (a test run with it off needs `--ini ZoneConfigVer=2 --ini bZonePlanner=False`); see `docs/ARCHITECTURE.md`.
 
 ## Playtest mode
 
