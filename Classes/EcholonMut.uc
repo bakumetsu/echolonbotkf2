@@ -132,6 +132,14 @@ var() config float ZoneMaxDist;               // zone pick band: farthest distan
 var() config float ZoneWideDist;              // widened band when the first one is empty (uu)
 var() config float ZoneMergeDist;             // a pod this close to a Dosh Hold zone merges into it
 var transient EcholonNavGrid NavGrid;         // shared floor-is-lava tile table (N10)
+var() config bool bSurveyNav;                 // use the survey map data (KFEcholonMapData.ini) for routes and steering; opt-in until the playtest passes. ?SurveyNav=1/0 overrides for one match
+var() config bool bSurveyNavGrid;             // the grid half of the survey nav (lazy chunks, grid steering, grid-first corner check); needs bSurveyNav. ?SurveyNavGrid=1/0 overrides
+var transient bool bSurveyNavGridNow;
+var transient bool bSurveyNavNow;             // bSurveyNav after the ?SurveyNav= option
+var transient int SurveyUnpacked;             // chunks unpacked this frame
+var transient int NavStuckGrunt;              // of those, stucks of GRUNT-rank bots (rank=0 in NAV_STUCK)
+var transient int NavStuckCount;              // NAV_STUCK level 1 events this match (NAV_SURVEY_SUMMARY)
+var transient EcholonMapData MapData;         // this map's survey data from KFEcholonMapData.ini (None when the switch is off)
 var() config int NavGridSquads;               // 0 = lava grid for every squad, N = only squad N (1 = first), -1 = off
 var() config bool bNavGridDebug;              // log an ASCII map of the grid around squad 1's leader every 20 s
 var transient float NavScanR;                 // body radius used by the scan
@@ -416,6 +424,120 @@ function PostBeginPlay()
     SetTimer(15.0, false, 'NavBenchmarkRun');
 }
 
+// Load this map's survey data (bSurveyNav only). The object reads its section of KFEcholonMapData.ini when created; Tick resolves the
+// verdicts a few entries per frame. Without the switch, a section or a matching checksum the nav stays as it was.
+function MapDataBegin()
+{
+    local string Key;
+    local int I;
+
+    if (MapData != None)
+    {
+        return;
+    }
+    if (!bSurveyNavNow)
+    {
+        EchelonLog("NAV_MAPDATA_LOAD map=" $ WorldInfo.GetMapName() $ " found=0 switch=off");
+        return;
+    }
+    Key = class'EcholonBot.EcholonMapData'.static.SectionKey(WorldInfo.GetMapName());
+    MapData = new(None, Key) class'EcholonBot.EcholonMapData';
+    MapData.Begin(self);
+    for (I = 0; I < ActiveBots.Length; I++)
+    {
+        if (ActiveBots[I] != None)
+        {
+            ActiveBots[I].MapData = MapData;
+        }
+    }
+}
+
+// Once, when the data is resolved: let the first living bot time the per-link blocking cost (NAV_MAPDATA_UNIT).
+function MapDataUnits()
+{
+    local int I;
+
+    for (I = 0; I < ActiveBots.Length; I++)
+    {
+        if (ActiveBots[I] != None && ActiveBots[I].Pawn != None)
+        {
+            ActiveBots[I].NavMapDataBenchmark();
+            return;
+        }
+    }
+}
+
+// Every 0.25 s: queue the survey chunks around each bot so they are unpacked before the bot gets there.
+function SurveyPrefetch()
+{
+    local int I;
+
+    if (NavGrid == None || !NavGrid.bSurveyReady)
+    {
+        return;
+    }
+    for (I = 0; I < ActiveBots.Length; I++)
+    {
+        if (ActiveBots[I] != None && ActiveBots[I].Pawn != None)
+        {
+            NavGrid.SurveyPrefetch(ActiveBots[I].Pawn.Location);
+        }
+    }
+}
+
+// NAV_GRID_UNPACK every 30 s.
+function SurveyGridReport()
+{
+    if (NavGrid == None || !NavGrid.bSurveyReady || MapData == None)
+    {
+        return;
+    }
+    EchelonLog("NAV_GRID_UNPACK unpacked=" $ string(NavGrid.SUnpacked) $ "/" $ string(NavGrid.SKeys.Length) $ " window=" $ string(NavGrid.SUnpackedWindow)
+        $ " max_per_frame=" $ string(NavGrid.SMaxFrame) $ " tiles=" $ string(NavGrid.SUnpacked * 256) $ " queued=" $ string(NavGrid.SQueue.Length)
+        $ " line_clear=" $ string(MapData.LcClear) $ " line_no_too_high=" $ string(MapData.LcTooHigh) $ " too_long=" $ string(MapData.LcTooLong)
+        $ " unknown=" $ string(MapData.LcUnknown) $ " nofloor=" $ string(MapData.LcNoFloor) $ " hidden=" $ string(MapData.LcHidden)
+        $ " edge=" $ string(MapData.LcEdge) $ " dist0=" $ string(MapData.LcDist0));
+    NavGrid.SUnpackedWindow = 0;
+    NavGrid.SMaxFrame = 0;
+}
+
+// End of a playtest match: stucks, relaxes and the estimated frame cost, so a run with bSurveyNav on and one with it off can be compared.
+function SurveyNavSummary()
+{
+    local int On, Relax, Unpacked;
+    local string TotalsText;
+
+    On = 0;
+    Relax = 0;
+    Unpacked = 0;
+    TotalsText = "";
+    if (NavMeter != None)
+    {
+        TotalsText = NavMeter.TotalsText();
+    }
+    if (MapData != None && MapData.bUsable)
+    {
+        On = 1;
+        Relax = MapData.RelaxCount;
+    }
+    if (NavGrid != None)
+    {
+        Unpacked = NavGrid.SUnpacked;
+    }
+    EchelonLog("NAV_SURVEY_SUMMARY map=" $ WorldInfo.GetMapName() $ " survey_nav=" $ string(On) $ " stucks=" $ string(NavStuckCount) $ " stucks_grunt=" $ string(NavStuckGrunt) $ " relaxes=" $ string(Relax)
+        $ " chunks_unpacked=" $ string(Unpacked) $ " minutes=" $ string(int(WorldInfo.TimeSeconds / 60.0)) $ " " $ TotalsText);
+}
+
+// True when the survey says this node sits inside a wall (never a steer target, crumb or relocation spot).
+function bool SurveyNodeInWall(NavigationPoint N)
+{
+    if (MapData == None || N == None)
+    {
+        return false;
+    }
+    return MapData.NodeVerdictOf(N) == class'EcholonMapData'.const.NV_WALL;
+}
+
 // One-time: let the first living bot measure the unit cost of a trace, a route search and a reach check.
 function NavBenchmarkRun()
 {
@@ -433,6 +555,7 @@ function NavBenchmarkRun()
             EchelonLog(NavMeter.UnitCostMessage());
             NavScanBegin();
             NavDumpBegin();
+            MapDataBegin();
             return;
         }
     }
@@ -735,6 +858,23 @@ event Tick(float DeltaTime)
     {
         NavDump.Step();
     }
+    if (MapData != None && !MapData.bDone)
+    {
+        if (MapData.Step() && MapData.bUsable)
+        {
+            MapDataUnits();
+            SetTimer(0.25, true, 'SurveyPrefetch');
+            SetTimer(30.0, true, 'SurveyGridReport');
+        }
+    }
+    if (NavGrid != None && NavGrid.bSurveyReady)
+    {
+        SurveyUnpacked = NavGrid.SurveyUnpackStep();
+        if (SurveyUnpacked > 0 && NavMeter != None)
+        {
+            NavMeter.CountUnpack(SurveyUnpacked);
+        }
+    }
     if (bSurvey && SurveyGrid != None)
     {
         if (!bSurveyDone)
@@ -877,6 +1017,16 @@ function InitMutator(string Options, out string ErrorMessage)
         SetTimer(1.0, true, 'PlaytestTick');
     }
 
+    bSurveyNavNow = bSurveyNav;
+    if (class'GameInfo'.static.HasOption(Options, "SurveyNav"))
+    {
+        bSurveyNavNow = class'GameInfo'.static.GetIntOption(Options, "SurveyNav", 0) != 0;
+    }
+    bSurveyNavGridNow = bSurveyNavGrid;
+    if (class'GameInfo'.static.HasOption(Options, "SurveyNavGrid"))
+    {
+        bSurveyNavGridNow = class'GameInfo'.static.GetIntOption(Options, "SurveyNavGrid", 0) != 0;
+    }
     bSurvey = class'GameInfo'.static.ParseOption(Options, "Survey") ~= "1";
     if (bSurvey)
     {
@@ -1171,6 +1321,7 @@ final function PlaytestCheckWaveEnd()
 
         if (Reason != "")
         {
+            SurveyNavSummary();
             EchelonLog("PLAYTEST_DONE reason=" $ Reason $ " waves_done=" $ string(PlaytestWavesDone));
             bPlaytestDone = true;
             SetTimer(5.0, false, 'PlaytestQuit');
@@ -1407,6 +1558,7 @@ function RegisterBot(EcholonBot NewBot)
     NewBot.NavBudget = NavBudget;
     NewBot.NavScan = NavScan;
     NewBot.NavGrid = NavGrid;
+    NewBot.MapData = MapData;
     NewBot.WdLastHubContactTime = WorldInfo.TimeSeconds;
 }
 
@@ -5563,7 +5715,7 @@ function vector PickRelocateSpot(vector AnchorPos, Pawn P)
     BestDistSq = 999999999.0;
     foreach WorldInfo.RadiusNavigationPoints(class'NavigationPoint', N, AnchorPos, 300.0)
     {
-        if (PathNode(N) == None)
+        if (PathNode(N) == None || SurveyNodeInWall(N))
             continue;
         DistSq = VSizeSq(N.Location - AnchorPos);
         if (DistSq < BestDistSq)
