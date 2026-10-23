@@ -1587,8 +1587,7 @@ function bool EvaluateSquadTether()
         {
             // Drop the roam goal, or Roaming walks straight back out to it (ping-pong at the ring).
             RandGoal = None;
-            MoveTowardGoal(KFGRI.OpenedTrader, vect(0, 0, 0), true);
-            return true;
+            return MoveTowardGoal(KFGRI.OpenedTrader, vect(0, 0, 0), true);
         }
         return false;
     }
@@ -1676,6 +1675,10 @@ function bool MoveTowardGoal(Actor GoalActor, vector GoalPoint, bool bActorGoal)
 
     if (bActorGoal && GoalActor != None)
     {
+        if (NavGoalSkipped(GoalActor))
+        {
+            return false;
+        }
         PathNode = NavigationPoint(FollowFindWalkablePath(GoalActor, vect(0,0,0)));  // wall-jump fix
         LastRouteDist = RouteDist;
         if (PathNode != None)
@@ -1683,8 +1686,19 @@ function bool MoveTowardGoal(Actor GoalActor, vector GoalPoint, bool bActorGoal)
             MoveTowardX(PathNode);
             return true;
         }
-        MoveToX(GoalActor.Location);
-        return true;
+        // No route: one last search without the special-link and squad-strike blocks (hurt_drop and bad_wall stay blocked on a surveyed
+        // map), then set the goal aside for 30 s instead of walking a straight line at it.
+        PathNode = NavigationPoint(FollowFindWalkablePath(GoalActor, vect(0,0,0), true));
+        LastRouteDist = RouteDist;
+        if (PathNode != None)
+        {
+            EchelonLog("NAV_PATH_LAST ok=1 goal=" $ string(GoalActor));
+            MoveTowardX(PathNode);
+            return true;
+        }
+        EchelonLog("NAV_PATH_LAST ok=0 goal=" $ string(GoalActor));
+        NavSkipGoalFor(GoalActor, 30.0, "no_route");
+        return false;
     }
     MoveToX(GoalPoint);
     return true;

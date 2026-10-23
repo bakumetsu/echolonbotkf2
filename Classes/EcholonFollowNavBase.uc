@@ -1697,7 +1697,7 @@ function string FollowGoalText()
 
 // Path toward Goal (or to Dest when Goal is None) that avoids every special edge this bot has seen.
 // Known special edges are marked BlockedBy only for the duration of the search, so zeds keep them.
-function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
+function Actor FollowFindWalkablePath(Actor Goal, vector Dest, optional bool bLast)
 {
     local array<ReachSpec> IterBlocked;
     local ReachSpec IterSpec;
@@ -1712,13 +1712,17 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
     FollowLastGoalTime = WorldInfo.TimeSeconds;
     IterMinStrikes = 1;
     IterSurveyLevel = 0;
+    if (bLast)
+    {
+        IterSurveyLevel = 2;   // the last search lets trouble and bad_hidden links in; bad_wall and hurt_drop stay blocked
+    }
     IterStrict = true;
     for (IterPass = 0; IterPass < 4; IterPass++)
     {
         IterBlocked.Length = 0;
         IterCScan = 0;
         IterCSurvey = 0;
-        for (IterIdx = 0; IterIdx < FollowSpecialSpecs.Length; IterIdx++)
+        for (IterIdx = 0; IterIdx < FollowSpecialSpecs.Length && !bLast; IterIdx++)
         {
             if (FollowSpecialSpecs[IterIdx] != None && FollowSpecialSpecs[IterIdx].BlockedBy == None)
             {
@@ -1731,7 +1735,10 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
         FollowBadEdgesBlock(IterMinStrikes, IterBlocked);
         IterCOwn = IterBlocked.Length - IterB0;
         IterB0 = IterBlocked.Length;
-        FollowSquadEdgesBlock(IterMinStrikes, IterBlocked);
+        if (!bLast)
+        {
+            FollowSquadEdgesBlock(IterMinStrikes, IterBlocked);
+        }
         IterCSquad = IterBlocked.Length - IterB0;
         if (IterStrict)
         {
@@ -1769,7 +1776,7 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
         }
         if (IterFirst == None)
         {
-            if (IterStrict && MapData != None && MapData.bUsable && MapData.bDone && IterSurveyLevel < 3)
+            if (IterStrict && !bLast && MapData != None && MapData.bUsable && MapData.bDone && IterSurveyLevel < 3)
             {
                 IterSurveyLevel = 3;   // one extra search: every kind back in except hurt_drop (a failing goal used to cost 3 extra)
                 MapData.RelaxCount++;
@@ -1797,10 +1804,14 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
                 $ " at_anchor=" $ IterNames);
             return None;
         }
-        if (!IterStrict || IterMinStrikes > 1 || IterSurveyLevel > 0)
+        if (!bLast && (!IterStrict || IterMinStrikes > 1 || IterSurveyLevel > 0))
         {
             EchelonLog("NAV_PATH_OK pass=relaxed goal=" $ FollowGoalText() $ " strict=" $ string(IterStrict) $ " min_strikes=" $ string(IterMinStrikes)
                 $ " survey_level=" $ string(IterSurveyLevel));
+        }
+        if (bLast)
+        {
+            return IterFirst;   // the last search accepts special links; they are not remembered
         }
         IterSpec = FollowFindSpecialEdge();
         if (IterSpec == None)
