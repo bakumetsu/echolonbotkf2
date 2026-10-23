@@ -197,6 +197,7 @@ var Actor NavLastStuckGoal;           // goal of the last level-2 stuck and when
 var float NavLastStuckGoalTime;
 var float NavLoopSince;               // start of the current series of level-1 stucks (a loop when it lasts 6 s)
 var float NavLoopLast;
+var NavigationPoint NavWalkBackBad;    // a node a walk-back stalled on: no more walk-backs to it (the unseen teleport may still use it)
 var float NavWalkBackAt;              // when the level-3 walk-back to NavLastGood began (0 = none)
 var bool bNavTeleport;
 var float NavTeleportAfter; // seconds of stall before teleport is allowed
@@ -371,6 +372,7 @@ var transient float NextReloadAttempt;
 var transient float NextWeaponSwitchTime;
 var transient float NextFallbackPoll;
 var transient float NextWeaponLog;         // next COMBAT_WEAPON line (one per 5 s per bot while it fires)
+var transient int NavReswitchTries;        // switches to a gun tried while holding the knife; after 3 the bot fights with it
 var transient float NextRangedSwitch;      // next time a bot holding the knife in a fight may switch to a gun
 var transient KFWeapon FallbackPrimary;
 var transient float FallbackSince;
@@ -1397,6 +1399,11 @@ final function ProcessMoveToward()
         if (NavigationPoint(MoveTarget) != None)
         {
             Pawn.SetAnchor(NavigationPoint(MoveTarget));
+            NavLastGood = NavigationPoint(MoveTarget);   // the pawn stood on this node
+            if (NavLastGood != NavWalkBackBad)
+            {
+                NavWalkBackBad = None;
+            }
         }
         Pawn.Acceleration = vect(0.0, 0.0, 0.0);
         MoveFlags = 0;
@@ -1753,7 +1760,7 @@ final function NavSkipGoalFor(Actor G, float Secs, string Why)
 // The goal of the move that is stuck: the goal of a route search in the last 20 s, else MoveTarget of a toward move; None for a point goal.
 final function Actor NavStuckGoal()
 {
-    if (FollowLastGoal != None && FollowLastGoalTime > 0.0 && WorldInfo.TimeSeconds - FollowLastGoalTime <= 20.0)
+    if (FollowLastGoal != None && Pawn(FollowLastGoal) == None && FollowLastGoalTime > 0.0 && WorldInfo.TimeSeconds - FollowLastGoalTime <= 20.0)
     {
         return FollowLastGoal;
     }
@@ -1771,6 +1778,10 @@ final function NavStrikeLinkInto(Actor G)
     local NavigationPoint IterLast, IterPrev;
     local ReachSpec IterSpec;
 
+    if (RouteGoal != G)
+    {
+        return;   // the cached route leads somewhere else
+    }
     L = RouteCache.Length - 1;
     while (L >= 0 && RouteCache[L] == None)
     {
@@ -2000,7 +2011,7 @@ final function NavProgressCheck()
     {
         NavLevel = 3;
         EchelonLog("NAV_STUCK level=3 state=" $ string(GetStateName()) $ " lastgood=" $ string(NavLastGood));
-        if (!bFollow && NavLastGood != None && NavLastGood != Pawn.Anchor)
+        if (!bFollow && NavLastGood != None && NavLastGood != Pawn.Anchor && NavLastGood != NavWalkBackBad)
         {
             NavWalkBackAt = IterNow;
             MoveTowardX(NavLastGood, None, false);
@@ -2013,7 +2024,7 @@ final function NavProgressCheck()
     if (NavLevel >= 3 && NavWalkBackAt > 0.0 && IterNow - NavWalkBackAt >= 1.5 && NavLastGood != None)
     {
         EchelonLog("NAV_LASTGOOD_CLEAR node=" $ string(NavLastGood) $ " reason=walkback_stalled");
-        NavLastGood = None;
+        NavWalkBackBad = NavLastGood;
         NavWalkBackAt = 0.0;
     }
     if (NavLevel < 4 && NavStall >= 6.0)
@@ -2069,8 +2080,9 @@ final function bool ProbeRoute(Actor Goal)
 {
     local array<NavigationPoint> SavedRoute;
     local array<ReachSpec> SavedSpecial;
-    local Actor SavedGoal;
-    local float SavedDist;
+    local Actor SavedGoal, SavedLastGoal;
+    local vector SavedLastGoalPos;
+    local float SavedDist, SavedLastGoalTime;
     local bool bOk;
 
     if (Goal == None || Pawn == None)
@@ -2082,7 +2094,13 @@ final function bool ProbeRoute(Actor Goal)
     SavedSpecial = FollowSpecialSpecs;
     SavedGoal = RouteGoal;
     SavedDist = RouteDist;
+    SavedLastGoal = FollowLastGoal;
+    SavedLastGoalPos = FollowLastGoalPos;
+    SavedLastGoalTime = FollowLastGoalTime;
     bOk = (FollowFindWalkablePath(Goal, vect(0, 0, 0)) != None);
+    FollowLastGoal = SavedLastGoal;
+    FollowLastGoalPos = SavedLastGoalPos;
+    FollowLastGoalTime = SavedLastGoalTime;
     RouteCache = SavedRoute;
     FollowSpecialSpecs = SavedSpecial;
     RouteGoal = SavedGoal;
@@ -4304,12 +4322,21 @@ final function bool HandleWeaponManagement(KFWeapon W)
 	local KFWeapon Best;
 
 	// Holding the knife in a fight while a gun with ammo is in the inventory: switch to the gun (the knife is taken out at the trader).
-	if (W.bMeleeWeapon && !bFallbackWeapon && HasUsableRangedWeapon())
+	if (!W.bMeleeWeapon || WorldInfo.TimeSeconds > NextRangedSwitch + 10.0)
+	{
+		NavReswitchTries = 0;
+	}
+	if (W.bMeleeWeapon && !bFallbackWeapon && NavReswitchTries < 3 && HasUsableRangedWeapon())
 	{
 		if (NextRangedSwitch < WorldInfo.TimeSeconds)
 		{
 			NextRangedSwitch = WorldInfo.TimeSeconds + 0.5;
-			EchelonLog("WEAPON_RESWITCH from=" $ string(W.Class.Name) $ " state=" $ string(GetStateName()));
+			NavReswitchTries++;
+			EchelonLog("WEAPON_RESWITCH from=" $ string(W.Class.Name) $ " try=" $ string(NavReswitchTries) $ " state=" $ string(GetStateName()));
+			if (NavReswitchTries >= 3)
+			{
+				EchelonLog("WEAPON_RESWITCH_FAIL weapon=" $ string(W.Class.Name));
+			}
 			SwitchToBestWeapon(true);
 		}
 		return true;
