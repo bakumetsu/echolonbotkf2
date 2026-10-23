@@ -1663,6 +1663,61 @@ final function NavGridRefresh()
     }
 }
 
+function int FollowRank()
+{
+    return int(BotRank);
+}
+
+// Distance in uu to the nearest other human-team pawn within 800 uu, -1 when none (for the stuck lines).
+final function int NavNearestMate()
+{
+    local KFPawn_Human IterP;
+    local float IterD, IterBest;
+
+    IterBest = -1.0;
+    foreach WorldInfo.AllPawns(class'KFPawn_Human', IterP, Pawn.Location, 800.0)
+    {
+        if (IterP == Pawn || IterP.Health <= 0)
+        {
+            continue;
+        }
+        IterD = VSize(IterP.Location - Pawn.Location);
+        if (IterBest < 0.0 || IterD < IterBest)
+        {
+            IterBest = IterD;
+        }
+    }
+    return int(IterBest);
+}
+
+// move= (point, node or follow), dest= (the real destination), goal= (goal of the last route search) and mate= for NAV_STUCK.
+final function string NavStuckInfo(bool bFollow)
+{
+    local string IterMove, IterDest;
+
+    if (bFollow)
+    {
+        IterMove = "follow";
+        IterDest = string(FollowNode);
+    }
+    else if (MoveFlags == 1)
+    {
+        IterMove = "point";
+        IterDest = FollowVecText(DestinationPosition.Position);
+    }
+    else if (MoveFlags == 2)
+    {
+        IterMove = "node";
+        IterDest = string(MoveTarget);
+    }
+    else
+    {
+        IterMove = "none";
+        IterDest = "-";
+    }
+    return " move=" $ IterMove $ " dest=" $ IterDest $ " goal=" $ FollowGoalText() $ " anchor=" $ string(Pawn.Anchor) $ " mate=" $ string(NavNearestMate());
+}
+
 // Progress check for MoveTo/MoveToward and the follow mover. 0.75 s without progress backs off (not in follow, which
 // has its own ladder), 1.5 s strikes the edge and ends the move so the hub replans, 3 s walks back to the last good
 // node, 6 s reports Blocked (the hub skips tethering for 10 s), 5 s of stall teleports to the last good node when neither the bot
@@ -1736,7 +1791,7 @@ final function NavProgressCheck()
             }
             bAdjusting = true;
             AdjustPosition.Position = Pawn.Location + (Normal(IterDir) * 64.0);
-            EchelonLog("NAV_STUCK level=1 state=" $ string(GetStateName()) $ " stalled=" $ string(NavStall) $ " rank=" $ string(int(BotRank)));
+            EchelonLog("NAV_STUCK level=1 state=" $ string(GetStateName()) $ " stalled=" $ string(NavStall) $ " rank=" $ string(int(BotRank)) $ NavStuckInfo(false));
             if (mut != None)
             {
                 mut.NavStuckCount++;
@@ -1744,6 +1799,14 @@ final function NavProgressCheck()
                 {
                     mut.NavStuckGrunt++;
                 }
+            }
+        }
+        else
+        {
+            EchelonLog("NAV_STUCK level=1 state=" $ string(GetStateName()) $ " stalled=" $ string(NavStall) $ " rank=" $ string(int(BotRank)) $ " follow=1" $ NavStuckInfo(true));
+            if (mut != None)
+            {
+                mut.NavStuckFollow++;
             }
         }
     }
@@ -1759,7 +1822,7 @@ final function NavProgressCheck()
                 IterSpec = Pawn.Anchor.GetReachSpecTo(IterEnd);
                 FollowStrikeEdge(IterSpec);
             }
-            EchelonLog("NAV_STUCK level=2 state=" $ string(GetStateName()) $ " target=" $ string(MoveTarget));
+            EchelonLog("NAV_STUCK level=2 state=" $ string(GetStateName()) $ " target=" $ string(MoveTarget) $ " rank=" $ string(int(BotRank)) $ NavStuckInfo(false));
             EndMoveTime = IterNow - 1.0;
         }
     }

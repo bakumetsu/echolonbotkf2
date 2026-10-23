@@ -137,6 +137,7 @@ var() config bool bSurveyNavGrid;             // the grid half of the survey nav
 var transient bool bSurveyNavGridNow;
 var transient bool bSurveyNavNow;             // bSurveyNav after the ?SurveyNav= option
 var transient int SurveyUnpacked;             // chunks unpacked this frame
+var transient int NavStuckFollow;             // NAV_STUCK level 1 events of bots in FollowingLeader (follow=1); not part of NavStuckCount
 var transient int NavStuckGrunt;              // of those, stucks of GRUNT-rank bots (rank=0 in NAV_STUCK)
 var transient int NavStuckCount;              // NAV_STUCK level 1 events this match (NAV_SURVEY_SUMMARY)
 var transient EcholonMapData MapData;         // this map's survey data from KFEcholonMapData.ini (None when the switch is off)
@@ -524,7 +525,7 @@ function SurveyNavSummary()
     {
         Unpacked = NavGrid.SUnpacked;
     }
-    EchelonLog("NAV_SURVEY_SUMMARY map=" $ WorldInfo.GetMapName() $ " survey_nav=" $ string(On) $ " stucks=" $ string(NavStuckCount) $ " stucks_grunt=" $ string(NavStuckGrunt) $ " relaxes=" $ string(Relax)
+    EchelonLog("NAV_SURVEY_SUMMARY map=" $ WorldInfo.GetMapName() $ " survey_nav=" $ string(On) $ " stucks=" $ string(NavStuckCount) $ " stucks_grunt=" $ string(NavStuckGrunt) $ " stucks_follow=" $ string(NavStuckFollow) $ " relaxes=" $ string(Relax)
         $ " chunks_unpacked=" $ string(Unpacked) $ " minutes=" $ string(int(WorldInfo.TimeSeconds / 60.0)) $ " " $ TotalsText);
 }
 
