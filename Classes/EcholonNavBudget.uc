@@ -21,6 +21,9 @@ var float UsedUs;
 var int SearchesUsed;
 var int UsDenied;
 var int SearchesDenied;
+var int CurRank;                 // rank of the bot asking (0 grunt .. 3 captain, -1 unknown); set by EcholonFollowNavBase before it asks
+var int UsDeniedRank[4];
+var int SearchesDeniedRank[4];
 
 // Reset per-frame counters when Now advances past the last stamped frame.
 final function NewFrameIf(float Now)
@@ -56,6 +59,10 @@ final function bool TakeUs(int Prio, float CostUs, float Now)
     }
 
     UsDenied++;
+    if (CurRank >= 0 && CurRank < 4)
+    {
+        UsDeniedRank[CurRank]++;
+    }
     return false;
 }
 
@@ -71,6 +78,10 @@ final function bool TakeSearch(float Now)
     }
 
     SearchesDenied++;
+    if (CurRank >= 0 && CurRank < 4)
+    {
+        SearchesDeniedRank[CurRank]++;
+    }
     return false;
 }
 
@@ -104,9 +115,18 @@ final function string TakeDeniedCounts()
 {
     local string S;
 
-    S = "denied_us=" $ UsDenied $ " denied_search=" $ SearchesDenied;
+    local int I;
+
+    S = "denied_us=" $ UsDenied $ " denied_search=" $ SearchesDenied
+        $ " denied_us_rank=" $ UsDeniedRank[0] $ "/" $ UsDeniedRank[1] $ "/" $ UsDeniedRank[2] $ "/" $ UsDeniedRank[3]
+        $ " denied_search_rank=" $ SearchesDeniedRank[0] $ "/" $ SearchesDeniedRank[1] $ "/" $ SearchesDeniedRank[2] $ "/" $ SearchesDeniedRank[3];
     UsDenied = 0;
     SearchesDenied = 0;
+    for (I = 0; I < 4; I++)
+    {
+        UsDeniedRank[I] = 0;
+        SearchesDeniedRank[I] = 0;
+    }
     return S;
 }
 

@@ -102,6 +102,9 @@ var EcholonNavMeter NavMeter;      // shared nav cost counter, set by EcholonMut
 var EcholonNavBudget NavBudget;    // shared per-frame nav budget, set by EcholonMut.RegisterBot
 var EcholonMapData MapData;       // survey data of this map (None when bSurveyNav is off), set by EcholonMut
 var bool bLastTileSurvey;           // the last NavGridTile answer came from the survey (no floor height to compare)
+var Actor FollowLastGoal;            // goal actor of the last route search (FollowFindWalkablePath), for NAV_STUCK and NAV_NO_ROUTE
+var vector FollowLastGoalPos;         // goal point of that search when it had no actor
+var float FollowLastGoalTime;         // when that search ran
 var float FollowNarrowSince;      // when this bot began waiting for a squadmate to clear a narrow link (0 = not waiting)
 var float FollowNarrowQuietUntil; // no narrow wait before this time (after a wait that timed out)
 var EcholonNavScan NavScan;        // start-of-match link scan result (bad links), set by EcholonMut.RegisterBot
@@ -531,6 +534,10 @@ function int NavGridTile(vector Loc, float RefZ, float Now, optional bool bEval)
     }
     if (TileState == class'EcholonNavGrid'.const.NAV_UNKNOWN && bEval)
     {
+        if (NavBudget != None)
+        {
+            NavBudget.CurRank = FollowRank();
+        }
         if (NavBudget == None || NavMeter == None || NavBudget.TakeUs(class'EcholonNavBudget'.const.NAV_PRIO_GRID, 6.0 * NavMeter.UnitTraceUs, Now))
         {
             return NavGridEval(TX, TY, RefZ, Now);
@@ -816,12 +823,19 @@ function NavGridMarkStuck(vector Dir)
 // ---------------------------------------------------------------- nav budget (N7)
 // True when a route search is permitted this frame.
 
+// Rank of this bot for the logs and the per-rank denied counts (0 grunt .. 3 captain); EcholonBotBase overrides it.
+function int FollowRank()
+{
+    return -1;
+}
+
 function bool NavAllowSearch()
 {
     if (NavBudget == None)
     {
         return true;
     }
+    NavBudget.CurRank = FollowRank();
     return NavBudget.TakeSearch(WorldInfo.TimeSeconds);
 }
 
@@ -832,6 +846,7 @@ function bool NavAllowReach()
     {
         return true;
     }
+    NavBudget.CurRank = FollowRank();
     return NavBudget.TakeUs(class'EcholonNavBudget'.const.NAV_PRIO_STEER, NavMeter.UnitReachUs, WorldInfo.TimeSeconds);
 }
 
@@ -845,6 +860,10 @@ function vector FollowSteerDirBudgeted(Actor Current)
     local bool bCacheUsable;
 
     Now = WorldInfo.TimeSeconds;
+    if (NavBudget != None)
+    {
+        NavBudget.CurRank = FollowRank();
+    }
 
     // Obtain the steer point.
     if (NavBudget == None || NavMeter == None)
@@ -1656,6 +1675,26 @@ function string FollowSurveyStepName(int Level)
     return "bad_wall";
 }
 
+// "x,y,z" of a point for the logs.
+function string FollowVecText(vector V)
+{
+    return string(int(V.X)) $ "," $ string(int(V.Y)) $ "," $ string(int(V.Z));
+}
+
+// Goal of the last route search for the logs: its actor, else its point, "-" when that search is older than 20 s.
+function string FollowGoalText()
+{
+    if (FollowLastGoalTime <= 0.0 || WorldInfo.TimeSeconds - FollowLastGoalTime > 20.0)
+    {
+        return "-";
+    }
+    if (FollowLastGoal != None)
+    {
+        return string(FollowLastGoal);
+    }
+    return FollowVecText(FollowLastGoalPos);
+}
+
 // Path toward Goal (or to Dest when Goal is None) that avoids every special edge this bot has seen.
 // Known special edges are marked BlockedBy only for the duration of the search, so zeds keep them.
 function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
@@ -1664,14 +1703,21 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
     local ReachSpec IterSpec;
     local Actor IterFirst;
     local int IterPass, IterIdx, IterMinStrikes, IterSurveyLevel;
+    local int IterCSpecial, IterCOwn, IterCSquad, IterCSurvey, IterCScan, IterB0, IterNameCount;
+    local string IterNames;
     local bool IterStrict;
 
+    FollowLastGoal = Goal;
+    FollowLastGoalPos = Dest;
+    FollowLastGoalTime = WorldInfo.TimeSeconds;
     IterMinStrikes = 1;
     IterSurveyLevel = 0;
     IterStrict = true;
     for (IterPass = 0; IterPass < 4; IterPass++)
     {
         IterBlocked.Length = 0;
+        IterCScan = 0;
+        IterCSurvey = 0;
         for (IterIdx = 0; IterIdx < FollowSpecialSpecs.Length; IterIdx++)
         {
             if (FollowSpecialSpecs[IterIdx] != None && FollowSpecialSpecs[IterIdx].BlockedBy == None)
@@ -1680,12 +1726,21 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
                 IterBlocked.AddItem(FollowSpecialSpecs[IterIdx]);
             }
         }
+        IterCSpecial = IterBlocked.Length;
+        IterB0 = IterBlocked.Length;
         FollowBadEdgesBlock(IterMinStrikes, IterBlocked);
+        IterCOwn = IterBlocked.Length - IterB0;
+        IterB0 = IterBlocked.Length;
         FollowSquadEdgesBlock(IterMinStrikes, IterBlocked);
+        IterCSquad = IterBlocked.Length - IterB0;
         if (IterStrict)
         {
+            IterB0 = IterBlocked.Length;
             FollowScanEdgesBlock(IterBlocked);
+            IterCScan = IterBlocked.Length - IterB0;
+            IterB0 = IterBlocked.Length;
             FollowSurveyEdgesBlock(IterSurveyLevel, IterBlocked);
+            IterCSurvey = IterBlocked.Length - IterB0;
             class'Path_AvoidClosedDoors'.static.AvoidClosedDoors(Pawn, true);
         }
         FollowPlanBegin();
@@ -1700,8 +1755,16 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
         }
         FollowPlanEnd();
         Pawn.ClearConstraints();
+        IterNames = "";
+        IterNameCount = 0;
         for (IterIdx = 0; IterIdx < IterBlocked.Length; IterIdx++)
         {
+            if (IterFirst == None && IterNameCount < 5 && Pawn.Anchor != None
+                && (IterBlocked[IterIdx].Start == Pawn.Anchor || IterBlocked[IterIdx].GetEnd() == Pawn.Anchor))
+            {
+                IterNames = IterNames $ string(IterBlocked[IterIdx].Start) $ ">" $ string(IterBlocked[IterIdx].GetEnd()) $ " ";
+                IterNameCount++;
+            }
             IterBlocked[IterIdx].BlockedBy = None;
         }
         if (IterFirst == None)
@@ -1728,7 +1791,16 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
                 IterPass--;
                 continue;
             }
+            EchelonLog("NAV_NO_ROUTE pos=" $ FollowVecText(Pawn.Location) $ " anchor=" $ string(Pawn.Anchor) $ " rank=" $ string(FollowRank())
+                $ " goal=" $ FollowGoalText() $ " special=" $ string(IterCSpecial) $ " own=" $ string(IterCOwn) $ " squad=" $ string(IterCSquad)
+                $ " survey=" $ string(IterCSurvey) $ " scan=" $ string(IterCScan) $ " min_strikes=" $ string(IterMinStrikes)
+                $ " at_anchor=" $ IterNames);
             return None;
+        }
+        if (!IterStrict || IterMinStrikes > 1 || IterSurveyLevel > 0)
+        {
+            EchelonLog("NAV_PATH_OK pass=relaxed goal=" $ FollowGoalText() $ " strict=" $ string(IterStrict) $ " min_strikes=" $ string(IterMinStrikes)
+                $ " survey_level=" $ string(IterSurveyLevel));
         }
         IterSpec = FollowFindSpecialEdge();
         if (IterSpec == None)
@@ -1741,6 +1813,8 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
         }
         EchelonLog("NAV_REPLAN spec=" $ string(IterSpec.Class.Name) $ " from=" $ string(IterSpec.Start) $ " to=" $ string(IterSpec.GetEnd()));
     }
+    EchelonLog("NAV_NO_ROUTE pos=" $ FollowVecText(Pawn.Location) $ " anchor=" $ string(Pawn.Anchor) $ " rank=" $ string(FollowRank())
+        $ " goal=" $ FollowGoalText() $ " reason=special_replans special=" $ string(IterCSpecial));
     return None;
 }
 
