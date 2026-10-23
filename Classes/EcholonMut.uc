@@ -51,6 +51,52 @@ var transient EcholonNavBudget NavBudget;     // per-frame nav budget, shared by
 var transient EcholonNavScan NavScan;         // start-of-match link scan state and bad links (N8)
 var transient EcholonNavDump NavDump;         // start-of-match node and link dump for the kit's map viewer (bNavTrace)
 var() config bool bNavTrace;                  // log the map's path network (NAVDUMP_ lines) at match start; off by default
+// Survey mode (?Survey=1 on the map URL): no zeds, survey bots explore the map blind and record a tile map.
+var transient bool bSurvey;
+var transient EcholonSurveyGrid SurveyGrid;          // the shared tile map
+var transient array<EcholonSurveyBot> SurveyBotList; // all survey bots
+var transient array<PhysicsVolume> SurveyHazards;    // pain and water volumes, boxes used for the hazard flag
+var transient int SurveyTraceLeft;                   // traces the survey bots may still run this frame
+var transient int SurveyBfsLeft;                     // search nodes the survey bots may still expand this frame
+var transient int SurveyScanLeft;                    // grid slots the bots may still read this frame (far-frontier scans)
+var transient float SurveyDropMax;                   // deepest drop (uu) the bots take; lowered when a fall hurts
+var transient int SurveyDropLogs;                    // SURVEY_DROP lines written so far (capped)
+var transient int SurveyFrontScan;                   // shared far-frontier scan: cursor over the grid's slots
+var transient array<int> SurveyFrontBuild;           // ... unexpanded floor tile keys found so far in this pass
+var transient array<int> SurveyFrontList;            // ... the list of the last finished pass; idle bots pick from it
+var transient float SurveyFrontNextAt;               // next pass starts at this time (one a second)
+var transient array<byte> SurveyRowMark;             // export: 1 for each (level, row) that holds a tile
+var transient int SurveyExpSlot;                     // export phase 0 cursor over the grid's slots
+var transient int SurveyExpPhase;                    // 0 = find the rows with tiles, 1 = write them
+var transient int SurveyCostFrames;                  // SURVEY_COST accumulators (reset every 30 s)
+var transient float SurveyCostDt;
+var transient float SurveyCostDtMax;
+var transient int SurveyCostTraces;
+var transient int SurveyCostBfs;
+var transient int SurveyCostScan;
+var() config int SurveyBots;                         // survey bot count (0 or less = 4); ?SurveyBots=N overrides for one match
+var() config int SurveyMinutes;                      // time limit of a survey (0 or less = 60); ?SurveyMinutes=N overrides
+var() config int SurveyTraces;                       // traces per frame for all survey bots together (0 or less = 120)
+var() config int SurveyBfsNodes;                     // search nodes per frame for all survey bots together (0 or less = 400)
+var transient int SurveyBotsNow;                     // values in force for this match (config or URL, defaults filled in)
+var transient int SurveyMinutesNow;
+var transient int SurveyTracesNow;
+var transient int SurveyBfsNow;
+var transient array<PlayerStart> SurveyStarts;       // player starts the survey bots spawn at
+var transient float SurveyStartTime;
+var transient int SurveyRot;                         // rotates which bot gets the frame's budget first
+var transient float SurveyNextProgress;
+var transient bool bSurveyDone;                      // the survey ended; the grid is being written to the log
+var transient bool bSurveyStopReq;                   // mutate SurveyStop
+var transient int SurveyLastExpanded;                // expanded-tile total at the last growth
+var transient float SurveyLastGrowth;                // when that total last grew (the survey ends as stalled after 3 minutes without)
+var transient string SurveyDoneReason;
+var transient bool bSurveyExporting;
+var transient int SurveyExpLvl;                      // GRID_ROW export cursor
+var transient int SurveyExpTY;
+var transient int SurveyExpTX;
+var transient int SurveyExpRows;
+var transient int SurveyExpTiles;
 var transient EcholonZonePlanner ZonePlanner;  // zone list builder, logging only (Hold and Relocate zones, step 2)
 var transient bool bZoneStarted;
 var() config int ZoneConfigVer;               // 0 = zone settings never written; 1 = defaults written once (separate from ConfigVer, which resets everything)
@@ -355,6 +401,10 @@ function NavBenchmarkRun()
 {
     local int I;
 
+    if (bSurvey)
+    {
+        return;
+    }
     for (I = 0; I < ActiveBots.Length; I++)
     {
         if (ActiveBots[I] != None && ActiveBots[I].Pawn != None)
@@ -399,10 +449,10 @@ function NavScanBegin()
     EchelonLog("NAV_SCAN_START nodes=" $ string(NavScan.Nodes.Length));
 }
 
-// Start the one-time node and link dump (bNavTrace only); the work is spread over frames in Tick.
-function NavDumpBegin()
+// Start the one-time node and link dump (bNavTrace only, or always in a survey); the work is spread over frames in Tick.
+function NavDumpBegin(optional bool bForce)
 {
-    if (!bNavTrace || NavDump != None)
+    if ((!bNavTrace && !bForce) || NavDump != None)
     {
         return;
     }
@@ -665,6 +715,17 @@ event Tick(float DeltaTime)
     {
         NavDump.Step();
     }
+    if (bSurvey && SurveyGrid != None)
+    {
+        if (!bSurveyDone)
+        {
+            SurveyTickAll(DeltaTime);
+        }
+        else if (bSurveyExporting)
+        {
+            SurveyExportStep();
+        }
+    }
     if (NavScan != None && NavScan.bActive)
     {
         NavScanStep();
@@ -717,19 +778,29 @@ function MatchStarting()
             AvatarMatchId = Rand(1000000000) + 1;
             EchelonLog("AVATAR_ON match=" $ string(AvatarMatchId) $ " port=" $ string(AvatarPort()));
         }
-        for (I = 0; I < NumBots; ++I)
+        if (bSurvey)
         {
-            AddBot();
+            SurveyBegin();
         }
-        // Spread the squads over random ammo crates right away, in the same tick the bots are created
-        // (see InitialRelocate).
-        InitialRelocate();
+        else
+        {
+            for (I = 0; I < NumBots; ++I)
+            {
+                AddBot();
+            }
+            // Spread the squads over random ammo crates right away, in the same tick the bots are created
+            // (see InitialRelocate).
+            InitialRelocate();
+        }
     }
     else
     {
         SetTimer(1.0, true);
     }
-    SetTimer(0.1, true, 'CheckWave');
+    if (!bSurvey)
+    {
+        SetTimer(0.1, true, 'CheckWave');
+    }
     InstallVoteCollector();
 }
 
@@ -785,6 +856,26 @@ function InitMutator(string Options, out string ErrorMessage)
             $ " skip_trader=" $ string(bPlaytestSkipTrader) $ " remote_shop=" $ string(bRemoteShopActive));
         SetTimer(1.0, true, 'PlaytestTick');
     }
+
+    bSurvey = class'GameInfo'.static.ParseOption(Options, "Survey") ~= "1";
+    if (bSurvey)
+    {
+        SurveyBotsNow = class'GameInfo'.static.GetIntOption(Options, "SurveyBots", SurveyBots);
+        if (SurveyBotsNow <= 0)
+            SurveyBotsNow = 4;
+        SurveyMinutesNow = class'GameInfo'.static.GetIntOption(Options, "SurveyMinutes", SurveyMinutes);
+        if (SurveyMinutesNow <= 0)
+            SurveyMinutesNow = 60;
+        SurveyTracesNow = SurveyTraces;
+        if (SurveyTracesNow <= 0)
+            SurveyTracesNow = 120;
+        SurveyBfsNow = SurveyBfsNodes;
+        if (SurveyBfsNow <= 0)
+            SurveyBfsNow = 400;
+        EchelonLog("SURVEY_MODE bots=" $ string(SurveyBotsNow) $ " minutes=" $ string(SurveyMinutesNow) $ " traces=" $ string(SurveyTracesNow)
+            $ " bfs=" $ string(SurveyBfsNow));
+        SetTimer(1.0, true, 'SurveyCheck');
+    }
 }
 
 final function KFPlayerController GetPlaytestHuman()
@@ -818,7 +909,10 @@ final function PlaytestMakeSpectator(KFPlayerController PC)
     PC.PlayerReplicationInfo.bIsSpectator = true;
     PC.PlayerReplicationInfo.bOutOfLives = true;
     PC.GotoState('Spectating');
-    KF.ForceLivingPlayerCount(byte(KF.NumBots));
+    if (bSurvey)
+        KF.ForceLivingPlayerCount(byte(SurveyBotList.Length));
+    else
+        KF.ForceLivingPlayerCount(byte(KF.NumBots));
 
     EchelonLog("PLAYTEST_SPECTATE again=" $ string(bPlaytestSpectating) $ " living_before=" $ string(LivingBefore)
         $ " living_after=" $ string(KF.GetLivingPlayerCount()) $ " wave=" $ string(KF.MyKFGRI.WaveNum));
@@ -4298,6 +4392,538 @@ final function DebugAI(PlayerController Sender)
     }
 }
 
+// ---- Survey mode (?Survey=1): no zeds, survey bots feel the map and fill a shared tile grid ----
+
+// Start of the survey: build the grid, collect hazards and player starts, spawn the survey bots.
+function SurveyBegin()
+{
+    local PhysicsVolume V;
+    local PlayerStart PS;
+    local int I;
+
+    if (SurveyGrid != None)
+    {
+        return;
+    }
+    SurveyGrid = new class'EcholonBot.EcholonSurveyGrid';
+    SurveyGrid.Clear();
+    SurveyDropMax = 180.0;      // until SurveyComputeLimits has read the pawn
+    foreach WorldInfo.AllActors(class'PhysicsVolume', V)
+    {
+        if (V.bPainCausing || V.bWaterVolume)
+        {
+            SurveyHazards.AddItem(V);
+        }
+    }
+    foreach WorldInfo.AllActors(class'PlayerStart', PS)
+    {
+        SurveyStarts.AddItem(PS);
+    }
+    SurveyStartTime = WorldInfo.TimeSeconds;
+    SurveyNextProgress = WorldInfo.TimeSeconds + 30.0;
+    for (I = 0; I < SurveyBotsNow; I++)
+    {
+        SurveyAddBot(I);
+    }
+    SurveyOpenDoors();
+    EchelonLog("SURVEY_BEGIN map=" $ WorldInfo.GetMapName() $ " bots=" $ string(SurveyBotList.Length) $ " starts=" $ string(SurveyStarts.Length)
+        $ " hazards=" $ string(SurveyHazards.Length));
+    SurveyComputeLimits();
+    NavDumpBegin(true);
+}
+
+// The deepest drop that does not hurt, from the pawn's own settings: damage starts when the landing speed passes MaxFallSpeed,
+// and a fall of h uu lands at sqrt(2 g h), so h = 0.85 MaxFallSpeed^2 / (2 g) with a margin. Logged once.
+function SurveyComputeLimits()
+{
+    local int I;
+    local Pawn P;
+    local float G, V;
+
+    for (I = 0; I < SurveyBotList.Length; I++)
+    {
+        if (SurveyBotList[I] != None && SurveyBotList[I].Pawn != None)
+        {
+            P = SurveyBotList[I].Pawn;
+            break;
+        }
+    }
+    if (P == None)
+    {
+        return;
+    }
+    G = Abs(P.GetGravityZ());
+    if (G < 1.0)
+    {
+        G = 1150.0;
+    }
+    V = P.MaxFallSpeed;
+    if (V < 1.0)
+    {
+        V = 1325.0;
+    }
+    SurveyDropMax = 0.85 * V * V / (2.0 * G);
+    EchelonLog("SURVEY_LIMITS safe_fall=" $ string(int(SurveyDropMax)) $ " max_fall_speed=" $ string(int(V)) $ " gravity=" $ string(int(G))
+        $ " step=" $ string(int(P.MaxStepHeight)) $ " jump_z=" $ string(int(P.JumpZ)) $ " jump_apex=" $ string(int(P.JumpZ * P.JumpZ / (2.0 * G))));
+}
+
+// Opens every door and keeps it open, so doors do not cut the map; each door is logged (SURVEY_DOOR) for the viewer.
+function SurveyOpenDoors()
+{
+    local KFDoorActor Door;
+    local int Count, AutoDoors, Welded;
+    local Pawn Opener;
+    local int J;
+
+    for (J = 0; J < SurveyBotList.Length; J++)
+    {
+        if (SurveyBotList[J] != None && SurveyBotList[J].Pawn != None)
+        {
+            Opener = SurveyBotList[J].Pawn;
+            break;
+        }
+    }
+    if (Opener == None)
+    {
+        EchelonLog("SURVEY_DOORS skipped why=no_pawn");
+        return;
+    }
+
+    foreach WorldInfo.AllActors(class'KFDoorActor', Door)
+    {
+        Count++;
+        if (Door.bAutomaticDoor)
+        {
+            AutoDoors++;
+        }
+        if (Door.WeldIntegrity > 0)
+        {
+            Welded++;
+        }
+        Door.bCanCloseDoor = false;
+        if (!Door.bIsDoorOpen)
+        {
+            if (Door.bAutomaticDoor)
+            {
+                // an automatic door opens when a pawn bumps it; with bCanCloseDoor off it then stays open
+                Door.Bump(Opener, None, vect(0.0, 0.0, 1.0));
+            }
+            else
+            {
+                Door.UseDoor(Opener);
+            }
+        }
+        EchelonLog("SURVEY_DOOR at=" $ string(int(Door.Location.X)) $ "," $ string(int(Door.Location.Y)) $ "," $ string(int(Door.Location.Z))
+            $ " auto=" $ string(Door.bAutomaticDoor) $ " welded=" $ string(Door.WeldIntegrity > 0) $ " open=" $ string(Door.bIsDoorOpen));
+    }
+    EchelonLog("SURVEY_DOORS count=" $ string(Count) $ " automatic=" $ string(AutoDoors) $ " welded=" $ string(Welded));
+}
+
+// One survey bot: a controller with a player record, then a pawn at a player start.
+function bool SurveyAddBot(int Idx)
+{
+    local EcholonSurveyBot B;
+    local PlayerStart Spot;
+    local KFPlayerReplicationInfo PRI;
+
+    if (SurveyStarts.Length == 0)
+    {
+        EchelonLog("SURVEY_SPAWN_FAIL bot=" $ string(Idx) $ " why=no_player_start");
+        return false;
+    }
+    Spot = SurveyStarts[Idx % SurveyStarts.Length];
+    B = Spawn(class'EcholonSurveyBot',,, Spot.Location);
+    if (B == None)
+    {
+        EchelonLog("SURVEY_SPAWN_FAIL bot=" $ string(Idx) $ " why=controller");
+        return false;
+    }
+    B.Setup(self, Idx);
+    SurveyBotList.AddItem(B);
+    // The scoreboard reads the perk of every player record every frame; without one the log fills with Accessed None.
+    PRI = KFPlayerReplicationInfo(B.PlayerReplicationInfo);
+    if (PRI != None)
+    {
+        PRI.CurrentPerkClass = PickBotPerk();
+        PRI.PlayerID = KF.GetNextPlayerID();
+    }
+    KF.GenericPlayerInitialization(B);
+    SurveyPlace(B, Spot);
+    KF.bOnePlayerAtStart = false;
+    KF.ForceLivingPlayerCount(byte(SurveyBotList.Length));
+    return true;
+}
+
+// Give a survey bot a pawn at a start spot: no inventory, no team collision (traces and bodies pass other bots).
+function SurveyPlace(EcholonSurveyBot B, NavigationPoint Spot)
+{
+    if (B.Pawn == None)
+    {
+        B.Pawn = KF.SpawnDefaultPawnFor(B, Spot);
+    }
+    if (B.Pawn == None)
+    {
+        EchelonLog("SURVEY_SPAWN_FAIL bot=" $ string(B.BotIdx) $ " why=pawn start=" $ string(Spot));
+        return;
+    }
+    B.Pawn.SetAnchor(Spot);
+    B.Possess(B.Pawn, false);
+    B.Pawn.SetMovementPhysics();
+    KF.SetTeam(B, KF.Teams[0]);
+    KF.SetPlayerDefaults(B.Pawn);
+    if (KFPawn(B.Pawn) != None)
+    {
+        KFPawn(B.Pawn).bIgnoreTeamCollision = true;
+    }
+}
+
+// A dead survey bot gets a new pawn; it is put back where it last stood on a good tile.
+function SurveyRespawn(EcholonSurveyBot B)
+{
+    local PlayerStart Spot;
+
+    if (SurveyStarts.Length == 0)
+    {
+        return;
+    }
+    Spot = SurveyStarts[B.BotIdx % SurveyStarts.Length];
+    SurveyPlace(B, Spot);
+    if (B.Pawn != None && VSize(B.LastGoodPos) > 0.0)
+    {
+        B.Pawn.SetLocation(B.LastGoodPos);
+    }
+}
+
+// Per frame: refresh the budgets, keep zed spawns off, run every survey bot (the first one rotates).
+function SurveyTickAll(float DT)
+{
+    local int I, K, N;
+
+    SurveyTraceLeft = SurveyTracesNow;
+    SurveyBfsLeft = SurveyBfsNow;
+    SurveyScanLeft = 12000;
+    SurveyFrontierStep();
+    if (KF != None && KF.SpawnManager != None)
+    {
+        KF.SpawnManager.TimeUntilNextSpawn = 9999.0;
+    }
+    N = SurveyBotList.Length;
+    if (N == 0)
+    {
+        return;
+    }
+    for (K = 0; K < N; K++)
+    {
+        I = (SurveyRot + K) % N;
+        if (SurveyBotList[I] != None)
+        {
+            SurveyBotList[I].SurveyTick(DT);
+        }
+    }
+    SurveyRot++;
+    SurveyCostFrames++;
+    SurveyCostDt += DT;
+    if (DT > SurveyCostDtMax)
+    {
+        SurveyCostDtMax = DT;
+    }
+    SurveyCostTraces += SurveyTracesNow - SurveyTraceLeft;
+    SurveyCostBfs += SurveyBfsNow - SurveyBfsLeft;
+    SurveyCostScan += 12000 - SurveyScanLeft;
+}
+
+// One shared pass over the grid's slots (12000 a frame, one pass a second at most): the unexplored floor tiles become the list
+// idle bots pick a far frontier from, instead of every idle bot reading the whole table itself.
+function SurveyFrontierStep()
+{
+    local int Slot, K, D;
+
+    if (SurveyFrontScan == 0 && WorldInfo.TimeSeconds < SurveyFrontNextAt)
+    {
+        return;
+    }
+    while (SurveyFrontScan < SurveyGrid.Keys.Length)
+    {
+        if (SurveyScanLeft <= 0)
+        {
+            return;
+        }
+        SurveyScanLeft--;
+        Slot = SurveyFrontScan;
+        SurveyFrontScan++;
+        K = SurveyGrid.Keys[Slot];
+        if (K == 0)
+        {
+            continue;
+        }
+        D = SurveyGrid.Data[Slot];
+        if (SurveyGrid.DKind(D) == class'EcholonSurveyGrid'.const.K_FLOOR
+            && (SurveyGrid.DFlags(D) & (class'EcholonSurveyGrid'.const.F_EXPANDED | class'EcholonSurveyGrid'.const.F_BLOCKED)) == 0)
+        {
+            SurveyFrontBuild.AddItem(K);
+        }
+    }
+    SurveyFrontList = SurveyFrontBuild;
+    SurveyFrontBuild.Length = 0;
+    SurveyFrontScan = 0;
+    SurveyFrontNextAt = WorldInfo.TimeSeconds + 1.0;
+}
+
+// 1 s timer: progress line every 30 s, and the end conditions.
+function SurveyCheck()
+{
+    local int I, IdleBots, Alive, Expanded;
+    local float Mins;
+    local EcholonSurveyBot B;
+
+    if (SurveyGrid == None || bSurveyDone)
+    {
+        return;
+    }
+    Mins = (WorldInfo.TimeSeconds - SurveyStartTime) / 60.0;
+    if (WorldInfo.TimeSeconds >= SurveyNextProgress)
+    {
+        SurveyNextProgress = WorldInfo.TimeSeconds + 30.0;
+        SurveyLogCost();
+        EchelonLog("SURVEY_PROGRESS mins=" $ string(int(Mins)) $ " tiles=" $ string(SurveyGrid.Used) $ " floor=" $ string(SurveyGrid.KindCount[1])
+            $ " wall=" $ string(SurveyGrid.KindCount[3]) $ " hidden=" $ string(SurveyGrid.HiddenCount) $ " " $ SurveyStatTotals());
+    }
+    for (I = 0; I < SurveyBotList.Length; I++)
+    {
+        B = SurveyBotList[I];
+        if (B != None && B.PawnOk())
+        {
+            Alive++;
+            if (B.Phase == B.SP_IDLE && B.IdleFails >= 3)
+            {
+                IdleBots++;
+            }
+        }
+    }
+    if (WorldInfo.TimeSeconds - SurveyStartTime > 60.0)
+    {
+        Expanded = SurveyExpandedTotal();
+        if (Expanded > SurveyLastExpanded || SurveyLastGrowth == 0.0)
+        {
+            SurveyLastExpanded = Expanded;
+            SurveyLastGrowth = WorldInfo.TimeSeconds;
+        }
+    }
+    if (bSurveyStopReq)
+        SurveyFinish("stop");
+    else if (SurveyLastGrowth > 0.0 && WorldInfo.TimeSeconds - SurveyLastGrowth > 180.0)
+        SurveyFinish("stalled");
+    else if (SurveyGrid.bFull)
+        SurveyFinish("grid_full");
+    else if (Mins >= float(SurveyMinutesNow))
+        SurveyFinish("time");
+    else if (Alive > 0 && IdleBots == Alive)
+        SurveyFinish("no_frontier");
+}
+
+// SURVEY_COST every 30 s: the frame time while the survey runs (Actor.Clock returns 0 in the retail game, so the frame delta is the
+// measure) and the average work per frame against the budgets.
+function SurveyLogCost()
+{
+    local float N;
+    local int A10;
+
+    if (SurveyCostFrames <= 0)
+    {
+        return;
+    }
+    N = float(SurveyCostFrames);
+    A10 = int(SurveyCostDt / N * 10000.0);
+    EchelonLog("SURVEY_COST frames=" $ string(SurveyCostFrames) $ " avg_ms=" $ string(A10 / 10) $ "." $ string(A10 % 10) $ " max_ms=" $ string(int(SurveyCostDtMax * 1000.0))
+        $ " traces_avg=" $ string(int(float(SurveyCostTraces) / N)) $ "/" $ string(SurveyTracesNow)
+        $ " bfs_avg=" $ string(int(float(SurveyCostBfs) / N)) $ "/" $ string(SurveyBfsNow)
+        $ " scan_avg=" $ string(int(float(SurveyCostScan) / N)) $ "/12000 front=" $ string(SurveyFrontList.Length));
+    SurveyCostFrames = 0;
+    SurveyCostDt = 0.0;
+    SurveyCostDtMax = 0.0;
+    SurveyCostTraces = 0;
+    SurveyCostBfs = 0;
+    SurveyCostScan = 0;
+}
+
+// Tiles all bots have expanded so far.
+function int SurveyExpandedTotal()
+{
+    local int I, Total;
+
+    for (I = 0; I < SurveyBotList.Length; I++)
+    {
+        if (SurveyBotList[I] != None)
+        {
+            Total += SurveyBotList[I].NExpanded;
+        }
+    }
+    return Total;
+}
+
+// Summed bot counters for the progress and done lines.
+function string SurveyStatTotals()
+{
+    local int I, Ex, Hid, Stk, Byb, Tel, Dea, Trc, Idl;
+    local EcholonSurveyBot B;
+
+    for (I = 0; I < SurveyBotList.Length; I++)
+    {
+        B = SurveyBotList[I];
+        if (B == None)
+        {
+            continue;
+        }
+        Ex += B.NExpanded;
+        Hid += B.NHidden;
+        Stk += B.NStuck;
+        Byb += B.NBlockedByBot;
+        Tel += B.NTeleports;
+        Dea += B.NDeaths;
+        Trc += B.NTraces;
+        if (B.Phase == B.SP_IDLE)
+        {
+            Idl++;
+        }
+    }
+    return "expanded=" $ string(Ex) $ " bot_hidden=" $ string(Hid) $ " stuck=" $ string(Stk) $ " bybot=" $ string(Byb) $ " teleports=" $ string(Tel)
+        $ " deaths=" $ string(Dea) $ " traces=" $ string(Trc) $ " idle=" $ string(Idl);
+}
+
+// End of the survey: stop the bots, log the summary, then write the grid rows to the log over the next frames.
+function SurveyFinish(string Reason)
+{
+    local int I;
+
+    if (bSurveyDone)
+    {
+        return;
+    }
+    bSurveyDone = true;
+    SurveyDoneReason = Reason;
+    for (I = 0; I < SurveyBotList.Length; I++)
+    {
+        if (SurveyBotList[I] != None && SurveyBotList[I].Pawn != None)
+        {
+            SurveyBotList[I].Pawn.Acceleration = vect(0.0, 0.0, 0.0);
+        }
+    }
+    EchelonLog("SURVEY_DONE reason=" $ Reason $ " mins=" $ string(int((WorldInfo.TimeSeconds - SurveyStartTime) / 60.0)) $ " tiles=" $ string(SurveyGrid.Used)
+        $ " floor=" $ string(SurveyGrid.KindCount[1]) $ " steep=" $ string(SurveyGrid.KindCount[2]) $ " wall=" $ string(SurveyGrid.KindCount[3])
+        $ " obstacle=" $ string(SurveyGrid.KindCount[4]) $ " drop=" $ string(SurveyGrid.KindCount[5]) $ " door=" $ string(SurveyGrid.KindCount[6])
+        $ " hidden=" $ string(SurveyGrid.HiddenCount) $ " " $ SurveyStatTotals());
+    EchelonLog("GRID_START tile=" $ string(int(class'EcholonSurveyGrid'.const.TILE)) $ " level_h=" $ string(int(class'EcholonSurveyGrid'.const.LEVEL_H))
+        $ " tx=" $ string(SurveyGrid.MinTX) $ ".." $ string(SurveyGrid.MaxTX) $ " ty=" $ string(SurveyGrid.MinTY) $ ".." $ string(SurveyGrid.MaxTY)
+        $ " lvl=" $ string(SurveyGrid.MinLvl) $ ".." $ string(SurveyGrid.MaxLvl) $ " tiles=" $ string(SurveyGrid.Used)
+        $ " chars=5 order=kind,flagsLow,flagsHigh,zLow,zHigh");
+    SurveyExpLvl = SurveyGrid.MinLvl;
+    SurveyExpTY = SurveyGrid.MinTY;
+    SurveyExpTX = SurveyGrid.MinTX;
+    SurveyExpRows = 0;
+    SurveyExpTiles = 0;
+    SurveyExpSlot = 0;
+    SurveyExpPhase = 0;
+    SurveyRowMark.Length = 0;
+    SurveyRowMark.Length = 262144;
+    if (SurveyGrid.ClampCount > 0)
+    {
+        EchelonLog("SURVEY_CLAMP count=" $ string(SurveyGrid.ClampCount) $ " note=map_outside_tile_level_or_height_range");
+    }
+    SurveyLogCost();
+    bSurveyExporting = SurveyGrid.Used > 0;
+    if (!bSurveyExporting)
+    {
+        SurveyExportDone();
+    }
+}
+
+// Moves the export cursor to the start of the next row; false when there are no more rows.
+function bool SurveyExpNextRow()
+{
+    SurveyExpTX = SurveyGrid.MinTX;
+    SurveyExpTY++;
+    if (SurveyExpTY > SurveyGrid.MaxTY)
+    {
+        SurveyExpTY = SurveyGrid.MinTY;
+        SurveyExpLvl++;
+        if (SurveyExpLvl > SurveyGrid.MaxLvl)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Export in two phases: first find which (level, row) pairs hold any tile (20000 slots a frame), then write only those rows as
+// GRID_ROW lines (6 chunks of 100 tiles a frame), so one stray tile far away does not make the export walk an empty bounding box.
+function SurveyExportStep()
+{
+    local int Chunks, Known, Skips, Slot, K;
+    local string Data;
+
+    if (SurveyExpPhase == 0)
+    {
+        for (Skips = 0; Skips < 20000 && SurveyExpSlot < SurveyGrid.Keys.Length; Skips++)
+        {
+            Slot = SurveyExpSlot;
+            SurveyExpSlot++;
+            K = SurveyGrid.Keys[Slot];
+            if (K != 0)
+            {
+                SurveyRowMark[(SurveyGrid.KeyLvl(K) + 32) * 4096 + SurveyGrid.KeyTY(K) + 2048] = 1;
+            }
+        }
+        if (SurveyExpSlot >= SurveyGrid.Keys.Length)
+        {
+            SurveyExpPhase = 1;
+        }
+        return;
+    }
+    Chunks = 0;
+    Skips = 0;
+    while (Chunks < 6 && Skips < 3000)
+    {
+        if (SurveyRowMark[(SurveyExpLvl + 32) * 4096 + SurveyExpTY + 2048] == 0)
+        {
+            Skips++;
+            if (!SurveyExpNextRow())
+            {
+                bSurveyExporting = false;
+                SurveyExportDone();
+                return;
+            }
+            continue;
+        }
+        Data = SurveyGrid.RowChunk(SurveyExpLvl, SurveyExpTY, SurveyExpTX, 100, Known);
+        if (Known > 0)
+        {
+            EchelonLog("GRID_ROW level=" $ string(SurveyExpLvl) $ " y=" $ string(SurveyExpTY) $ " x0=" $ string(SurveyExpTX) $ " data=" $ Data);
+            SurveyExpRows++;
+            SurveyExpTiles += Known;
+        }
+        Chunks++;
+        SurveyExpTX += 100;
+        if (SurveyExpTX > SurveyGrid.MaxTX && !SurveyExpNextRow())
+        {
+            bSurveyExporting = false;
+            SurveyExportDone();
+            return;
+        }
+    }
+}
+
+// The grid is in the log: tell the playtest runner the run is over.
+function SurveyExportDone()
+{
+    EchelonLog("GRID_DONE rows=" $ string(SurveyExpRows) $ " tiles=" $ string(SurveyExpTiles) $ " reason=" $ SurveyDoneReason);
+    if (bPlaytest && !bPlaytestDone)
+    {
+        EchelonLog("PLAYTEST_DONE reason=survey waves_done=0");
+        bPlaytestDone = true;
+        SetTimer(5.0, false, 'PlaytestQuit');
+    }
+}
+
 function Mutate(string MutateString, PlayerController Sender)
 {
     if (MutateString ~= "AI")
@@ -4324,6 +4950,11 @@ function Mutate(string MutateString, PlayerController Sender)
             PMsg(Sender, ("-SetBotsLevel <" $ string(bShowBotLevel)) $ "> = Show [Lv X] prefix on bot names");
             PMsg(Sender, ("-SetBotRole <" $ string(bShowBotRole)) $ "> = Show [Role] prefix on bot names");
             PMsg(Sender, ("-SetBotAvatars <" $ string(bBotAvatars)) $ "> = Bots get scoreboard pictures from the local avatar server");
+        }
+        else if (MutateString ~= "SurveyStop")
+        {
+            bSurveyStopReq = true;
+            PMsg(Sender, "Survey: stop requested");
         }
         else if (Left(MutateString, 11) ~= "SetNumBots ")
         {
