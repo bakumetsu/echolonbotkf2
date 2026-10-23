@@ -643,6 +643,38 @@ function int NavSurveyClearance(vector Dir, float RefZ)
     return Sum;
 }
 
+// True when a closed, non-automatic door stands within 150 uu of the line From -> To (the survey ran with every door open, so a clear
+// grid line there proves nothing about the door).
+function bool NavDoorNearLine(vector From, vector To)
+{
+    local int I;
+    local KFDoorActor D;
+    local vector Seg, Rel;
+    local float LenSq, T;
+
+    Seg = To - From;
+    LenSq = VSizeSq(Seg);
+    for (I = 0; I < MapData.Doors.Length; I++)
+    {
+        D = MapData.Doors[I];
+        if (D == None || D.bIsDoorOpen || D.bAutomaticDoor || D.bIsDestroyed || Abs(D.Location.Z - From.Z) > 200.0)
+        {
+            continue;
+        }
+        Rel = D.Location - From;
+        T = 0.0;
+        if (LenSq > 1.0)
+        {
+            T = FClamp((Rel dot Seg) / LenSq, 0.0, 1.0);
+        }
+        if (VSizeSq(From + Seg * T - D.Location) < 22500.0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 // True when the survey grid alone says the straight walk From -> To is free: every tile along the line (a sample every half tile)
 // is standable on this floor, has room for the body (wall distance 1 or more) and has no hidden collision. A "no" or "don't know"
 // means nothing: the caller then does its real traces. Lines over 40 samples or with a height change over 60 uu are not tried.
@@ -691,6 +723,11 @@ function bool NavSurveyLineClear(vector From, vector To)
                 MapData.LcDist0++;
             return false;
         }
+    }
+    if (NavDoorNearLine(From, To))
+    {
+        MapData.LcDoor++;
+        return false;
     }
     MapData.LcClear++;
     if (NavMeter != None)
@@ -1778,9 +1815,19 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest, optional bool bLa
         {
             if (IterStrict && !bLast && MapData != None && MapData.bUsable && MapData.bDone && IterSurveyLevel < 3)
             {
-                IterSurveyLevel = 3;   // one extra search: every kind back in except hurt_drop (a failing goal used to cost 3 extra)
+                // First the trouble-spot links come back (they only carry a starting strike: avoided, not forbidden); if that is not
+                // enough, every kind except hurt_drop. A goal that still has no route is set aside by the caller, which bounds the cost.
+                if (IterSurveyLevel == 0 && MapData.TroubleCount > 0)
+                {
+                    IterSurveyLevel = 1;
+                    EchelonLog("NAV_SURVEY_RELAX step=trouble goal=" $ string(Goal));
+                }
+                else
+                {
+                    IterSurveyLevel = 3;
+                    EchelonLog("NAV_SURVEY_RELAX step=all_but_hurt_drop goal=" $ string(Goal));
+                }
                 MapData.RelaxCount++;
-                EchelonLog("NAV_SURVEY_RELAX step=all_but_hurt_drop goal=" $ string(Goal));
                 IterPass--;
                 continue;
             }
