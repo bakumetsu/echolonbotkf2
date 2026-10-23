@@ -15,8 +15,7 @@ const SP_PLAN = 2;
 const SP_WALK = 3;
 const SP_IDLE = 4;
 const SP_DEAD = 5;
-const SP_SCAN = 6;
-// Copies of the tile constants in EcholonSurveyGrid.
+// Copies of the tile constants in EcholonSurveyGrid (keep in sync with that class).
 const TILE = 38.0;
 const K_FLOOR = 1;
 const K_STEEP = 2;
@@ -42,8 +41,7 @@ const STEP_UP = 40.0;       // the down trace starts this far above the current 
 const STEP_DOWN = 60.0;     // ... and reaches this far below it; no floor in that span is a drop edge
 const STEP_MAX = 35.0;      // highest step a bot climbs (Pawn.MaxStepHeight)
 const KNEE = 45.0;          // height above the floor of the body-sized wall trace
-const DROP_PROBE = 500.0;   // how far the second down trace looks for the landing
-const SAFE_FALL = 350.0;    // drops up to this deep count as safe (logged only in this build)
+const DROP_PROBE = 900.0;   // how far the second down trace looks for the landing (the safe fall limit itself is Mut.SurveyDropMax, computed from the pawn's fall damage settings)
 const ARRIVE_DIST = 10.0;   // 2D distance at which the last tile of a path counts as reached
 const PASS_DIST = 12.0;     // ... and an intermediate tile (also reached when the bot passed it within 40 uu)
 const BOT_BLOCK_MAX = 3;    // blocked-by-bot waits in a row before it counts as a real stuck
@@ -98,9 +96,6 @@ var float LastMoveTime;      // last frame StepWalk steered the pawn
 var bool bDropStep;          // the step being walked is a planned drop
 var int DropHealth;          // pawn health before that drop
 var float DropFall;          // its fall height
-var int ScanSlot;            // far-frontier scan cursor over the grid's hash table
-var int ScanBestKey;
-var float ScanBestD;
 var int NTransfers;
 var float IdleSince;
 var int IdleFails;           // consecutive searches that found no frontier (the mutator ends the survey when all bots reach 3)
@@ -239,12 +234,12 @@ final function int FeelNeighbour(int D)
         else
             LandZ = ExpZ - DROP_PROBE;
         Fall = ExpZ - LandZ;
-        if (Fall > SAFE_FALL)
+        if (Fall > Mut.SurveyDropMax)
             Flags = F_UNSAFE;
         else
             Flags = 0;
         Grid.PutData(Grid.MakeKey(QTX, QTY, PL), Grid.PackData(K_DROP, Flags, LandZ));
-        if (Fall <= SAFE_FALL)
+        if (Fall <= Mut.SurveyDropMax)
             SafeStr = "1";
         else
             SafeStr = "0";
@@ -796,7 +791,7 @@ final function StepWalk()
 // SurveyTick: per-frame dispatcher driven by the mutator.
 final function SurveyTick(float DT)
 {
-    local int R;
+    local int R, Far;
 
     if (!PawnOk())
     {
@@ -842,16 +837,11 @@ final function SurveyTick(float DT)
             }
             else if (R == 2)
             {
-                BeginScan();
-            }
-            break;
-        case SP_SCAN:
-            Pawn.Acceleration = V3(0.0, 0.0, 0.0);
-            if (StepScan())
-            {
-                if (ScanBestKey != 0)
+                // nothing reachable on foot: go to the nearest unexplored floor on the mutator's shared list
+                Far = PickFarFrontier();
+                if (Far != 0)
                 {
-                    TransferTo(ScanBestKey);
+                    TransferTo(Far);
                 }
                 else
                 {
@@ -874,45 +864,32 @@ final function SurveyTick(float DT)
     }
 }
 
-// BeginScan: no frontier reachable by walking; look through the whole grid for the nearest unexpanded floor tile.
-final function BeginScan()
+// PickFarFrontier: the nearest unexplored floor tile (not blocked, not claimed by another bot) on the mutator's shared list,
+// which it rebuilds once a second from the whole grid. 0 when there is none.
+final function int PickFarFrontier()
 {
-    ScanSlot = 0;
-    ScanBestKey = 0;
-    ScanBestD = 1000000000000.0;
-    Phase = SP_SCAN;
-}
+    local int I, K, D, Best;
+    local float X, Y, Z, Dd, BestD;
 
-// StepScan: reads up to the frame's share of hash slots; true when the whole table was read.
-final function bool StepScan()
-{
-    local int K, D, Slot;
-    local float X, Y, Z, Dd;
-
-    while (ScanSlot < Grid.Keys.Length)
+    Best = 0;
+    BestD = 1000000000000.0;
+    for (I = 0; I < Mut.SurveyFrontList.Length; I++)
     {
-        if (Mut.SurveyScanLeft <= 0)
-            return false;
-        Mut.SurveyScanLeft--;
-        Slot = ScanSlot;
-        ScanSlot++;
-        K = Grid.Keys[Slot];
-        if (K == 0)
-            continue;
-        D = Grid.Data[Slot];
-        if (Grid.DKind(D) != K_FLOOR || (Grid.DFlags(D) & (F_EXPANDED | F_BLOCKED)) != 0)
+        K = Mut.SurveyFrontList[I];
+        D = Grid.GetData(K);
+        if (D == 0 || Grid.DKind(D) != K_FLOOR || (Grid.DFlags(D) & (F_EXPANDED | F_BLOCKED)) != 0)
             continue;
         X = Grid.CenterOf(Grid.KeyTX(K)) - Pawn.Location.X;
         Y = Grid.CenterOf(Grid.KeyTY(K)) - Pawn.Location.Y;
         Z = Grid.DZ(D) + BodyH - Pawn.Location.Z;
         Dd = X * X + Y * Y + Z * Z;
-        if (Dd < ScanBestD && !ClaimedByOther(K))
+        if (Dd < BestD && !ClaimedByOther(K))
         {
-            ScanBestD = Dd;
-            ScanBestKey = K;
+            BestD = Dd;
+            Best = K;
         }
     }
-    return true;
+    return Best;
 }
 
 // TransferTo: put the bot on a far frontier tile and start feeling from there (no walking route to it was known).
@@ -952,8 +929,6 @@ final function string StatLine()
 {
     return "expanded=" $ string(NExpanded) $ " transfers=" $ string(NTransfers) $ " hidden=" $ string(NHidden) $ " stuck=" $ string(NStuck) $ " bybot=" $ string(NBlockedByBot) $ " teleports=" $ string(NTeleports) $ " deaths=" $ string(NDeaths) $ " searches=" $ string(NSearches) $ " traces=" $ string(NTraces);
 }
-
-// @@FUNCS@@
 
 defaultproperties
 {

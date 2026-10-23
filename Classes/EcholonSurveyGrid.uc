@@ -46,6 +46,7 @@ var int MinLvl;
 var int MaxLvl;
 var array<int> KindCount;
 var int HiddenCount;
+var int ClampCount;          // positions that were outside the tile, level or height range and got clamped (logged as SURVEY_CLAMP)
 
 // Reset all state; arrays are re-allocated to SLOTS zeroed slots.
 final function Clear()
@@ -61,6 +62,7 @@ final function Clear()
     Used = 0;
     bFull = false;
     HiddenCount = 0;
+    ClampCount = 0;
     MinTX = 99999;
     MaxTX = -99999;
     MinTY = 99999;
@@ -74,8 +76,16 @@ final function int TileOf(float V)
 {
     local int I;
     I = FFloor(V / TILE);
-    if (I < -2047) I = -2047;
-    if (I > 2047) I = 2047;
+    if (I < -2047)
+    {
+        I = -2047;
+        ClampCount++;
+    }
+    if (I > 2047)
+    {
+        I = 2047;
+        ClampCount++;
+    }
     return I;
 }
 
@@ -84,8 +94,16 @@ final function int LevelOf(float Z)
 {
     local int I;
     I = Round(Z / LEVEL_H);
-    if (I < -31) I = -31;
-    if (I > 31) I = 31;
+    if (I < -31)
+    {
+        I = -31;
+        ClampCount++;
+    }
+    if (I > 31)
+    {
+        I = 31;
+        ClampCount++;
+    }
     return I;
 }
 
@@ -271,8 +289,16 @@ final function int ZQ(float Z)
 {
     local int I;
     I = Round((Z + 4096.0) / 2.0);
-    if (I < 0) I = 0;
-    if (I > 4095) I = 4095;
+    if (I < 0)
+    {
+        I = 0;
+        ClampCount++;
+    }
+    if (I > 4095)
+    {
+        I = 4095;
+        ClampCount++;
+    }
     return I;
 }
 

@@ -61,6 +61,19 @@ var transient int SurveyBfsLeft;                     // search nodes the survey 
 var transient int SurveyScanLeft;                    // grid slots the bots may still read this frame (far-frontier scans)
 var transient float SurveyDropMax;                   // deepest drop (uu) the bots take; lowered when a fall hurts
 var transient int SurveyDropLogs;                    // SURVEY_DROP lines written so far (capped)
+var transient int SurveyFrontScan;                   // shared far-frontier scan: cursor over the grid's slots
+var transient array<int> SurveyFrontBuild;           // ... unexpanded floor tile keys found so far in this pass
+var transient array<int> SurveyFrontList;            // ... the list of the last finished pass; idle bots pick from it
+var transient float SurveyFrontNextAt;               // next pass starts at this time (one a second)
+var transient array<byte> SurveyRowMark;             // export: 1 for each (level, row) that holds a tile
+var transient int SurveyExpSlot;                     // export phase 0 cursor over the grid's slots
+var transient int SurveyExpPhase;                    // 0 = find the rows with tiles, 1 = write them
+var transient int SurveyCostFrames;                  // SURVEY_COST accumulators (reset every 30 s)
+var transient float SurveyCostDt;
+var transient float SurveyCostDtMax;
+var transient int SurveyCostTraces;
+var transient int SurveyCostBfs;
+var transient int SurveyCostScan;
 var() config int SurveyBots;                         // survey bot count (0 or less = 4); ?SurveyBots=N overrides for one match
 var() config int SurveyMinutes;                      // time limit of a survey (0 or less = 60); ?SurveyMinutes=N overrides
 var() config int SurveyTraces;                       // traces per frame for all survey bots together (0 or less = 120)
@@ -436,10 +449,10 @@ function NavScanBegin()
     EchelonLog("NAV_SCAN_START nodes=" $ string(NavScan.Nodes.Length));
 }
 
-// Start the one-time node and link dump (bNavTrace only); the work is spread over frames in Tick.
-function NavDumpBegin()
+// Start the one-time node and link dump (bNavTrace only, or always in a survey); the work is spread over frames in Tick.
+function NavDumpBegin(optional bool bForce)
 {
-    if (!bNavTrace || NavDump != None)
+    if ((!bNavTrace && !bForce) || NavDump != None)
     {
         return;
     }
@@ -4394,7 +4407,7 @@ function SurveyBegin()
     }
     SurveyGrid = new class'EcholonBot.EcholonSurveyGrid';
     SurveyGrid.Clear();
-    SurveyDropMax = 180.0;
+    SurveyDropMax = 180.0;      // until SurveyComputeLimits has read the pawn
     foreach WorldInfo.AllActors(class'PhysicsVolume', V)
     {
         if (V.bPainCausing || V.bWaterVolume)
@@ -4415,7 +4428,43 @@ function SurveyBegin()
     SurveyOpenDoors();
     EchelonLog("SURVEY_BEGIN map=" $ WorldInfo.GetMapName() $ " bots=" $ string(SurveyBotList.Length) $ " starts=" $ string(SurveyStarts.Length)
         $ " hazards=" $ string(SurveyHazards.Length));
-    NavDumpBegin();
+    SurveyComputeLimits();
+    NavDumpBegin(true);
+}
+
+// The deepest drop that does not hurt, from the pawn's own settings: damage starts when the landing speed passes MaxFallSpeed,
+// and a fall of h uu lands at sqrt(2 g h), so h = 0.85 MaxFallSpeed^2 / (2 g) with a margin. Logged once.
+function SurveyComputeLimits()
+{
+    local int I;
+    local Pawn P;
+    local float G, V;
+
+    for (I = 0; I < SurveyBotList.Length; I++)
+    {
+        if (SurveyBotList[I] != None && SurveyBotList[I].Pawn != None)
+        {
+            P = SurveyBotList[I].Pawn;
+            break;
+        }
+    }
+    if (P == None)
+    {
+        return;
+    }
+    G = Abs(P.GetGravityZ());
+    if (G < 1.0)
+    {
+        G = 1150.0;
+    }
+    V = P.MaxFallSpeed;
+    if (V < 1.0)
+    {
+        V = 1325.0;
+    }
+    SurveyDropMax = 0.85 * V * V / (2.0 * G);
+    EchelonLog("SURVEY_LIMITS safe_fall=" $ string(int(SurveyDropMax)) $ " max_fall_speed=" $ string(int(V)) $ " gravity=" $ string(int(G))
+        $ " step=" $ string(int(P.MaxStepHeight)) $ " jump_z=" $ string(int(P.JumpZ)) $ " jump_apex=" $ string(int(P.JumpZ * P.JumpZ / (2.0 * G))));
 }
 
 // Opens every door and keeps it open, so doors do not cut the map; each door is logged (SURVEY_DOOR) for the viewer.
@@ -4553,6 +4602,7 @@ function SurveyTickAll(float DT)
     SurveyTraceLeft = SurveyTracesNow;
     SurveyBfsLeft = SurveyBfsNow;
     SurveyScanLeft = 12000;
+    SurveyFrontierStep();
     if (KF != None && KF.SpawnManager != None)
     {
         KF.SpawnManager.TimeUntilNextSpawn = 9999.0;
@@ -4571,6 +4621,52 @@ function SurveyTickAll(float DT)
         }
     }
     SurveyRot++;
+    SurveyCostFrames++;
+    SurveyCostDt += DT;
+    if (DT > SurveyCostDtMax)
+    {
+        SurveyCostDtMax = DT;
+    }
+    SurveyCostTraces += SurveyTracesNow - SurveyTraceLeft;
+    SurveyCostBfs += SurveyBfsNow - SurveyBfsLeft;
+    SurveyCostScan += 12000 - SurveyScanLeft;
+}
+
+// One shared pass over the grid's slots (12000 a frame, one pass a second at most): the unexplored floor tiles become the list
+// idle bots pick a far frontier from, instead of every idle bot reading the whole table itself.
+function SurveyFrontierStep()
+{
+    local int Slot, K, D;
+
+    if (SurveyFrontScan == 0 && WorldInfo.TimeSeconds < SurveyFrontNextAt)
+    {
+        return;
+    }
+    while (SurveyFrontScan < SurveyGrid.Keys.Length)
+    {
+        if (SurveyScanLeft <= 0)
+        {
+            return;
+        }
+        SurveyScanLeft--;
+        Slot = SurveyFrontScan;
+        SurveyFrontScan++;
+        K = SurveyGrid.Keys[Slot];
+        if (K == 0)
+        {
+            continue;
+        }
+        D = SurveyGrid.Data[Slot];
+        if (SurveyGrid.DKind(D) == class'EcholonSurveyGrid'.const.K_FLOOR
+            && (SurveyGrid.DFlags(D) & (class'EcholonSurveyGrid'.const.F_EXPANDED | class'EcholonSurveyGrid'.const.F_BLOCKED)) == 0)
+        {
+            SurveyFrontBuild.AddItem(K);
+        }
+    }
+    SurveyFrontList = SurveyFrontBuild;
+    SurveyFrontBuild.Length = 0;
+    SurveyFrontScan = 0;
+    SurveyFrontNextAt = WorldInfo.TimeSeconds + 1.0;
 }
 
 // 1 s timer: progress line every 30 s, and the end conditions.
@@ -4588,6 +4684,7 @@ function SurveyCheck()
     if (WorldInfo.TimeSeconds >= SurveyNextProgress)
     {
         SurveyNextProgress = WorldInfo.TimeSeconds + 30.0;
+        SurveyLogCost();
         EchelonLog("SURVEY_PROGRESS mins=" $ string(int(Mins)) $ " tiles=" $ string(SurveyGrid.Used) $ " floor=" $ string(SurveyGrid.KindCount[1])
             $ " wall=" $ string(SurveyGrid.KindCount[3]) $ " hidden=" $ string(SurveyGrid.HiddenCount) $ " " $ SurveyStatTotals());
     }
@@ -4622,6 +4719,31 @@ function SurveyCheck()
         SurveyFinish("time");
     else if (Alive > 0 && IdleBots == Alive)
         SurveyFinish("no_frontier");
+}
+
+// SURVEY_COST every 30 s: the frame time while the survey runs (Actor.Clock returns 0 in the retail game, so the frame delta is the
+// measure) and the average work per frame against the budgets.
+function SurveyLogCost()
+{
+    local float N;
+    local int A10;
+
+    if (SurveyCostFrames <= 0)
+    {
+        return;
+    }
+    N = float(SurveyCostFrames);
+    A10 = int(SurveyCostDt / N * 10000.0);
+    EchelonLog("SURVEY_COST frames=" $ string(SurveyCostFrames) $ " avg_ms=" $ string(A10 / 10) $ "." $ string(A10 % 10) $ " max_ms=" $ string(int(SurveyCostDtMax * 1000.0))
+        $ " traces_avg=" $ string(int(float(SurveyCostTraces) / N)) $ "/" $ string(SurveyTracesNow)
+        $ " bfs_avg=" $ string(int(float(SurveyCostBfs) / N)) $ "/" $ string(SurveyBfsNow)
+        $ " scan_avg=" $ string(int(float(SurveyCostScan) / N)) $ "/12000 front=" $ string(SurveyFrontList.Length));
+    SurveyCostFrames = 0;
+    SurveyCostDt = 0.0;
+    SurveyCostDtMax = 0.0;
+    SurveyCostTraces = 0;
+    SurveyCostBfs = 0;
+    SurveyCostScan = 0;
 }
 
 // Tiles all bots have expanded so far.
@@ -4699,6 +4821,15 @@ function SurveyFinish(string Reason)
     SurveyExpTX = SurveyGrid.MinTX;
     SurveyExpRows = 0;
     SurveyExpTiles = 0;
+    SurveyExpSlot = 0;
+    SurveyExpPhase = 0;
+    SurveyRowMark.Length = 0;
+    SurveyRowMark.Length = 262144;
+    if (SurveyGrid.ClampCount > 0)
+    {
+        EchelonLog("SURVEY_CLAMP count=" $ string(SurveyGrid.ClampCount) $ " note=map_outside_tile_level_or_height_range");
+    }
+    SurveyLogCost();
     bSurveyExporting = SurveyGrid.Used > 0;
     if (!bSurveyExporting)
     {
@@ -4706,14 +4837,63 @@ function SurveyFinish(string Reason)
     }
 }
 
-// Writes up to 600 tiles' worth of GRID_ROW lines per frame (rows of 100 tiles; rows with no known tile are skipped).
+// Moves the export cursor to the start of the next row; false when there are no more rows.
+function bool SurveyExpNextRow()
+{
+    SurveyExpTX = SurveyGrid.MinTX;
+    SurveyExpTY++;
+    if (SurveyExpTY > SurveyGrid.MaxTY)
+    {
+        SurveyExpTY = SurveyGrid.MinTY;
+        SurveyExpLvl++;
+        if (SurveyExpLvl > SurveyGrid.MaxLvl)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Export in two phases: first find which (level, row) pairs hold any tile (20000 slots a frame), then write only those rows as
+// GRID_ROW lines (6 chunks of 100 tiles a frame), so one stray tile far away does not make the export walk an empty bounding box.
 function SurveyExportStep()
 {
-    local int Chunks, Known;
+    local int Chunks, Known, Skips, Slot, K;
     local string Data;
 
-    for (Chunks = 0; Chunks < 6; Chunks++)
+    if (SurveyExpPhase == 0)
     {
+        for (Skips = 0; Skips < 20000 && SurveyExpSlot < SurveyGrid.Keys.Length; Skips++)
+        {
+            Slot = SurveyExpSlot;
+            SurveyExpSlot++;
+            K = SurveyGrid.Keys[Slot];
+            if (K != 0)
+            {
+                SurveyRowMark[(SurveyGrid.KeyLvl(K) + 32) * 4096 + SurveyGrid.KeyTY(K) + 2048] = 1;
+            }
+        }
+        if (SurveyExpSlot >= SurveyGrid.Keys.Length)
+        {
+            SurveyExpPhase = 1;
+        }
+        return;
+    }
+    Chunks = 0;
+    Skips = 0;
+    while (Chunks < 6 && Skips < 3000)
+    {
+        if (SurveyRowMark[(SurveyExpLvl + 32) * 4096 + SurveyExpTY + 2048] == 0)
+        {
+            Skips++;
+            if (!SurveyExpNextRow())
+            {
+                bSurveyExporting = false;
+                SurveyExportDone();
+                return;
+            }
+            continue;
+        }
         Data = SurveyGrid.RowChunk(SurveyExpLvl, SurveyExpTY, SurveyExpTX, 100, Known);
         if (Known > 0)
         {
@@ -4721,22 +4901,13 @@ function SurveyExportStep()
             SurveyExpRows++;
             SurveyExpTiles += Known;
         }
+        Chunks++;
         SurveyExpTX += 100;
-        if (SurveyExpTX > SurveyGrid.MaxTX)
+        if (SurveyExpTX > SurveyGrid.MaxTX && !SurveyExpNextRow())
         {
-            SurveyExpTX = SurveyGrid.MinTX;
-            SurveyExpTY++;
-            if (SurveyExpTY > SurveyGrid.MaxTY)
-            {
-                SurveyExpTY = SurveyGrid.MinTY;
-                SurveyExpLvl++;
-                if (SurveyExpLvl > SurveyGrid.MaxLvl)
-                {
-                    bSurveyExporting = false;
-                    SurveyExportDone();
-                    return;
-                }
-            }
+            bSurveyExporting = false;
+            SurveyExportDone();
+            return;
         }
     }
 }
