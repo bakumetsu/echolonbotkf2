@@ -49,6 +49,8 @@ var transient array<EcholonWeaponInfo> TraderList;
 var transient EcholonNavMeter NavMeter;       // nav cost counter, shared by all bots (N6)
 var transient EcholonNavBudget NavBudget;     // per-frame nav budget, shared by all bots (N7)
 var transient EcholonNavScan NavScan;         // start-of-match link scan state and bad links (N8)
+var transient EcholonNavDump NavDump;         // start-of-match node and link dump for the kit's map viewer (bNavTrace)
+var() config bool bNavTrace;                  // log the map's path network (NAVDUMP_ lines) at match start; off by default
 var transient EcholonZonePlanner ZonePlanner;  // zone list builder, logging only (Hold and Relocate zones, step 2)
 var transient bool bZoneStarted;
 var() config int ZoneConfigVer;               // 0 = zone settings never written; 1 = defaults written once (separate from ConfigVer, which resets everything)
@@ -360,6 +362,7 @@ function NavBenchmarkRun()
             ActiveBots[I].NavBenchmark();
             EchelonLog(NavMeter.UnitCostMessage());
             NavScanBegin();
+            NavDumpBegin();
             return;
         }
     }
@@ -394,6 +397,17 @@ function NavScanBegin()
     }
     NavScan.Begin(WorldInfo.TimeSeconds);
     EchelonLog("NAV_SCAN_START nodes=" $ string(NavScan.Nodes.Length));
+}
+
+// Start the one-time node and link dump (bNavTrace only); the work is spread over frames in Tick.
+function NavDumpBegin()
+{
+    if (!bNavTrace || NavDump != None)
+    {
+        return;
+    }
+    NavDump = new class'EcholonBot.EcholonNavDump';
+    NavDump.Begin(self, WorldInfo.TimeSeconds);
 }
 
 // Per-frame budgeted step: process up to 25 links or until the scan budget is spent.
@@ -646,6 +660,10 @@ event Tick(float DeltaTime)
         {
             EchelonLog(NavReport $ " " $ NavBudget.TakeDeniedCounts());
         }
+    }
+    if (NavDump != None && NavDump.bActive)
+    {
+        NavDump.Step();
     }
     if (NavScan != None && NavScan.bActive)
     {
