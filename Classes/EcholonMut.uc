@@ -526,8 +526,17 @@ function SurveyNavSummary()
     {
         Unpacked = NavGrid.SUnpacked;
     }
-    EchelonLog("NAV_SURVEY_SUMMARY map=" $ WorldInfo.GetMapName() $ " survey_nav=" $ string(On) $ " stucks=" $ string(NavStuckCount) $ " stucks_grunt=" $ string(NavStuckGrunt) $ " stucks_follow=" $ string(NavStuckFollow) $ " relaxes=" $ string(Relax)
+    EchelonLog("NAV_SURVEY_SUMMARY map=" $ WorldInfo.GetMapName() $ " survey_nav=" $ string(On) $ " stucks=" $ string(NavStuckCount) $ " stucks_grunt=" $ string(NavStuckGrunt) $ " stucks_follow=" $ string(NavStuckFollow) $ " proven_routes=" $ string(ProvenUsedCount()) $ " relaxes=" $ string(Relax)
         $ " chunks_unpacked=" $ string(Unpacked) $ " minutes=" $ string(int(WorldInfo.TimeSeconds / 60.0)) $ " " $ TotalsText);
+}
+
+function int ProvenUsedCount()
+{
+    if (MapData == None)
+    {
+        return 0;
+    }
+    return MapData.ProvenUsed;
 }
 
 // True when the survey says this node sits inside a wall (never a steer target, crumb or relocation spot).

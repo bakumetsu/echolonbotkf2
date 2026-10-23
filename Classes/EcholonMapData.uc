@@ -15,6 +15,7 @@ const VK_BAD_HIDDEN = 2;
 const VK_NARROW = 3;
 const VK_SAFE_DROP = 4;
 const VK_HURT_DROP = 5;
+const VK_PROVEN = 7;                    // a window or shortcut link a survey bot walked: usable although the route search treats it as special
 const VK_TROUBLE = 6;                   // passes within 76 uu of a trouble spot: starts the match with one strike
 const NV_WALL = 1;
 const NV_UNREACHED = 2;
@@ -41,6 +42,8 @@ var config array<string> GridChunk;        // "cx,cy,lvl,packed"
 // state
 var EcholonMut Mut;
 var EcholonNavGrid Grid;                // receives the packed chunks (the lava grid object of the mutator)
+var int ProvenUsed;                     // proven links the accepted routes used (one per link per search)
+var int ProvenCount;                    // links with the proven verdict
 var int TroubleCount;                   // links with the trouble verdict (the first relax step lets them back in)
 var array<KFDoorActor> Doors;           // every door on the map: a clear grid line near a closed one still gets a real trace
 var int LcDoor;
@@ -213,6 +216,8 @@ final function int KindOfName(string V)
         return VK_HURT_DROP;
     if (V == "trouble")
         return VK_TROUBLE;
+    if (V == "proven")
+        return VK_PROVEN;
     return VK_NONE;
 }
 
@@ -263,6 +268,10 @@ final function bool Step()
             if (K == VK_TROUBLE)
             {
                 TroubleCount++;
+            }
+            if (K == VK_PROVEN)
+            {
+                ProvenCount++;
             }
         }
         if (Idx >= LinkV.Length)
@@ -442,7 +451,7 @@ final function Report()
     if (bMatch)
         M = 1;
     Mut.EchelonLog("NAV_MAPDATA_LOAD map=" $ Mut.WorldInfo.GetMapName() $ " found=" $ string(F) $ " checksum_match=" $ string(M)
-        $ " links=" $ string(LinksUsed) $ " links_skipped=" $ string(LinksSkipped) $ " nodes=" $ string(NodesUsed) $ " nodes_skipped=" $ string(NodesSkipped)
+        $ " links=" $ string(LinksUsed) $ " links_skipped=" $ string(LinksSkipped) $ " proven=" $ string(ProvenCount) $ " nodes=" $ string(NodesUsed) $ " nodes_skipped=" $ string(NodesSkipped)
         $ " spots=" $ string(SpotPos.Length) $ " chunks=" $ string(GridChunk.Length) $ " packed_chars=" $ string(PackedChars)
         $ " frames=" $ string(Frames));
 }
