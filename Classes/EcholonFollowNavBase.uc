@@ -1440,18 +1440,28 @@ function bool FollowIsWalkableSpec(ReachSpec Spec)
     {
         return true;
     }
-    if (MapData != None && MapData.VerdictOf(Spec) == class'EcholonMapData'.const.VK_PROVEN)
-    {
-        return true;   // a survey bot of this size walked it
-    }
-    // Gaps narrower than this pawn are for zeds; treat them like special edges.
-    if (Pawn != None && Spec.CollisionRadius < Pawn.GetCollisionRadius())
+    // Gaps narrower than this pawn are for zeds; treat them like special edges. A proven link (a survey bot of this size walked it)
+    // waives only this narrow-gap rule, never the class test below: the mover cannot jump or climb.
+    if (Pawn != None && Spec.CollisionRadius < Pawn.GetCollisionRadius()
+        && !(MapData != None && MapData.VerdictOf(Spec) == class'EcholonMapData'.const.VK_PROVEN))
     {
         return false;
     }
-    return !(Spec.IsA('KFLeapReachSpec') || Spec.IsA('FloorToWallReachSpec') || Spec.IsA('WallReachSpec')
+    return !FollowIsSpecialClass(Spec);
+}
+
+// Leap, wall, mantle, ceiling, ladder and wall-transition links: the steering mover cannot follow them.
+function bool FollowIsSpecialClass(ReachSpec Spec)
+{
+    return Spec.IsA('KFLeapReachSpec') || Spec.IsA('FloorToWallReachSpec') || Spec.IsA('WallReachSpec')
         || Spec.IsA('WallToFloorReachSpec') || Spec.IsA('MantleReachSpec') || Spec.IsA('CeilingReachSpec')
-        || Spec.IsA('FloorToCeilingReachSpec') || Spec.IsA('LadderReachSpec') || Spec.IsA('WallTransReachSpec'));
+        || Spec.IsA('FloorToCeilingReachSpec') || Spec.IsA('LadderReachSpec') || Spec.IsA('WallTransReachSpec');
+}
+
+// True for a proven window or shortcut link the mover can walk (a proven leap, mantle or ladder link is still special).
+function bool FollowIsProvenWalkable(ReachSpec Spec)
+{
+    return MapData != None && Spec != None && MapData.VerdictOf(Spec) == class'EcholonMapData'.const.VK_PROVEN && !FollowIsSpecialClass(Spec);
 }
 
 // First non-walkable edge on the route FindPathToward/FindPathTo just left in RouteCache, or None.
@@ -1498,7 +1508,7 @@ function FollowScanEdgesBlock(out array<ReachSpec> OutBlocked)
     for (I = 0; I < NavScan.BadSpecs.Length; I++)
     {
         if (NavScan.BadSpecs[I] != None && NavScan.BadSpecs[I].BlockedBy == None
-            && !(MapData != None && MapData.VerdictOf(NavScan.BadSpecs[I]) == class'EcholonMapData'.const.VK_PROVEN))
+            && !FollowIsProvenWalkable(NavScan.BadSpecs[I]))
         {
             NavScan.BadSpecs[I].BlockedBy = Pawn;
             OutBlocked.AddItem(NavScan.BadSpecs[I]);
@@ -1795,7 +1805,7 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest, optional bool bLa
         for (IterIdx = 0; IterIdx < FollowSpecialSpecs.Length && !bLast; IterIdx++)
         {
             if (FollowSpecialSpecs[IterIdx] != None && FollowSpecialSpecs[IterIdx].BlockedBy == None
-                && !(MapData != None && MapData.VerdictOf(FollowSpecialSpecs[IterIdx]) == class'EcholonMapData'.const.VK_PROVEN))
+                && !FollowIsProvenWalkable(FollowSpecialSpecs[IterIdx]))
             {
                 FollowSpecialSpecs[IterIdx].BlockedBy = Pawn;
                 IterBlocked.AddItem(FollowSpecialSpecs[IterIdx]);
