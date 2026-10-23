@@ -151,6 +151,13 @@ var int CurrentLevel;
 var Class<KFPerk> Perk;
 var Class<KFWeapon> FavoriteWeapon;
 var EcholonMut mut;
+var transient vector TraceLastLoc;          // bot trace (bNavTrace): position, target and time of the last TRACE_POS line
+var transient Actor TraceLastTarget;
+var transient float TraceLastTime;
+var transient Actor TraceRouteGoal;         // the route last written as TRACE_ROUTE
+var transient int TraceRouteLen;
+var transient Actor TraceRouteFirst;
+var transient Actor TraceRouteMid;
 var KFCharacterInfo_Human CharacterArch;
 var KFPawn_Human KPawn;
 var KFPawn_Human PendingHeal;
@@ -516,6 +523,139 @@ final function GiveWeaponDef(Class<KFWeaponDefinition> W)
     }
 }
 
+// ---- Bot trace (mutator bNavTrace): one TRACE_POS line per 0.25 s per bot, TRACE_ROUTE when the route changes ----
+// Read by kit\tools\nav_viz.py to draw where each bot walked, why it oscillated and where it got stuck.
+
+// Game time as seconds with two decimals.
+final function string TraceClock()
+{
+    local int Cs;
+
+    Cs = int(WorldInfo.TimeSeconds * 100.0);
+    return string(Cs / 100) $ "." $ Right("0" $ string(Cs % 100), 2);
+}
+
+final function string TraceXYZ(vector V)
+{
+    return string(int(V.X)) $ "," $ string(int(V.Y)) $ "," $ string(int(V.Z));
+}
+
+// What the bot is steering for now: its move target, else its follow node.
+final function Actor TraceTarget()
+{
+    if (MoveTarget != None)
+    {
+        return MoveTarget;
+    }
+    return FollowNode;
+}
+
+// Logs TRACE_ROUTE (the goal and up to 32 node names) when the follow route or the cached route changed (goal, length,
+// first or middle node). The compare reads the arrays in place; nothing is copied unless a line is written.
+final function NavTraceRoute()
+{
+    local int I, Len, Shown;
+    local bool bFollow;
+    local Actor First, Mid, Goal, Node;
+    local string Names;
+
+    bFollow = (FollowRoute.Length > 0 && FollowRouteIdx < FollowRoute.Length);
+    if (bFollow)
+    {
+        Len = FollowRoute.Length;
+    }
+    else
+    {
+        Len = RouteCache.Length;
+    }
+    if (Len == 0)
+    {
+        TraceRouteLen = 0;
+        TraceRouteGoal = None;
+        TraceRouteFirst = None;
+        TraceRouteMid = None;
+        return;
+    }
+    if (bFollow)
+    {
+        First = FollowRoute[0];
+        Mid = FollowRoute[Len / 2];
+        Goal = FollowRoute[Len - 1];
+    }
+    else
+    {
+        First = RouteCache[0];
+        Mid = RouteCache[Len / 2];
+        Goal = RouteCache[Len - 1];
+    }
+    if (Goal == TraceRouteGoal && Len == TraceRouteLen && First == TraceRouteFirst && Mid == TraceRouteMid)
+    {
+        return;
+    }
+    TraceRouteGoal = Goal;
+    TraceRouteLen = Len;
+    TraceRouteFirst = First;
+    TraceRouteMid = Mid;
+    Names = "";
+    for (I = 0; I < Len && Shown < 32; I++)
+    {
+        if (bFollow)
+        {
+            Node = FollowRoute[I];
+        }
+        else
+        {
+            Node = RouteCache[I];
+        }
+        if (Node != None)
+        {
+            if (Shown > 0)
+            {
+                Names = Names $ ",";
+            }
+            Names = Names $ string(Node);
+            Shown++;
+        }
+    }
+    EchelonLog("TRACE_ROUTE t=" $ TraceClock() $ " goal=" $ string(Goal) $ " n=" $ string(Len) $ " nodes=" $ Names);
+}
+
+// 0.25 s timer (started in Restart while bNavTrace is on). A line is skipped when the bot moved under 16 uu and kept its
+// target, except one heartbeat line every 2 s.
+function NavTraceTick()
+{
+    local Actor Tgt;
+    local float Now;
+    local string TgtName, AnchorName;
+
+    if (Pawn == None || !Pawn.IsAliveAndWell() || mut == None || !mut.bNavTrace)
+    {
+        return;
+    }
+    Now = WorldInfo.TimeSeconds;
+    Tgt = TraceTarget();
+    NavTraceRoute();
+    if (VSize(Pawn.Location - TraceLastLoc) < 16.0 && Tgt == TraceLastTarget && (Now - TraceLastTime) < 2.0)
+    {
+        return;
+    }
+    TraceLastLoc = Pawn.Location;
+    TraceLastTarget = Tgt;
+    TraceLastTime = Now;
+    TgtName = "-";
+    if (Tgt != None)
+    {
+        TgtName = string(Tgt);
+    }
+    AnchorName = "-";
+    if (AssignedAnchor != None)
+    {
+        AnchorName = string(AssignedAnchor);
+    }
+    EchelonLog("TRACE_POS t=" $ TraceClock() $ " at=" $ TraceXYZ(Pawn.Location) $ " target=" $ TgtName $ " anchor=" $ AnchorName
+        $ " state=" $ string(GetStateName()) $ " speed=" $ string(int(VSize(Pawn.Velocity))));
+}
+
 function Restart(bool bVehicleTransition)
 {
     local KFPlayerReplicationInfo KFPRI;
@@ -558,6 +698,18 @@ function Restart(bool bVehicleTransition)
     SetTimer(0.2 + (FRand() * 0.1), true, 'CheckGrabbed');
     SetTimer(SPRINT_TICK_INTERVAL + (FRand() * 0.05), true, 'SprintTick');
     SetTimer(0.25 + (FRand() * 0.05), true, 'HeadlessAvoidTick');
+    if (mut != None && mut.bNavTrace)
+    {
+        TraceLastLoc = Pawn.Location;
+        TraceLastTarget = None;
+        TraceLastTime = -10.0;
+        TraceRouteLen = 0;
+        TraceRouteMid = None;
+        TraceRouteGoal = None;
+        TraceRouteFirst = None;
+        SetTimer(0.25, true, 'NavTraceTick');
+        EchelonLog("TRACE_SPAWN t=" $ TraceClock() $ " at=" $ TraceXYZ(Pawn.Location));
+    }
     KFInvManager = KFInventoryManager(Pawn.InvManager);
 
     if (KFInvManager != None)
@@ -2730,6 +2882,10 @@ function bool AuditRateLimit(string Msg)
 	if (Left(Msg, 4) ~= "HUB_")
 	{
 		return true;  // hub audit lines are never throttled; hub_audit.py needs every one
+	}
+	if (Left(Msg, 6) ~= "TRACE_")
+	{
+		return true;  // bot trace lines (bNavTrace) keep their own 0.25 s pacing
 	}
 	if (Left(Msg, 10) ~= "NAV_ACCEL_")
 	{

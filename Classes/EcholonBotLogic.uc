@@ -799,6 +799,10 @@ function PawnDied(Pawn inPawn)
         return;
     }
 
+    if (mut != None && mut.bNavTrace && Pawn != None)
+    {
+        EchelonLog("TRACE_DEATH t=" $ TraceClock() $ " at=" $ TraceXYZ(Pawn.Location));
+    }
     ActivatePlayerDiedSequenceEvents();
     TriggerEventClass(Class'Engine.SeqEvent_Death', self);
 
