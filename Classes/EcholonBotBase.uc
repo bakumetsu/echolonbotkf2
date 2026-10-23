@@ -1867,14 +1867,14 @@ final function bool NavSpotRoomy(vector Spot)
     return IterS != class'EcholonNavGrid'.const.SV_CLEAR || IterD >= 1;
 }
 
-// A Grunt's spot (formation slot, point near the leader, overwatch target) as a spot this bot can walk to: Spot itself when the engine says it is
-// reachable (and the survey grid says it has room), else the nearest path node within 300 uu of it that is; Fallback (the leader's position)
-// when there is none. The answer is kept for 2 s while the spot moves less than 100 uu, so this is not a search every tick.
+// A Grunt's spot (formation slot, point near the leader, overwatch target) as a spot with room: Spot itself when the survey grid gives it room
+// (not a wall, a drop edge or a tile touching a wall) or says nothing, else the nearest path node within 300 uu that has room, else Fallback
+// (the leader's position). Only the survey grid decides: a direct-reach test said no to most spots behind a corner, which a route (not a snap)
+// handles. Without survey data (switch off) the spot is returned as it is. The answer is kept 2 s per bot while the spot moves less than 100 uu.
 final function vector NavSnapSpot(vector Spot, vector Fallback)
 {
     local NavigationPoint IterN;
     local float IterD, IterBest, IterNow;
-    local int IterChecked;
     local bool bFound;
     local vector IterOut;
 
@@ -1886,11 +1886,7 @@ final function vector NavSnapSpot(vector Spot, vector Fallback)
     NavSnapIn = Spot;
     NavSnapUntil = IterNow + 2.0;
     NavSnapOut = Spot;
-    if (Pawn == None || !NavAllowReach())
-    {
-        return Spot;
-    }
-    if (NavSpotRoomy(Spot) && WalkPointReachable(Spot))
+    if (NavSpotRoomy(Spot))
     {
         return Spot;
     }
@@ -1902,16 +1898,7 @@ final function vector NavSnapSpot(vector Spot, vector Fallback)
             continue;
         }
         IterD = VSize(IterN.Location - Spot);
-        if (IterD >= IterBest)
-        {
-            continue;
-        }
-        IterChecked++;
-        if (IterChecked > 6)
-        {
-            break;
-        }
-        if (WalkReachable(IterN))
+        if (IterD < IterBest)
         {
             IterBest = IterD;
             IterOut = IterN.Location;
