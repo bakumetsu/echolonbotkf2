@@ -498,7 +498,7 @@ function SurveyGridReport()
         $ " max_per_frame=" $ string(NavGrid.SMaxFrame) $ " tiles=" $ string(NavGrid.SUnpacked * 256) $ " queued=" $ string(NavGrid.SQueue.Length)
         $ " line_clear=" $ string(MapData.LcClear) $ " line_no_too_high=" $ string(MapData.LcTooHigh) $ " too_long=" $ string(MapData.LcTooLong)
         $ " unknown=" $ string(MapData.LcUnknown) $ " nofloor=" $ string(MapData.LcNoFloor) $ " hidden=" $ string(MapData.LcHidden)
-        $ " edge=" $ string(MapData.LcEdge) $ " dist0=" $ string(MapData.LcDist0));
+        $ " edge=" $ string(MapData.LcEdge) $ " dist0=" $ string(MapData.LcDist0) $ " door=" $ string(MapData.LcDoor));
     NavGrid.SUnpackedWindow = 0;
     NavGrid.SMaxFrame = 0;
 }

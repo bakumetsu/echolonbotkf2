@@ -41,6 +41,9 @@ var config array<string> GridChunk;        // "cx,cy,lvl,packed"
 // state
 var EcholonMut Mut;
 var EcholonNavGrid Grid;                // receives the packed chunks (the lava grid object of the mutator)
+var int TroubleCount;                   // links with the trouble verdict (the first relax step lets them back in)
+var array<KFDoorActor> Doors;           // every door on the map: a clear grid line near a closed one still gets a real trace
+var int LcDoor;
 var int LcClear;                        // NavSurveyLineClear answers: clear, or why not (for NAV_GRID_UNPACK)
 var int LcTooHigh;
 var int LcTooLong;
@@ -120,6 +123,7 @@ static final function string SectionKey(string MapName)
 final function Begin(EcholonMut M)
 {
     local NavigationPoint N;
+    local KFDoorActor IterDoor;
     local int I;
 
     Mut = M;
@@ -129,6 +133,11 @@ final function Begin(EcholonMut M)
     LiveSum = 0;
     NodeRefs.Length = 0;
     NodeNames.Length = 0;
+    Doors.Length = 0;
+    foreach M.WorldInfo.AllActors(class'KFDoorActor', IterDoor)
+    {
+        Doors.AddItem(IterDoor);
+    }
     foreach M.WorldInfo.AllActors(class'NavigationPoint', N)
     {
         NodeRefs.AddItem(N);
@@ -251,6 +260,10 @@ final function bool Step()
             VSpec.AddItem(S);
             VKind.AddItem(K);
             LinksUsed++;
+            if (K == VK_TROUBLE)
+            {
+                TroubleCount++;
+            }
         }
         if (Idx >= LinkV.Length)
         {
