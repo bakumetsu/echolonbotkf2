@@ -38,6 +38,10 @@ With the local kit, run `python kit\tools\playtest_runner.py --map KF-BioticsLab
 
 Add `?Survey=1` to the map URL and the match becomes a map survey: no zeds, a few survey bots (`?SurveyBots=N`, default 4) feel the map blind and record a tile grid, and the game ends after `?SurveyMinutes=N` minutes (default 60) or when nothing is left to explore. The grid is written to the log as `GRID_ROW` lines. The ini key `bNavTrace` (default off) logs the map's path nodes and links (`NAVDUMP_` lines) and each bot's position and route every 0.25 s (`TRACE_` lines). When the walking survey stalls, pass 2 tries the designer's links that it did not walk (jumps, drops, windows, narrow doorways) and logs each success as a link (`?SurveyPass2=0` turns it off, `mutate SurveyPass2` starts it now). With both off, none of this code runs. The viewer that draws the log lives in the local-only kit (`kit/tools/nav_viz.py`, see `kit/README.md`), not in GitHub. Details are in `docs/ARCHITECTURE.md` ("Survey mode, node dump and bot trace").
 
+## Survey-based nav
+
+`?SurveyNav=1` (or the ini key `bSurveyNav`, default off; `?SurveyNav=0` forces it off) makes the bots use a finished survey: bad links stay out of their routes and the survey grid saves traces. The data comes from `KFEcholonMapData.ini` (class `EcholonMapData`, one section per map), which the local kit writes from survey logs. Without data for the map nothing changes. Details are in `docs/ARCHITECTURE.md` ("Survey-based nav").
+
 ## Docs before every push
 
 Every push that changes `Classes/` also updates the docs (`docs/ARCHITECTURE.md` or this README). If a change needs no doc update, add a line `Docs: none (<reason>)` to the last commit message.
