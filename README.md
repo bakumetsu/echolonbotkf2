@@ -5,7 +5,7 @@ A ground-up rewrite of the KF2Bots single-player bot mod for Killing Floor 2 (UE
 ## Layout
 
 ```
-Classes/              the mod's UnrealScript source (16 classes)
+Classes/              the mod's UnrealScript source (19 classes)
 avatars/              bot avatar server and the KF2-Avatars launcher source (see avatars/README.md)
 docs/ARCHITECTURE.md  class chain, milestone plan, every class's symbols, single-writer rules
 ```
@@ -33,6 +33,10 @@ Add `?Playtest=1` to the map URL and the human becomes a spectator who watches t
 Spectator camera: left/right click is the previous/next bot, Space toggles free fly (WASD and mouse), middle click cycles third person, first person and orbit, and the mouse wheel zooms in third person and orbit. The camera only changes bot when the watched bot dies or on a click. `EcholonSpectatorPC` is now the player controller in every game, so a human who dies in normal play gets the same camera; a living player is unchanged. Known limitations are listed in `docs/ARCHITECTURE.md` under "Known limitations and open items".
 
 With the local kit, run `python kit\tools\playtest_runner.py --map KF-BioticsLab --waves 2 --matches 2 --bots 6`. The runner adds `?SkipTrader=1` by default (`--no-skip-trader` turns it off); `--remote-shop` adds `?RemoteShop=1`.
+
+## Map survey and bot trace
+
+Add `?Survey=1` to the map URL and the match becomes a map survey: no zeds, a few survey bots (`?SurveyBots=N`, default 4) feel the map blind and record a tile grid, and the game ends after `?SurveyMinutes=N` minutes (default 60) or when nothing is left to explore. The grid is written to the log as `GRID_ROW` lines. The ini key `bNavTrace` (default off) logs the map's path nodes and links (`NAVDUMP_` lines) and each bot's position and route every 0.25 s (`TRACE_` lines). With both off, none of this code runs. The viewer that draws the log lives in the local-only kit (`kit/tools/nav_viz.py`, see `kit/README.md`), not in GitHub. Details are in `docs/ARCHITECTURE.md` ("Survey mode, node dump and bot trace").
 
 ## Docs before every push
 
