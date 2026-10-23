@@ -507,8 +507,7 @@ A simple fallback loop in one `Begin` label: leaves for `FollowExitState` if req
 
 ### Survey-based nav (`EcholonMapData`, off by default)
 
-`EcholonMapData` is a per-object config class (`KFEcholonMapData.ini`, one section per map) written by the kit (`python kit	ools
-av_viz.py --export-mapdata <map> [logs]`). It holds the survey's link verdicts and packed grid chunks. It is read only when `bSurveyNav` is set in the `EcholonMut` config or the URL has `?SurveyNav=1` (`?SurveyNav=0` forces it off); otherwise none of it runs.
+`EcholonMapData` is a per-object config class (`KFEcholonMapData.ini`, one section per map) written by the kit (`python kit\tools\nav_viz.py --export-mapdata <map> [logs]`). It holds the survey's link verdicts and packed grid chunks. It is read only when `bSurveyNav` is set in the `EcholonMut` config or the URL has `?SurveyNav=1` (`?SurveyNav=0` forces it off); otherwise none of it runs. The grid half (lazy chunk unpack, grid steering, grid-first corner check) has its own switch, `bSurveyNavGrid` / `?SurveyNavGrid=1` (off by default), so route blocking can be judged alone. When a route search fails with the survey on, one relax step lets every kind back in except `hurt_drop` (`NAV_SURVEY_RELAX step=all_but_hurt_drop`). `NAV_MAPDATA_SELFTEST` checks at load that 50 verdict-free nodes land on standable survey tiles, and `NAV_GRID_UNPACK` also counts why the grid could not answer a corner check.
 
 - Load: `NAV_MAPDATA_LOAD` (section found), `NAV_MAPDATA_UNIT` (per unit), `NAV_MAPDATA_MISMATCH` (data does not fit the loaded map, ignored), `NAV_SURVEY_SUMMARY`.
 - Routes: `EcholonFollowNavBase` blocks links with the verdicts `bad_wall`, `bad_hidden`, `hurt_drop` and `trouble` in the route search; if no route is found it relaxes step by step and logs `NAV_SURVEY_RELAX`. A narrow link is taken single file (`NAV_NARROW_WAIT`).

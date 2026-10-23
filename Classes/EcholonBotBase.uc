@@ -1736,10 +1736,14 @@ final function NavProgressCheck()
             }
             bAdjusting = true;
             AdjustPosition.Position = Pawn.Location + (Normal(IterDir) * 64.0);
-            EchelonLog("NAV_STUCK level=1 state=" $ string(GetStateName()) $ " stalled=" $ string(NavStall));
+            EchelonLog("NAV_STUCK level=1 state=" $ string(GetStateName()) $ " stalled=" $ string(NavStall) $ " rank=" $ string(int(BotRank)));
             if (mut != None)
             {
                 mut.NavStuckCount++;
+                if (BotRank == GRUNT)
+                {
+                    mut.NavStuckGrunt++;
+                }
             }
         }
     }

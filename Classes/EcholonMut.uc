@@ -133,8 +133,11 @@ var() config float ZoneWideDist;              // widened band when the first one
 var() config float ZoneMergeDist;             // a pod this close to a Dosh Hold zone merges into it
 var transient EcholonNavGrid NavGrid;         // shared floor-is-lava tile table (N10)
 var() config bool bSurveyNav;                 // use the survey map data (KFEcholonMapData.ini) for routes and steering; opt-in until the playtest passes. ?SurveyNav=1/0 overrides for one match
+var() config bool bSurveyNavGrid;             // the grid half of the survey nav (lazy chunks, grid steering, grid-first corner check); needs bSurveyNav. ?SurveyNavGrid=1/0 overrides
+var transient bool bSurveyNavGridNow;
 var transient bool bSurveyNavNow;             // bSurveyNav after the ?SurveyNav= option
 var transient int SurveyUnpacked;             // chunks unpacked this frame
+var transient int NavStuckGrunt;              // of those, stucks of GRUNT-rank bots (rank=0 in NAV_STUCK)
 var transient int NavStuckCount;              // NAV_STUCK level 1 events this match (NAV_SURVEY_SUMMARY)
 var transient EcholonMapData MapData;         // this map's survey data from KFEcholonMapData.ini (None when the switch is off)
 var() config int NavGridSquads;               // 0 = lava grid for every squad, N = only squad N (1 = first), -1 = off
@@ -485,12 +488,15 @@ function SurveyPrefetch()
 // NAV_GRID_UNPACK every 30 s.
 function SurveyGridReport()
 {
-    if (NavGrid == None || !NavGrid.bSurveyReady)
+    if (NavGrid == None || !NavGrid.bSurveyReady || MapData == None)
     {
         return;
     }
     EchelonLog("NAV_GRID_UNPACK unpacked=" $ string(NavGrid.SUnpacked) $ "/" $ string(NavGrid.SKeys.Length) $ " window=" $ string(NavGrid.SUnpackedWindow)
-        $ " max_per_frame=" $ string(NavGrid.SMaxFrame) $ " tiles=" $ string(NavGrid.SUnpacked * 256) $ " queued=" $ string(NavGrid.SQueue.Length));
+        $ " max_per_frame=" $ string(NavGrid.SMaxFrame) $ " tiles=" $ string(NavGrid.SUnpacked * 256) $ " queued=" $ string(NavGrid.SQueue.Length)
+        $ " line_clear=" $ string(MapData.LcClear) $ " line_no_too_high=" $ string(MapData.LcTooHigh) $ " too_long=" $ string(MapData.LcTooLong)
+        $ " unknown=" $ string(MapData.LcUnknown) $ " nofloor=" $ string(MapData.LcNoFloor) $ " hidden=" $ string(MapData.LcHidden)
+        $ " edge=" $ string(MapData.LcEdge) $ " dist0=" $ string(MapData.LcDist0));
     NavGrid.SUnpackedWindow = 0;
     NavGrid.SMaxFrame = 0;
 }
@@ -518,7 +524,7 @@ function SurveyNavSummary()
     {
         Unpacked = NavGrid.SUnpacked;
     }
-    EchelonLog("NAV_SURVEY_SUMMARY map=" $ WorldInfo.GetMapName() $ " survey_nav=" $ string(On) $ " stucks=" $ string(NavStuckCount) $ " relaxes=" $ string(Relax)
+    EchelonLog("NAV_SURVEY_SUMMARY map=" $ WorldInfo.GetMapName() $ " survey_nav=" $ string(On) $ " stucks=" $ string(NavStuckCount) $ " stucks_grunt=" $ string(NavStuckGrunt) $ " relaxes=" $ string(Relax)
         $ " chunks_unpacked=" $ string(Unpacked) $ " minutes=" $ string(int(WorldInfo.TimeSeconds / 60.0)) $ " " $ TotalsText);
 }
 
@@ -1015,6 +1021,11 @@ function InitMutator(string Options, out string ErrorMessage)
     if (class'GameInfo'.static.HasOption(Options, "SurveyNav"))
     {
         bSurveyNavNow = class'GameInfo'.static.GetIntOption(Options, "SurveyNav", 0) != 0;
+    }
+    bSurveyNavGridNow = bSurveyNavGrid;
+    if (class'GameInfo'.static.HasOption(Options, "SurveyNavGrid"))
+    {
+        bSurveyNavGridNow = class'GameInfo'.static.GetIntOption(Options, "SurveyNavGrid", 0) != 0;
     }
     bSurvey = class'GameInfo'.static.ParseOption(Options, "Survey") ~= "1";
     if (bSurvey)

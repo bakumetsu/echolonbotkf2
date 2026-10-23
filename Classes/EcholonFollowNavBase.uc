@@ -651,11 +651,13 @@ function bool NavSurveyLineClear(vector From, vector To)
     }
     if (Abs(To.Z - From.Z) > 60.0)
     {
+        MapData.LcTooHigh++;
         return false;
     }
     N = int(VSize2D(To - From) / 19.0);
     if (N > 40)
     {
+        MapData.LcTooLong++;
         return false;
     }
     N = Max(N, 1);
@@ -670,9 +672,20 @@ function bool NavSurveyLineClear(vector From, vector To)
             {
                 NavMeter.CountGrid(I + 1);
             }
+            if (S == class'EcholonNavGrid'.const.SV_UNKNOWN)
+                MapData.LcUnknown++;
+            else if (S == class'EcholonNavGrid'.const.SV_NOFLOOR)
+                MapData.LcNoFloor++;
+            else if (S == class'EcholonNavGrid'.const.SV_HIDDEN)
+                MapData.LcHidden++;
+            else if (S == class'EcholonNavGrid'.const.SV_EDGE)
+                MapData.LcEdge++;
+            else
+                MapData.LcDist0++;
             return false;
         }
     }
+    MapData.LcClear++;
     if (NavMeter != None)
     {
         NavMeter.CountGrid(N + 1);
@@ -692,7 +705,7 @@ function vector NavGridSteer(vector WantDir, optional float WantDist)
     local int I, C, MaxTiles;
     local float Deg, Rad, CosA, SinA;
     local int Angles[4];
-    local bool bSurveyOn;
+    local bool bSurveyOn, bEvalNow;
 
     Now = WorldInfo.TimeSeconds;
 
@@ -701,6 +714,7 @@ function vector NavGridSteer(vector WantDir, optional float WantDist)
         return WantDir;
     }
     bSurveyOn = (MapData != None && MapData.bUsable && NavGrid.bSurveyReady);
+    bEvalNow = (Now < NavGridArmedUntil);   // live traces only while a stall armed the grid; otherwise survey answers only
     if (Now < NavGridOffUntil || (Now >= NavGridArmedUntil && !bSurveyOn))
     {
         return WantDir;
@@ -728,7 +742,7 @@ function vector NavGridSteer(vector WantDir, optional float WantDist)
     }
 
     // Open space: wanted direction is clear up to the target (or 6 tiles), grid sleeps.
-    C0 = float(NavGridRayClear(WantDir, RefZ, Now, MaxTiles, true));
+    C0 = float(NavGridRayClear(WantDir, RefZ, Now, MaxTiles, bEvalNow));
     if (C0 >= float(Min(6, MaxTiles)))
     {
         NavGridKeepUntil = 0.0;
@@ -755,7 +769,7 @@ function vector NavGridSteer(vector WantDir, optional float WantDist)
         H.X = WantDir.X * CosA - WantDir.Y * SinA;
         H.Y = WantDir.X * SinA + WantDir.Y * CosA;
         H.Z = 0.0;
-        C = NavGridRayClear(H, RefZ, Now, MaxTiles, true);
+        C = NavGridRayClear(H, RefZ, Now, MaxTiles, bEvalNow);
         R.X = 10.0 * float(C) - Abs(Deg) * 0.3;
         if (bSurveyOn)
         {
@@ -1402,7 +1416,7 @@ function ReachSpec FollowFindSpecialEdge()
         if (IterPrev != None && IterPrev != IterNav)
         {
             IterSpec = IterPrev.GetReachSpecTo(IterNav);
-            if (!FollowIsWalkableSpec(IterSpec))
+            if (!FollowIsWalkableSpec(IterSpec) && !(MapData != None && MapData.VerdictOf(IterSpec) == class'EcholonMapData'.const.VK_SAFE_DROP))
             {
                 return IterSpec;
             }
@@ -1694,9 +1708,9 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
         {
             if (IterStrict && MapData != None && MapData.bUsable && MapData.bDone && IterSurveyLevel < 3)
             {
-                IterSurveyLevel++;
+                IterSurveyLevel = 3;   // one extra search: every kind back in except hurt_drop (a failing goal used to cost 3 extra)
                 MapData.RelaxCount++;
-                EchelonLog("NAV_SURVEY_RELAX step=" $ FollowSurveyStepName(IterSurveyLevel) $ " goal=" $ string(Goal));
+                EchelonLog("NAV_SURVEY_RELAX step=all_but_hurt_drop goal=" $ string(Goal));
                 IterPass--;
                 continue;
             }

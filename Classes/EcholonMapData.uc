@@ -18,8 +18,10 @@ const VK_HURT_DROP = 5;
 const VK_TROUBLE = 6;                   // passes within 76 uu of a trouble spot: starts the match with one strike
 const NV_WALL = 1;
 const NV_UNREACHED = 2;
-const PER_FRAME = 40;                   // verdict entries resolved per frame
+const PER_FRAME = 10;                   // verdict entries resolved per frame (NodeByName is a linear string search)
 const SUM_MOD = 16777213;               // same checksum as EcholonNavDump
+const SELFTEST_NODES = 50;              // verdict-free nodes checked against the survey grid at load
+const SELFTEST_PER_FRAME = 5;
 
 // file contents (header, verdict lists, packed chunks)
 var config string Map;
@@ -39,6 +41,23 @@ var config array<string> GridChunk;        // "cx,cy,lvl,packed"
 // state
 var EcholonMut Mut;
 var EcholonNavGrid Grid;                // receives the packed chunks (the lava grid object of the mutator)
+var int LcClear;                        // NavSurveyLineClear answers: clear, or why not (for NAV_GRID_UNPACK)
+var int LcTooHigh;
+var int LcTooLong;
+var int LcUnknown;
+var int LcNoFloor;
+var int LcHidden;
+var int LcEdge;
+var int LcDist0;
+var array<NavigationPoint> SelfNodes;   // self-test sample
+var int SelfIdx;
+var int SelfOk;
+var int SelfClear;
+var int SelfEdge;
+var int SelfHidden;
+var int SelfNoFloor;
+var int SelfUnknown;
+var bool bSelfDone;
 var int RelaxCount;                     // route searches that had to relax a survey step (for NAV_SURVEY_SUMMARY)
 var bool bFound;                        // the section exists in the ini
 var bool bChecked;                      // header compared with the live map
@@ -304,7 +323,7 @@ final function bool Step()
             }
         }
     }
-    else
+    else if (Phase == 3)
     {
         while (Idx < GridChunk.Length && Items < PER_FRAME)
         {
@@ -322,13 +341,80 @@ final function bool Step()
         {
             if (Grid != None)
             {
-                Grid.bSurveyReady = true;
+                Grid.bSurveyLoaded = true;
+                Grid.bSurveyReady = Mut.bSurveyNavGridNow;
             }
-            bDone = true;
+            Phase = 4;
+            Idx = 0;
+            PickSelfTest();
             Report();
         }
     }
+    else
+    {
+        SelfTestStep();
+        if (bSelfDone)
+        {
+            bDone = true;
+        }
+    }
     return bDone;
+}
+
+// Take up to SELFTEST_NODES nodes that have no node verdict, spread over the node list.
+final function PickSelfTest()
+{
+    local int I, Step;
+
+    SelfNodes.Length = 0;
+    SelfIdx = 0;
+    if (Grid == None || NodeRefs.Length == 0)
+    {
+        bSelfDone = true;
+        return;
+    }
+    Step = Max(1, NodeRefs.Length / SELFTEST_NODES);
+    for (I = 0; I < NodeRefs.Length && SelfNodes.Length < SELFTEST_NODES; I += Step)
+    {
+        if (NodeRefs[I] != None && VNode.Find(NodeRefs[I]) < 0)
+        {
+            SelfNodes.AddItem(NodeRefs[I]);
+        }
+    }
+}
+
+// Check a few nodes per frame: the floor tile under a verdict-free node should be standable on the survey grid. A low hit rate
+// means the kit and the mod disagree about the packing (row order, negative chunk coordinates or the level rule).
+final function SelfTestStep()
+{
+    local int N, S, D;
+    local NavigationPoint Nd;
+
+    N = 0;
+    while (SelfIdx < SelfNodes.Length && N < SELFTEST_PER_FRAME)
+    {
+        Nd = SelfNodes[SelfIdx];
+        SelfIdx++;
+        N++;
+        S = Grid.SurveyTileForce(Grid.TileOf(Nd.Location.X), Grid.TileOf(Nd.Location.Y), Nd.Location.Z - 45.0, D);
+        if (S == class'EcholonNavGrid'.const.SV_CLEAR)
+            SelfClear++;
+        else if (S == class'EcholonNavGrid'.const.SV_EDGE)
+            SelfEdge++;
+        else if (S == class'EcholonNavGrid'.const.SV_HIDDEN)
+            SelfHidden++;
+        else if (S == class'EcholonNavGrid'.const.SV_NOFLOOR)
+            SelfNoFloor++;
+        else
+            SelfUnknown++;
+    }
+    if (SelfIdx >= SelfNodes.Length)
+    {
+        SelfOk = SelfClear + SelfEdge + SelfHidden;
+        bSelfDone = true;
+        Mut.EchelonLog("NAV_MAPDATA_SELFTEST ok=" $ string(SelfOk) $ "/" $ string(SelfNodes.Length) $ " clear=" $ string(SelfClear) $ " edge=" $ string(SelfEdge)
+            $ " hidden=" $ string(SelfHidden) $ " nofloor=" $ string(SelfNoFloor) $ " unknown=" $ string(SelfUnknown));
+    }
 }
 
 // NAV_MAPDATA_LOAD: one line per match.

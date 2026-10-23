@@ -50,7 +50,8 @@ var int SLevelH;
 var int SUnpacked;
 var int SUnpackedWindow;
 var int SMaxFrame;
-var bool bSurveyReady;
+var bool bSurveyReady;     // the grid half is switched on (bSurveyNavGrid) and the chunks are registered
+var bool bSurveyLoaded;    // the chunks are registered (the self-test reads them even with the switch off)
 
 static final function int ChunkKey(int CX, int CY, int Lvl)
 {
@@ -71,6 +72,7 @@ final function SurveyPrepare(int Chunks, int LevelH)
     SUnpackedWindow = 0;
     SMaxFrame = 0;
     bSurveyReady = false;
+    bSurveyLoaded = false;
 }
 
 final function SurveyAddChunk(int CX, int CY, int Lvl, string Packed)
@@ -177,7 +179,7 @@ final function SurveyPrefetch(vector Loc)
 {
     local int CX, CY, L0, DX, DY, DL, Idx;
 
-    if (!bSurveyReady || SLevelH <= 0)
+    if (!bSurveyLoaded || SLevelH <= 0)
     {
         return;
     }
@@ -200,19 +202,14 @@ final function SurveyPrefetch(vector Loc)
     }
 }
 
-// What the survey says about tile (TX, TY) at floor height RefZ; Dist gets the wall distance (0..7) for SV_CLEAR.
-final function int SurveyTile(int TX, int TY, float RefZ, out int Dist)
+// What the survey says about tile (TX, TY) on floor level Lvl; Dist gets the wall distance (0..7) for SV_CLEAR.
+final function int SurveyTileAt(int TX, int TY, int Lvl, out int Dist)
 {
-    local int CX, CY, Lvl, Idx, V;
+    local int CX, CY, Idx, V;
 
     Dist = 0;
-    if (!bSurveyReady || SLevelH <= 0)
-    {
-        return SV_UNKNOWN;
-    }
     CX = FFloor(float(TX) / 16.0);
     CY = FFloor(float(TY) / 16.0);
-    Lvl = Round(RefZ / float(SLevelH));
     Idx = SKeys.Find(ChunkKey(CX, CY, Lvl));
     if (Idx < 0)
     {
@@ -239,6 +236,62 @@ final function int SurveyTile(int TX, int TY, float RefZ, out int Dist)
         return SV_EDGE;
     }
     return SV_CLEAR;
+}
+
+// What the survey says about tile (TX, TY) at floor height RefZ. The level is Round(RefZ / LevelH); when that level has no
+// standable tile there, the level on the other side of RefZ is tried (the survey itself assigns levels with a +-1 search).
+final function int SurveyTile(int TX, int TY, float RefZ, out int Dist)
+{
+    local int Lvl, Alt, R, R2, D2;
+    local float Frac;
+
+    Dist = 0;
+    if (!bSurveyLoaded || SLevelH <= 0)
+    {
+        return SV_UNKNOWN;
+    }
+    Frac = RefZ / float(SLevelH);
+    Lvl = Round(Frac);
+    R = SurveyTileAt(TX, TY, Lvl, Dist);
+    if (R == SV_CLEAR || R == SV_EDGE || R == SV_HIDDEN)
+    {
+        return R;
+    }
+    if (Frac > float(Lvl))
+        Alt = Lvl + 1;
+    else
+        Alt = Lvl - 1;
+    R2 = SurveyTileAt(TX, TY, Alt, D2);
+    if (R2 == SV_CLEAR || R2 == SV_EDGE || R2 == SV_HIDDEN)
+    {
+        Dist = D2;
+        return R2;
+    }
+    return R;
+}
+
+// Like SurveyTile but unpacks the chunks of both levels on the spot (the load-time self-test).
+final function int SurveyTileForce(int TX, int TY, float RefZ, out int Dist)
+{
+    local int CX, CY, Lvl, DL, Idx;
+
+    Dist = 0;
+    if (SLevelH <= 0)
+    {
+        return SV_UNKNOWN;
+    }
+    CX = FFloor(float(TX) / 16.0);
+    CY = FFloor(float(TY) / 16.0);
+    Lvl = Round(RefZ / float(SLevelH));
+    for (DL = -1; DL <= 1; DL++)
+    {
+        Idx = SKeys.Find(ChunkKey(CX, CY, Lvl + DL));
+        if (Idx >= 0 && SReady[Idx] == 0)
+        {
+            UnpackChunk(Idx);
+        }
+    }
+    return SurveyTile(TX, TY, RefZ, Dist);
 }
 
 // A tile inside the first chunk (for the unit-cost benchmark): fills its tile coordinates and floor height; false when there is no chunk.
