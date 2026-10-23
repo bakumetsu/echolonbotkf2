@@ -100,6 +100,9 @@ var float FollowWaitTime;
 var EFollowStatus FollowStatus;
 var EcholonNavMeter NavMeter;      // shared nav cost counter, set by EcholonMut.RegisterBot
 var EcholonNavBudget NavBudget;    // shared per-frame nav budget, set by EcholonMut.RegisterBot
+var EcholonMapData MapData;       // survey data of this map (None when bSurveyNav is off), set by EcholonMut
+var float FollowNarrowSince;      // when this bot began waiting for a squadmate to clear a narrow link (0 = not waiting)
+var float FollowNarrowQuietUntil; // no narrow wait before this time (after a wait that timed out)
 var EcholonNavScan NavScan;        // start-of-match link scan result (bad links), set by EcholonMut.RegisterBot
 var EcholonNavGrid NavGrid;           // shared tile table, set by EcholonMut.RegisterBot
 var bool bNavGridOn;                  // true while the grid steers this bot (set by the owner class)
@@ -1295,6 +1298,173 @@ function FollowScanEdgesBlock(out array<ReachSpec> OutBlocked)
     }
 }
 
+// Blocks, for one search, the links the survey marked bad. Level 0 blocks all of them; each relax step lets one kind back in:
+// 1 trouble-spot strikes, 2 bad_hidden, 3 bad_wall. hurt_drop is never relaxed. narrow and safe_drop links are not blocked.
+function FollowSurveyEdgesBlock(int Level, out array<ReachSpec> OutBlocked)
+{
+    local int I, K, Used;
+
+    if (MapData == None || !MapData.bUsable || !MapData.bDone || Pawn == None)
+    {
+        return;
+    }
+    Used = 0;
+    for (I = 0; I < MapData.VSpec.Length; I++)
+    {
+        K = MapData.VKind[I];
+        if (K == class'EcholonMapData'.const.VK_NARROW || K == class'EcholonMapData'.const.VK_SAFE_DROP)
+        {
+            continue;
+        }
+        if (K == class'EcholonMapData'.const.VK_TROUBLE && Level >= 1)
+        {
+            continue;
+        }
+        if (K == class'EcholonMapData'.const.VK_BAD_HIDDEN && Level >= 2)
+        {
+            continue;
+        }
+        if (K == class'EcholonMapData'.const.VK_BAD_WALL && Level >= 3)
+        {
+            continue;
+        }
+        if (MapData.VSpec[I] != None && MapData.VSpec[I].BlockedBy == None)
+        {
+            MapData.VSpec[I].BlockedBy = Pawn;
+            OutBlocked.AddItem(MapData.VSpec[I]);
+            Used++;
+        }
+    }
+    if (NavMeter != None)
+    {
+        NavMeter.CountSurvey(Used);
+    }
+}
+
+// True while the next route link is one the survey marked narrow (a one-person doorway) and another squadmate stands on it:
+// the bot waits so followers pass in single file. A wait ends after 3 s (a squadmate parked in the doorway must not stall the squad)
+// and the bot then walks on without waiting for 5 s.
+function bool FollowNarrowBusy()
+{
+    local NavigationPoint IterPrev, IterNext;
+    local ReachSpec IterSpec;
+    local KFPawn_Human IterP;
+    local vector IterA, IterB, IterSeg, IterRel;
+    local float IterSegLenSq, IterT, IterNow;
+
+    IterNow = WorldInfo.TimeSeconds;
+    if (MapData == None || !MapData.bUsable || !MapData.bDone || Pawn == None || FollowRouteIdx >= FollowRoute.Length
+        || IterNow < FollowNarrowQuietUntil)
+    {
+        FollowNarrowSince = 0.0;
+        return false;
+    }
+    IterNext = NavigationPoint(FollowRoute[FollowRouteIdx]);
+    if (FollowRouteIdx > 0)
+    {
+        IterPrev = NavigationPoint(FollowRoute[FollowRouteIdx - 1]);
+    }
+    else
+    {
+        IterPrev = Pawn.Anchor;
+    }
+    if (IterNext == None || IterPrev == None || IterPrev == IterNext)
+    {
+        FollowNarrowSince = 0.0;
+        return false;
+    }
+    IterSpec = IterPrev.GetReachSpecTo(IterNext);
+    if (MapData.VerdictOf(IterSpec) != class'EcholonMapData'.const.VK_NARROW)
+    {
+        FollowNarrowSince = 0.0;
+        return false;
+    }
+    IterA = IterPrev.Location;
+    IterB = IterNext.Location;
+    IterSeg = IterB - IterA;
+    IterSegLenSq = VSizeSq(IterSeg);
+    if (IterSegLenSq < 1.0)
+    {
+        FollowNarrowSince = 0.0;
+        return false;
+    }
+    foreach WorldInfo.AllPawns(class'KFPawn_Human', IterP, (IterA + IterB) * 0.5, Sqrt(IterSegLenSq) * 0.5 + 60.0)
+    {
+        if (IterP == Pawn || IterP.Health <= 0)
+        {
+            continue;
+        }
+        IterRel = IterP.Location - IterA;
+        IterT = FClamp((IterRel dot IterSeg) / IterSegLenSq, 0.0, 1.0);
+        if (VSizeSq(IterA + IterSeg * IterT - IterP.Location) < 3600.0)
+        {
+            if (FollowNarrowSince <= 0.0)
+            {
+                FollowNarrowSince = IterNow;
+                EchelonLog("NAV_NARROW_WAIT from=" $ string(IterPrev) $ " to=" $ string(IterNext) $ " other=" $ string(IterP));
+            }
+            if (IterNow - FollowNarrowSince > 3.0)
+            {
+                FollowNarrowSince = 0.0;
+                FollowNarrowQuietUntil = IterNow + 5.0;
+                EchelonLog("NAV_NARROW_WAIT_END from=" $ string(IterPrev) $ " to=" $ string(IterNext) $ " reason=timeout");
+                return false;
+            }
+            return true;
+        }
+    }
+    FollowNarrowSince = 0.0;
+    return false;
+}
+
+// One-time (NAV_MAPDATA_UNIT): wall-clock cost of setting and clearing BlockedBy on survey links, per link.
+// Clock/UnClock return 0 in the retail game, so a batch of 20000 operations is timed with GetSystemTime like NavBenchmark.
+function NavMapDataBenchmark()
+{
+    local int I, N, Rep, Elapsed, StartMs, EndMs;
+    local int Y, Mo, Dw, D, H, Mi, S, Ms;
+    local float Us;
+
+    if (MapData == None || !MapData.bUsable || MapData.VSpec.Length == 0 || Pawn == None || NavMeter == None)
+    {
+        return;
+    }
+    N = Min(MapData.VSpec.Length, 200);
+    GetSystemTime(Y, Mo, Dw, D, H, Mi, S, Ms);
+    StartMs = ((H * 60 + Mi) * 60 + S) * 1000 + Ms;
+    for (Rep = 0; Rep < 100; Rep++)
+    {
+        for (I = 0; I < N; I++)
+        {
+            MapData.VSpec[I].BlockedBy = Pawn;
+        }
+        for (I = 0; I < N; I++)
+        {
+            MapData.VSpec[I].BlockedBy = None;
+        }
+    }
+    GetSystemTime(Y, Mo, Dw, D, H, Mi, S, Ms);
+    EndMs = ((H * 60 + Mi) * 60 + S) * 1000 + Ms;
+    Us = 0.2;
+    if (EndMs >= StartMs)
+    {
+        Elapsed = EndMs - StartMs;
+        Us = float(Elapsed) * 1000.0 / float(N * 100);
+        NavMeter.SetSurveyUnit(Us);
+    }
+    EchelonLog("NAV_MAPDATA_UNIT survey_link_us=" $ string(Us) $ " ops=" $ string(N * 200) $ " ms=" $ string(Elapsed));
+}
+
+// Name of the survey relax step that brings a kind back in (for NAV_SURVEY_RELAX).
+function string FollowSurveyStepName(int Level)
+{
+    if (Level == 1)
+        return "trouble";
+    if (Level == 2)
+        return "bad_hidden";
+    return "bad_wall";
+}
+
 // Path toward Goal (or to Dest when Goal is None) that avoids every special edge this bot has seen.
 // Known special edges are marked BlockedBy only for the duration of the search, so zeds keep them.
 function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
@@ -1302,10 +1472,11 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
     local array<ReachSpec> IterBlocked;
     local ReachSpec IterSpec;
     local Actor IterFirst;
-    local int IterPass, IterIdx, IterMinStrikes;
+    local int IterPass, IterIdx, IterMinStrikes, IterSurveyLevel;
     local bool IterStrict;
 
     IterMinStrikes = 1;
+    IterSurveyLevel = 0;
     IterStrict = true;
     for (IterPass = 0; IterPass < 4; IterPass++)
     {
@@ -1323,6 +1494,7 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
         if (IterStrict)
         {
             FollowScanEdgesBlock(IterBlocked);
+            FollowSurveyEdgesBlock(IterSurveyLevel, IterBlocked);
             class'Path_AvoidClosedDoors'.static.AvoidClosedDoors(Pawn, true);
         }
         FollowPlanBegin();
@@ -1343,6 +1515,13 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
         }
         if (IterFirst == None)
         {
+            if (IterStrict && MapData != None && MapData.bUsable && MapData.bDone && IterSurveyLevel < 3)
+            {
+                IterSurveyLevel++;
+                EchelonLog("NAV_SURVEY_RELAX step=" $ FollowSurveyStepName(IterSurveyLevel) $ " goal=" $ string(Goal));
+                IterPass--;
+                continue;
+            }
             if (IterStrict)
             {
                 EchelonLog("NAV_PATH_RELAX rules=scan_doors");
@@ -1701,6 +1880,12 @@ function EFollowAction FollowDecide()
         }
     }
 
+    if (FollowNarrowBusy())
+    {
+        FollowWaitTime = 0.3;
+        return FA_Wait;
+    }
+
     return FA_Path;
 }
 
@@ -2044,7 +2229,7 @@ function NavigationPoint FollowPickCrumbFrom(EcholonFollowNavBase Leader)
     }
     for (IterIdx = Leader.FollowCrumbs.Length - 1; IterIdx >= 0; IterIdx--)
     {
-        if (Leader.FollowCrumbs[IterIdx] != None)
+        if (Leader.FollowCrumbs[IterIdx] != None && (MapData == None || MapData.NodeVerdictOf(Leader.FollowCrumbs[IterIdx]) != class'EcholonMapData'.const.NV_WALL))
         {
             if (VSizeSq(Pawn.Location - Leader.FollowCrumbs[IterIdx].Location) < 22500.0)
             {

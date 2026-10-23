@@ -132,6 +132,9 @@ var() config float ZoneMaxDist;               // zone pick band: farthest distan
 var() config float ZoneWideDist;              // widened band when the first one is empty (uu)
 var() config float ZoneMergeDist;             // a pod this close to a Dosh Hold zone merges into it
 var transient EcholonNavGrid NavGrid;         // shared floor-is-lava tile table (N10)
+var() config bool bSurveyNav;                 // use the survey map data (KFEcholonMapData.ini) for routes and steering; opt-in until the playtest passes. ?SurveyNav=1/0 overrides for one match
+var transient bool bSurveyNavNow;             // bSurveyNav after the ?SurveyNav= option
+var transient EcholonMapData MapData;         // this map's survey data from KFEcholonMapData.ini (None when the switch is off)
 var() config int NavGridSquads;               // 0 = lava grid for every squad, N = only squad N (1 = first), -1 = off
 var() config bool bNavGridDebug;              // log an ASCII map of the grid around squad 1's leader every 20 s
 var transient float NavScanR;                 // body radius used by the scan
@@ -416,6 +419,59 @@ function PostBeginPlay()
     SetTimer(15.0, false, 'NavBenchmarkRun');
 }
 
+// Load this map's survey data (bSurveyNav only). The object reads its section of KFEcholonMapData.ini when created; Tick resolves the
+// verdicts a few entries per frame. Without the switch, a section or a matching checksum the nav stays as it was.
+function MapDataBegin()
+{
+    local string Key;
+    local int I;
+
+    if (MapData != None)
+    {
+        return;
+    }
+    if (!bSurveyNavNow)
+    {
+        EchelonLog("NAV_MAPDATA_LOAD map=" $ WorldInfo.GetMapName() $ " found=0 switch=off");
+        return;
+    }
+    Key = class'EcholonBot.EcholonMapData'.static.SectionKey(WorldInfo.GetMapName());
+    MapData = new(None, Key) class'EcholonBot.EcholonMapData';
+    MapData.Begin(self);
+    for (I = 0; I < ActiveBots.Length; I++)
+    {
+        if (ActiveBots[I] != None)
+        {
+            ActiveBots[I].MapData = MapData;
+        }
+    }
+}
+
+// Once, when the data is resolved: let the first living bot time the per-link blocking cost (NAV_MAPDATA_UNIT).
+function MapDataUnits()
+{
+    local int I;
+
+    for (I = 0; I < ActiveBots.Length; I++)
+    {
+        if (ActiveBots[I] != None && ActiveBots[I].Pawn != None)
+        {
+            ActiveBots[I].NavMapDataBenchmark();
+            return;
+        }
+    }
+}
+
+// True when the survey says this node sits inside a wall (never a steer target, crumb or relocation spot).
+function bool SurveyNodeInWall(NavigationPoint N)
+{
+    if (MapData == None || N == None)
+    {
+        return false;
+    }
+    return MapData.NodeVerdictOf(N) == class'EcholonMapData'.const.NV_WALL;
+}
+
 // One-time: let the first living bot measure the unit cost of a trace, a route search and a reach check.
 function NavBenchmarkRun()
 {
@@ -433,6 +489,7 @@ function NavBenchmarkRun()
             EchelonLog(NavMeter.UnitCostMessage());
             NavScanBegin();
             NavDumpBegin();
+            MapDataBegin();
             return;
         }
     }
@@ -735,6 +792,13 @@ event Tick(float DeltaTime)
     {
         NavDump.Step();
     }
+    if (MapData != None && !MapData.bDone)
+    {
+        if (MapData.Step() && MapData.bUsable)
+        {
+            MapDataUnits();
+        }
+    }
     if (bSurvey && SurveyGrid != None)
     {
         if (!bSurveyDone)
@@ -877,6 +941,11 @@ function InitMutator(string Options, out string ErrorMessage)
         SetTimer(1.0, true, 'PlaytestTick');
     }
 
+    bSurveyNavNow = bSurveyNav;
+    if (class'GameInfo'.static.HasOption(Options, "SurveyNav"))
+    {
+        bSurveyNavNow = class'GameInfo'.static.GetIntOption(Options, "SurveyNav", 0) != 0;
+    }
     bSurvey = class'GameInfo'.static.ParseOption(Options, "Survey") ~= "1";
     if (bSurvey)
     {
@@ -1407,6 +1476,7 @@ function RegisterBot(EcholonBot NewBot)
     NewBot.NavBudget = NavBudget;
     NewBot.NavScan = NavScan;
     NewBot.NavGrid = NavGrid;
+    NewBot.MapData = MapData;
     NewBot.WdLastHubContactTime = WorldInfo.TimeSeconds;
 }
 
@@ -5563,7 +5633,7 @@ function vector PickRelocateSpot(vector AnchorPos, Pawn P)
     BestDistSq = 999999999.0;
     foreach WorldInfo.RadiusNavigationPoints(class'NavigationPoint', N, AnchorPos, 300.0)
     {
-        if (PathNode(N) == None)
+        if (PathNode(N) == None || SurveyNodeInWall(N))
             continue;
         DistSq = VSizeSq(N.Location - AnchorPos);
         if (DistSq < BestDistSq)
