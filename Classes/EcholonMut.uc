@@ -137,6 +137,7 @@ var() config bool bSurveyNavGrid;             // the grid half of the survey nav
 var transient bool bSurveyNavGridNow;
 var transient bool bSurveyNavNow;             // bSurveyNav after the ?SurveyNav= option
 var transient int SurveyUnpacked;             // chunks unpacked this frame
+var() config bool bBotEmotes;                  // bots answer a human's emote and dance after a won match; off by default (a config bool is false when absent)
 var transient int NavStuckFollow;             // NAV_STUCK level 1 events of bots in FollowingLeader (follow=1); not part of NavStuckCount
 var transient int NavStuckGrunt;              // of those, stucks of GRUNT-rank bots (rank=0 in NAV_STUCK)
 var transient int NavStuckCount;              // NAV_STUCK level 1 events this match (NAV_SURVEY_SUMMARY)

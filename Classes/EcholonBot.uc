@@ -1975,7 +1975,7 @@ state VictoryDance
 
         NextVictoryDance = WorldInfo.TimeSeconds + 20.0;
         B = KFPawn(Pawn);
-        if (B != None)
+        if (B != None && mut != None && mut.bBotEmotes)
         {
             B.DoSpecialMove(35, true, , mut.PickRandEmote());
         }

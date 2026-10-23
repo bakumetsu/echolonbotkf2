@@ -370,6 +370,8 @@ var float DefaultWeaponEffectiveRangeUU;
 var transient float NextReloadAttempt;
 var transient float NextWeaponSwitchTime;
 var transient float NextFallbackPoll;
+var transient float NextWeaponLog;         // next COMBAT_WEAPON line (one per 5 s per bot while it fires)
+var transient float NextRangedSwitch;      // next time a bot holding the knife in a fight may switch to a gun
 var transient KFWeapon FallbackPrimary;
 var transient float FallbackSince;
 var transient byte GrenadeAimTicks;
@@ -1059,6 +1061,12 @@ function bool FireWeaponAt(Actor inActor)
 	W = KFWeapon(Pawn.Weapon);
 	if (W != None)
 	{
+		if (NextWeaponLog < WorldInfo.TimeSeconds)
+		{
+			NextWeaponLog = WorldInfo.TimeSeconds + 5.0;
+			EchelonLog("COMBAT_WEAPON weapon=" $ string(W.Class.Name) $ " melee=" $ string(W.bMeleeWeapon) $ " gun_ready=" $ string(HasUsableRangedWeapon()) $ " state=" $ string(GetStateName())
+				$ " enemy_dist=" $ string(int(VSize(inActor.Location - Pawn.Location))) $ " health=" $ string(Pawn.Health));
+		}
 		if (HandleWeaponManagement(W))
 		{
 			return false;
@@ -2925,13 +2933,34 @@ final function bool ShouldTacticalRetreat()
 	return (CachedZedCount >= RETREAT_ZED_TRIGGER_COUNT) || bCachedHeavyZed || ExceedsRetreatZedCount();
 }
 
+// True when the pawn has a gun (not a medic gun, welder or knife) that still has ammo in the inventory.
+final function bool HasUsableRangedWeapon()
+{
+    local KFWeapon IterW;
+
+    if (Pawn == None || Pawn.InvManager == None)
+    {
+        return false;
+    }
+    foreach Pawn.InvManager.InventoryActors(class'KFWeapon', IterW)
+    {
+        if (IterW != None && !IterW.bMeleeWeapon && KFWeap_HealerBase(IterW) == None && !IterW.IsA('KFWeap_Welder') && IterW.HasAnyAmmo())
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Melee only means no usable gun in the inventory. It used to mean "the weapon in hand is melee", so a bot that took out the knife at the
+// trader fought the next wave with it (the knife made it melee-only, which kept it on the knife).
 final function bool IsMeleeOnly()
 {
     if (Pawn == None)
         return false;
 
     if (Pawn.Weapon != None)
-        return Pawn.Weapon.bMeleeWeapon;
+        return Pawn.Weapon.bMeleeWeapon && !HasUsableRangedWeapon();
     else
         return !Pawn.HasRangedAttack();
 }
@@ -4273,6 +4302,18 @@ function ClearGrenadeSignal()
 final function bool HandleWeaponManagement(KFWeapon W)
 {
 	local KFWeapon Best;
+
+	// Holding the knife in a fight while a gun with ammo is in the inventory: switch to the gun (the knife is taken out at the trader).
+	if (W.bMeleeWeapon && !bFallbackWeapon && HasUsableRangedWeapon())
+	{
+		if (NextRangedSwitch < WorldInfo.TimeSeconds)
+		{
+			NextRangedSwitch = WorldInfo.TimeSeconds + 0.5;
+			EchelonLog("WEAPON_RESWITCH from=" $ string(W.Class.Name) $ " state=" $ string(GetStateName()));
+			SwitchToBestWeapon(true);
+		}
+		return true;
+	}
 
 	if (ShouldReload(W))
 	{
@@ -5691,6 +5732,10 @@ function ApplyWedgeTarget(out vector OutTarget)
 
 function StartEmoteEchoTimer()
 {
+    if (mut == None || !mut.bBotEmotes)
+    {
+        return;
+    }
     SetTimer(FRand(), false, 'BeginEmoteEcho');
 }
 
@@ -5706,7 +5751,7 @@ function CheckEmoteEcho()
     local KFPawn_Human H;
     local KFGameReplicationInfo GRI;
 
-    if (Pawn == None || bPlayingEmote || mut == None)
+    if (Pawn == None || bPlayingEmote || mut == None || !mut.bBotEmotes)
         return;
 
     GRI = mut.KF.MyKFGRI;
