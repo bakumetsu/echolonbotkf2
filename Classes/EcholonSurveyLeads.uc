@@ -19,7 +19,6 @@ const LT_UNREACHED = 0;
 const LT_THROUGH = 1;
 const LT_SHORTCUT = 2;
 const LT_DROP = 3;
-const PER_FRAME = 20;        // nodes read per BuildStep (each node's links are checked against the grid)
 const K_FLOOR = 1;           // copies of the tile kinds in EcholonSurveyGrid (keep in sync with that class)
 const K_STEEP = 2;
 const K_WALL = 3;
@@ -57,6 +56,7 @@ var int NTooHigh;
 var int NLethal;
 var int NOk;
 var int NFailed;
+var int PerFrame;           // nodes read per BuildStep (each node's links are checked against the grid); fewer in later rounds, WasTried grows
 var int Round;              // pass 2 runs in rounds: a success opens new floor, which gives new leads
 var int NOkRound;           // successes in this round
 var array<NavigationPoint> DoneA;   // every lead tried in earlier rounds (start and end), so a round never repeats one
@@ -73,6 +73,7 @@ final function Begin(EcholonMut M)
     List.Length = 0;
     Round = 1;
     NOkRound = 0;
+    PerFrame = 20;
 }
 
 // The next round: forget this round's list, keep what was tried, read the nodes again against the grown grid.
@@ -80,6 +81,7 @@ final function Rebuild()
 {
     Round++;
     NOkRound = 0;
+    PerFrame = 6;
     Cursor = 0;
     bBuilt = false;
     List.Length = 0;
@@ -116,7 +118,7 @@ final function bool BuildStep()
         return true;
     }
     Count = 0;
-    while (Cursor < Nodes.Length && Count < PER_FRAME)
+    while (Cursor < Nodes.Length && Count < PerFrame)
     {
         A = Nodes[Cursor];
         Cursor++;
@@ -336,10 +338,14 @@ final function int Claim(int BotId, vector BotLoc)
     return Best;
 }
 
-// A bot gave up the lead for now (died, no floor): it can be claimed again until it has been tried 3 times.
-final function Release(int Idx)
+// The lead cannot be tried now (no mapped floor next to its start, no room at its end): it is retired for this round, counts as a failure,
+// but is not remembered as tried, so the next round (which may have mapped that floor) reads it again.
+final function Retire(int Idx)
 {
+    List[Idx].bDone = true;
     List[Idx].Claim = 0;
+    List[Idx].bOk = false;
+    NFailed++;
 }
 
 // The lead is finished: it worked, or it failed for good.

@@ -4734,6 +4734,10 @@ function SurveyBenchmark()
     }
     GetSystemTime(Y, Mo, Dw, D, H, Mi, S, Ms);
     EndMs = ((H * 60 + Mi) * 60 + S) * 1000 + Ms;
+    if (EndMs < StartMs)
+    {
+        EndMs += 86400000;      // the clock passed midnight
+    }
     SurveyUnitTraceUs = FMax(0.5, float(EndMs - StartMs) * 1000.0 / 6000.0);
     StartMs = EndMs;
     for (I = 0; I < 40000; I++)
@@ -4742,6 +4746,10 @@ function SurveyBenchmark()
     }
     GetSystemTime(Y, Mo, Dw, D, H, Mi, S, Ms);
     EndMs = ((H * 60 + Mi) * 60 + S) * 1000 + Ms;
+    if (EndMs < StartMs)
+    {
+        EndMs += 86400000;      // the clock passed midnight
+    }
     SurveyUnitFindUs = FMax(0.05, float(EndMs - StartMs) * 1000.0 / 40000.0);
     StartMs = EndMs;
     for (I = 0; I < 200000; I++)
@@ -4750,6 +4758,10 @@ function SurveyBenchmark()
     }
     GetSystemTime(Y, Mo, Dw, D, H, Mi, S, Ms);
     EndMs = ((H * 60 + Mi) * 60 + S) * 1000 + Ms;
+    if (EndMs < StartMs)
+    {
+        EndMs += 86400000;      // the clock passed midnight
+    }
     SurveyUnitSlotUs = FMax(0.02, float(EndMs - StartMs) * 1000.0 / 200000.0);
     EchelonLog("SURVEY_UNIT_COST trace_us=" $ string(SurveyUnitTraceUs) $ " find_us=" $ string(SurveyUnitFindUs) $ " slot_us=" $ string(SurveyUnitSlotUs) $ " sink=" $ string(Sink));
 }

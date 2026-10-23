@@ -129,6 +129,8 @@ var vector LeadStartPos;
 var vector LeadProgPos;
 var float LeadProgT;
 var int LeadHealth0;
+var array<vector> LeadTrack;     // positions during the run of a try (every 19 uu), where the walls it passed become narrow floor
+var float LeadPlaceT0;       // when placing the bot on its start floor first failed (another pawn on the spot)
 var int NLeadOk;
 var int NLeadFail;
 var int BotBlockRun;         // blocked-by-bot waits in a row on this step
@@ -861,14 +863,19 @@ final function SurveyTick(float DT)
     {
         if (Phase != SP_DEAD && Phase != SP_WAIT)
         {
-            Mut.EchelonLog("SURVEY_DEATH bot=" $ string(BotIdx) $ " tile=" $ TileText(CurKey) $ " level_deaths=" $ string(Mut.SurveyLevelDeaths[CurLvl + 32] + 1));
+            Mut.EchelonLog("SURVEY_DEATH bot=" $ string(BotIdx) $ " tile=" $ TileText(CurKey) $ " level_deaths=" $ string(Mut.SurveyLevelDeaths[CurLvl + 32]));
             NDeaths++;
-            // a death marks the tile and counts against its floor level; a level with 3 deaths is not transferred to any more
-            Grid.AddFlags(CurKey, F_BLOCKED);
-            Mut.SurveyLevelDeaths[CurLvl + 32] = Mut.SurveyLevelDeaths[CurLvl + 32] + 1;
+            // a death marks the tile and counts against its floor level; a level with 3 deaths is not transferred to any more.
+            // During a lead CurKey is the tile before the lead (the bot was placed elsewhere), so the lead's own failure records it.
+            if (LeadIdx < 0)
+            {
+                Grid.AddFlags(CurKey, F_BLOCKED);
+                Mut.SurveyLevelDeaths[CurLvl + 32] = Mut.SurveyLevelDeaths[CurLvl + 32] + 1;
+            }
             if (LeadIdx >= 0)
             {
                 Mut.SurveyLeads.Finish(LeadIdx, false);
+                NLeadFail++;
                 Mut.EchelonLog("SURVEY_LEAD_FAIL bot=" $ string(BotIdx) $ " type=" $ LeadTypeName() $ " from=" $ string(LeadA) $ " to=" $ string(LeadB) $ " reason=died");
                 LeadIdx = -1;
             }
@@ -1112,6 +1119,10 @@ final function LeadPlace()
     local int Tries;
 
     Tries = Mut.SurveyLeads.List[LeadIdx].Tries;
+    if (LeadType == 1 && Tries >= 1)
+    {
+        bLeadJump = true;     // a window sill: walking into it failed, jump on the later tries
+    }
     Dir = Normal(V3(LeadB.Location.X - LeadA.Location.X, LeadB.Location.Y - LeadA.Location.Y, 0.0));
     bFound = false;
     if (bLeadJump)
@@ -1137,10 +1148,26 @@ final function LeadPlace()
             return;
         }
     }
-    Pawn.SetLocation(Pos);
+    if (!Pawn.SetLocation(Pos))
+    {
+        // another pawn stands there: wait a frame, give up the try after 3 s
+        if (LeadPlaceT0 == 0.0)
+        {
+            LeadPlaceT0 = WorldInfo.TimeSeconds;
+        }
+        if (WorldInfo.TimeSeconds - LeadPlaceT0 > 3.0)
+        {
+            LeadPlaceT0 = 0.0;
+            LeadFail("occupied", false);
+        }
+        return;
+    }
+    LeadPlaceT0 = 0.0;
+    Pawn.Health = Pawn.HealthMax;     // a bot hurt by an earlier drop must not die on a safe one
     Pawn.Velocity = V3(0.0, 0.0, 0.0);
     Pawn.Acceleration = V3(0.0, 0.0, 0.0);
     Pawn.SetPhysics(PHYS_Walking);
+    LeadTrack.Length = 0;
     LeadStartPos = Pos;
     LeadStartZ = Pos.Z;
     LeadApexZ = Pos.Z;
@@ -1208,6 +1235,13 @@ final function StepLead()
         }
         Pawn.Acceleration = MoveDir * 2000.0;
         Pawn.SetRotation(rotator(MoveDir));
+        if (LeadTrack.Length == 0 || VSize(Pawn.Location - LeadTrack[LeadTrack.Length - 1]) >= 19.0)
+        {
+            if (LeadTrack.Length < 200)
+            {
+                LeadTrack.AddItem(Pawn.Location);
+            }
+        }
         if (VSize(Pawn.Location - LeadProgPos) > 8.0)
         {
             LeadProgPos = Pawn.Location;
@@ -1276,22 +1310,19 @@ final function string LeadKind()
     return "walk";
 }
 
-// Wall, obstacle and door tiles along the line a bot walked through become narrow floor (the designer's link proved the way).
-final function MarkPassage(vector A, vector B)
+// Wall, obstacle and door tiles the bot actually stood on during the run become narrow floor (the designer's link proved the way, and
+// the bot's own positions show where the gap is; a straight line from start to landing could cross real walls).
+final function MarkTrack()
 {
-    local int Steps, K, TX, TY, L0, Dl, Key, D, Kind, N;
-    local float F, Z, Tz;
-    local vector P;
+    local int I, TX, TY, L0, Dl, Key, D, Kind, N;
+    local float FloorZ, Tz;
 
-    Steps = Max(1, int(VSize(B - A) / 19.0));
-    for (K = 0; K <= Steps; K++)
+    for (I = 0; I < LeadTrack.Length; I++)
     {
-        F = float(K) / float(Steps);
-        P = A + (B - A) * F;
-        TX = Grid.TileOf(P.X);
-        TY = Grid.TileOf(P.Y);
-        Z = P.Z;
-        L0 = Grid.LevelOf(Z - 45.0);
+        TX = Grid.TileOf(LeadTrack[I].X);
+        TY = Grid.TileOf(LeadTrack[I].Y);
+        FloorZ = LeadTrack[I].Z - BodyH;
+        L0 = Grid.LevelOf(FloorZ);
         for (Dl = -1; Dl <= 1; Dl++)
         {
             Key = Grid.MakeKey(TX, TY, L0 + Dl);
@@ -1300,7 +1331,7 @@ final function MarkPassage(vector A, vector B)
             {
                 Kind = Grid.DKind(D);
                 Tz = Grid.DZ(D);
-                if ((Kind == K_WALL || Kind == K_OBST || Kind == K_DOOR) && Tz >= Z - 130.0 && Tz <= Z + 60.0)
+                if ((Kind == K_WALL || Kind == K_OBST || Kind == K_DOOR) && Tz >= FloorZ - 100.0 && Tz <= FloorZ + 60.0)
                 {
                     Grid.PutData(Key, Grid.PackData(K_NARROW, 0, Tz));
                     N++;
@@ -1332,13 +1363,13 @@ final function LeadSuccess()
     }
     if (Dmg > 0 && bLeadDrop)
     {
-        Mut.EchelonLog("SURVEY_DROP_DAMAGE bot=" $ string(BotIdx) $ " fall=" $ string(int(-Dz)) $ " health_lost=" $ string(Dmg) $ " lead=1");
+        Mut.EchelonLog("SURVEY_DROP_DAMAGE bot=" $ string(BotIdx) $ " fall=" $ string(int(-Dz)) $ " health_lost=" $ string(Dmg) $ " predicted=" $ string(int(Mut.SurveyLeads.List[LeadIdx].DropDmg)) $ " lead=1");
     }
     Mut.EchelonLog("SURVEY_LINK kind=" $ Kind $ " from=" $ string(LeadA) $ " to=" $ string(LeadB) $ " from_at=" $ LeadXYZ(LeadStartPos) $ " to_at=" $ LeadXYZ(Pawn.Location)
         $ " oneway=" $ string(OneWay) $ " dmg=" $ string(Dmg) $ " tries=" $ string(Mut.SurveyLeads.List[LeadIdx].Tries + 1));
     if (!bLeadJumped && !bLeadDrop)
     {
-        MarkPassage(LeadStartPos, Pawn.Location);
+        MarkTrack();
     }
     Mut.SurveyLeads.Finish(LeadIdx, true);
     NLeadOk++;
@@ -1389,7 +1420,14 @@ final function LeadFail(string Reason, bool bFinal)
     }
     if (bFinal || Tries >= 3)
     {
-        Mut.SurveyLeads.Finish(LeadIdx, false);
+        if (Reason == "no_floor" || Reason == "no_room")
+        {
+            Mut.SurveyLeads.Retire(LeadIdx);
+        }
+        else
+        {
+            Mut.SurveyLeads.Finish(LeadIdx, false);
+        }
         NLeadFail++;
         LeadIdx = -1;
         Pawn.Acceleration = V3(0.0, 0.0, 0.0);
