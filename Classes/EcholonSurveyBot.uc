@@ -15,6 +15,7 @@ const SP_PLAN = 2;
 const SP_WALK = 3;
 const SP_IDLE = 4;
 const SP_DEAD = 5;
+const SP_SCAN = 6;
 // Copies of the tile constants in EcholonSurveyGrid.
 const TILE = 38.0;
 const K_FLOOR = 1;
@@ -33,6 +34,7 @@ const F_VISITED = 1024;
 const F_ONEWAY = 2048;
 const F_UNSAFE = 4096;
 const F_BLOCKED = 8192;
+const MOMENTUM = 0.25;      // seconds a bot keeps moving after a path ends, so it does not stop at every tile
 const VIS_SIZE = 131072;
 const VIS_MASK = 131071;
 const SEARCH_CAP = 60000;
@@ -44,6 +46,7 @@ const DROP_PROBE = 500.0;   // how far the second down trace looks for the landi
 const SAFE_FALL = 350.0;    // drops up to this deep count as safe (logged only in this build)
 const ARRIVE_DIST = 10.0;   // 2D distance at which the last tile of a path counts as reached
 const PASS_DIST = 12.0;     // ... and an intermediate tile (also reached when the bot passed it within 40 uu)
+const BOT_BLOCK_MAX = 3;    // blocked-by-bot waits in a row before it counts as a real stuck
 const START_GRACE = 15.0;   // seconds after a spawn in which a bot that has not moved yet is just waiting, not stuck
 const STUCK_SECS = 3.0;     // no progress for this long is a stuck bot
 const BOT_NEAR = 80.0;      // another survey pawn this close makes a stuck a blocked_by_bot
@@ -91,6 +94,14 @@ var string BumpActorName;
 var float FallStartZ;
 var float FallStartTime;
 var bool bWasFalling;
+var float LastMoveTime;      // last frame StepWalk steered the pawn
+var bool bDropStep;          // the step being walked is a planned drop
+var int DropHealth;          // pawn health before that drop
+var float DropFall;          // its fall height
+var int ScanSlot;            // far-frontier scan cursor over the grid's hash table
+var int ScanBestKey;
+var float ScanBestD;
+var int NTransfers;
 var float IdleSince;
 var int IdleFails;           // consecutive searches that found no frontier (the mutator ends the survey when all bots reach 3)
 var float DeadSince;
@@ -102,6 +113,7 @@ var int NTraces;
 var int NTeleports;
 var int NDeaths;
 var int NBlockedByBot;
+var int BotBlockRun;         // blocked-by-bot waits in a row on this step
 
 // ---- stage C: the cane ----
 final function vector V3(float X, float Y, float Z)
@@ -236,7 +248,19 @@ final function int FeelNeighbour(int D)
             SafeStr = "1";
         else
             SafeStr = "0";
-        Mut.EchelonLog("SURVEY_DROP bot=" $ string(BotIdx) $ " at=" $ int(QX) $ "," $ int(QY) $ "," $ int(ExpZ) $ " fall=" $ int(Fall) $ " safe=" $ SafeStr);
+        // A drop that lands on floor we know nothing about is taken once: the landing becomes a one-way floor tile and
+        // the link carries code 99 (see EcholonSurveyGrid.LinkDelta). Unsafe or already known landings are only logged.
+        if (Hit != None && HitNorm.Z >= 0.7 && Fall > 60.0 && Fall <= Mut.SurveyDropMax && Grid.GetData(Grid.MakeKey(QTX, QTY, Grid.LevelOf(LandZ))) == 0)
+        {
+            Grid.PutData(Grid.MakeKey(QTX, QTY, Grid.LevelOf(LandZ)), Grid.PackData(K_FLOOR, F_ONEWAY, LandZ));
+            Grid.PutLinks(ExpKey, Grid.LinkSet(Grid.GetLinks(ExpKey), D, 99));
+            SafeStr = SafeStr $ " link=1";
+        }
+        if (Mut.SurveyDropLogs < 150)
+        {
+            Mut.SurveyDropLogs++;
+            Mut.EchelonLog("SURVEY_DROP bot=" $ string(BotIdx) $ " at=" $ int(QX) $ "," $ int(QY) $ "," $ int(ExpZ) $ " fall=" $ int(Fall) $ " safe=" $ SafeStr);
+        }
         return 0;
     }
 
@@ -401,7 +425,10 @@ final function int StepSearch()
         {
             if (Grid.LinkOpen(L, D))
             {
-                NK = Grid.MakeKey(TX + Grid.DirDX(D), TY + Grid.DirDY(D), Lv + Grid.LinkDelta(L, D));
+                if (Grid.LinkDelta(L, D) == 99)
+                    NK = Grid.MakeKey(TX + Grid.DirDX(D), TY + Grid.DirDY(D), Grid.LevelOf(Grid.DZ(Grid.GetData(Grid.MakeKey(TX + Grid.DirDX(D), TY + Grid.DirDY(D), Lv)))));
+                else
+                    NK = Grid.MakeKey(TX + Grid.DirDX(D), TY + Grid.DirDY(D), Lv + Grid.LinkDelta(L, D));
                 if (VisitedBefore(NK))
                     continue;
                 ND = Grid.GetData(NK);
@@ -551,6 +578,13 @@ final function SetWalkTarget(int NextKey)
     ND = Grid.GetData(NextKey);
     WalkTarget = V3(Grid.CenterOf(NTX), Grid.CenterOf(NTY), Grid.DZ(ND) + BodyH);
     WalkStartTime = WorldInfo.TimeSeconds;
+    bDropStep = (WalkDir < 8 && Grid.LinkDelta(Grid.GetLinks(CurKey), WalkDir) == 99);
+    if (bDropStep)
+    {
+        DropHealth = Pawn.Health;
+        DropFall = CurZ - Grid.DZ(ND);
+    }
+    BotBlockRun = 0;
     ProgPos = Pawn.Location;
     WalkFromPos = Pawn.Location;
     ProgTime = WorldInfo.TimeSeconds;
@@ -628,15 +662,17 @@ final function StuckFound()
         WalkStartTime = WorldInfo.TimeSeconds;
         return;
     }
-    if (NearOtherBot())
+    if (NearOtherBot() && BotBlockRun < BOT_BLOCK_MAX)
     {
         NBlockedByBot++;
+        BotBlockRun++;
         ProgTime = WorldInfo.TimeSeconds;
         ProgPos = Pawn.Location;
         WalkStartTime = WorldInfo.TimeSeconds;
         Mut.EchelonLog("SURVEY_STUCK_BOT bot=" $ string(BotIdx) $ " at=" $ string(int(Pawn.Location.X)) $ "," $ string(int(Pawn.Location.Y)) $ "," $ string(int(Pawn.Location.Z)));
         return;
     }
+    BotBlockRun = 0;
     NStuck++;
     Grid.AddFlags(WalkToKey, F_BLOCKED);
     if (WalkDir < 8)
@@ -692,7 +728,7 @@ final function StepWalk()
     {
         bWasFalling = false;
         Fall = FallStartZ - Pawn.Location.Z;
-        if (Fall > 45.0 && (Now - FallStartTime) > 0.25)
+        if (!bDropStep && Fall > 45.0 && (Now - FallStartTime) > 0.25)
         {
             HiddenFound("fall", "fall=" $ string(int(Fall)));
             return;
@@ -704,6 +740,28 @@ final function StepWalk()
     else
         ArriveD = PASS_DIST;
     SegDot = (WalkTarget.X - WalkFromPos.X) * ToDest.X + (WalkTarget.Y - WalkFromPos.Y) * ToDest.Y;
+    LastMoveTime = Now;
+    if (bDropStep)
+    {
+        // a drop: arrived once it has landed near the landing tile (the fall can carry it a little past)
+        MoveDir = Normal(ToDest);
+        if (Pawn.Physics != PHYS_Falling && Dist < 70.0 && Abs(Pawn.Location.Z - WalkTarget.Z) < 40.0)
+        {
+            if (Pawn.Health < DropHealth)
+            {
+                Mut.SurveyDropMax = FMax(0.0, DropFall - 30.0);
+                Mut.EchelonLog("SURVEY_DROP_DAMAGE bot=" $ string(BotIdx) $ " fall=" $ string(int(DropFall)) $ " health_lost=" $ string(DropHealth - Pawn.Health) $ " max_now=" $ string(int(Mut.SurveyDropMax)));
+            }
+            bDropStep = false;
+            ReachedTile();
+            return;
+        }
+        if (Pawn.Physics != PHYS_Falling)
+            Pawn.Acceleration = MoveDir * 2000.0;
+        if ((Now - WalkStartTime) > 8.0)
+            StuckFound();
+        return;
+    }
     if (Dist < ArriveD || (SegDot < 0.0 && Dist < 40.0))
     {
         ReachedTile();
@@ -765,7 +823,8 @@ final function SurveyTick(float DT)
     switch (Phase)
     {
         case SP_EXPAND:
-            Pawn.Acceleration = V3(0.0, 0.0, 0.0);
+            if (WorldInfo.TimeSeconds - LastMoveTime > MOMENTUM)
+                Pawn.Acceleration = V3(0.0, 0.0, 0.0);
             if (StepExpand())
             {
                 ClaimKey = 0;
@@ -773,7 +832,8 @@ final function SurveyTick(float DT)
             }
             break;
         case SP_PLAN:
-            Pawn.Acceleration = V3(0.0, 0.0, 0.0);
+            if (WorldInfo.TimeSeconds - LastMoveTime > MOMENTUM)
+                Pawn.Acceleration = V3(0.0, 0.0, 0.0);
             R = StepSearch();
             if (R == 1)
             {
@@ -782,11 +842,25 @@ final function SurveyTick(float DT)
             }
             else if (R == 2)
             {
-                IdleFails++;
-                Phase = SP_IDLE;
-                IdleSince = WorldInfo.TimeSeconds;
-                if (IdleFails == 1)
-                    Mut.EchelonLog("SURVEY_IDLE bot=" $ string(BotIdx) $ " expanded=" $ string(NExpanded));
+                BeginScan();
+            }
+            break;
+        case SP_SCAN:
+            Pawn.Acceleration = V3(0.0, 0.0, 0.0);
+            if (StepScan())
+            {
+                if (ScanBestKey != 0)
+                {
+                    TransferTo(ScanBestKey);
+                }
+                else
+                {
+                    IdleFails++;
+                    Phase = SP_IDLE;
+                    IdleSince = WorldInfo.TimeSeconds;
+                    if (IdleFails == 1)
+                        Mut.EchelonLog("SURVEY_IDLE bot=" $ string(BotIdx) $ " expanded=" $ string(NExpanded));
+                }
             }
             break;
         case SP_WALK:
@@ -800,10 +874,83 @@ final function SurveyTick(float DT)
     }
 }
 
+// BeginScan: no frontier reachable by walking; look through the whole grid for the nearest unexpanded floor tile.
+final function BeginScan()
+{
+    ScanSlot = 0;
+    ScanBestKey = 0;
+    ScanBestD = 1000000000000.0;
+    Phase = SP_SCAN;
+}
+
+// StepScan: reads up to the frame's share of hash slots; true when the whole table was read.
+final function bool StepScan()
+{
+    local int K, D, Slot;
+    local float X, Y, Z, Dd;
+
+    while (ScanSlot < Grid.Keys.Length)
+    {
+        if (Mut.SurveyScanLeft <= 0)
+            return false;
+        Mut.SurveyScanLeft--;
+        Slot = ScanSlot;
+        ScanSlot++;
+        K = Grid.Keys[Slot];
+        if (K == 0)
+            continue;
+        D = Grid.Data[Slot];
+        if (Grid.DKind(D) != K_FLOOR || (Grid.DFlags(D) & (F_EXPANDED | F_BLOCKED)) != 0)
+            continue;
+        X = Grid.CenterOf(Grid.KeyTX(K)) - Pawn.Location.X;
+        Y = Grid.CenterOf(Grid.KeyTY(K)) - Pawn.Location.Y;
+        Z = Grid.DZ(D) + BodyH - Pawn.Location.Z;
+        Dd = X * X + Y * Y + Z * Z;
+        if (Dd < ScanBestD && !ClaimedByOther(K))
+        {
+            ScanBestD = Dd;
+            ScanBestKey = K;
+        }
+    }
+    return true;
+}
+
+// TransferTo: put the bot on a far frontier tile and start feeling from there (no walking route to it was known).
+final function TransferTo(int Key)
+{
+    local float X, Y, Z;
+    local int FromKey;
+
+    FromKey = CurKey;
+    X = Grid.CenterOf(Grid.KeyTX(Key));
+    Y = Grid.CenterOf(Grid.KeyTY(Key));
+    Z = Grid.DZ(Grid.GetData(Key)) + BodyH + 4.0;
+    ClaimKey = Key;
+    if (!Pawn.SetLocation(V3(X, Y, Z)))
+    {
+        Grid.AddFlags(Key, F_BLOCKED);
+        ClaimKey = 0;
+        Phase = SP_IDLE;
+        IdleSince = WorldInfo.TimeSeconds;
+        return;
+    }
+    Pawn.Velocity = V3(0.0, 0.0, 0.0);
+    Pawn.Acceleration = V3(0.0, 0.0, 0.0);
+    Pawn.SetPhysics(PHYS_Walking);
+    SetCurTile(Key);
+    LastGoodKey = Key;
+    LastGoodPos = Pawn.Location;
+    NTransfers++;
+    IdleFails = 0;
+    bWasFalling = false;
+    Mut.EchelonLog("SURVEY_TRANSFER bot=" $ string(BotIdx) $ " from=" $ TileText(FromKey) $ " to=" $ TileText(Key) $ " at=" $ string(int(X)) $ "," $ string(int(Y)) $ "," $ string(int(Z)));
+    BeginExpand();
+}
+
 // StatLine: one-line summary of this bot's counters.
 final function string StatLine()
 {
-    return "expanded=" $ string(NExpanded) $ " hidden=" $ string(NHidden) $ " stuck=" $ string(NStuck) $ " bybot=" $ string(NBlockedByBot) $ " teleports=" $ string(NTeleports) $ " deaths=" $ string(NDeaths) $ " searches=" $ string(NSearches) $ " traces=" $ string(NTraces);
+    return "expanded=" $ string(NExpanded) $ " transfers=" $ string(NTransfers) $ " hidden=" $ string(NHidden) $ " stuck=" $ string(NStuck) $ " bybot=" $ string(NBlockedByBot) $ " teleports=" $ string(NTeleports) $ " deaths=" $ string(NDeaths) $ " searches=" $ string(NSearches) $ " traces=" $ string(NTraces);
 }
 
 // @@FUNCS@@

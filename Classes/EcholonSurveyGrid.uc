@@ -346,13 +346,14 @@ final function bool LinkOpen(int L, int D)
     return (L & (1 << D)) != 0;
 }
 
-// Level delta for direction D: 0=same, 1=up, -1=down.
+// Level delta for direction D: 0=same, 1=up, -1=down, 99=a drop (the landing level is the one of the height stored in the drop tile at the same tile).
 final function int LinkDelta(int L, int D)
 {
     local int C;
     C = (L >> (8 + 2 * D)) & 3;
     if (C == 1) return 1;
     if (C == 2) return -1;
+    if (C == 3) return 99;
     return 0;
 }
 
@@ -364,6 +365,7 @@ final function int LinkSet(int L, int D, int Delta)
     Code = 0;
     if (Delta == 1) Code = 1;
     else if (Delta == -1) Code = 2;
+    else if (Delta == 99) Code = 3;
     Mask = (1 << D) | (3 << (8 + 2 * D));
     return (L & (~Mask)) | (1 << D) | (Code << (8 + 2 * D));
 }
