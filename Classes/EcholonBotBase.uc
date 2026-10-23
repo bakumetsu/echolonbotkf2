@@ -191,6 +191,13 @@ var transient float NavStall;
 var transient int NavLevel;
 var transient NavigationPoint NavLastGood;
 var float NavBlockedUntil;
+var Actor NavSkipGoal;                // goal set aside for this bot (no route, or two stucks on it)
+var float NavSkipUntil;
+var Actor NavLastStuckGoal;           // goal of the last level-2 stuck and when it happened
+var float NavLastStuckGoalTime;
+var float NavLoopSince;               // start of the current series of level-1 stucks (a loop when it lasts 6 s)
+var float NavLoopLast;
+var float NavWalkBackAt;              // when the level-3 walk-back to NavLastGood began (0 = none)
 var bool bNavTeleport;
 var float NavTeleportAfter; // seconds of stall before teleport is allowed
 var float NavNextTeleportTry; // earliest game time the next teleport attempt may fire
@@ -1718,6 +1725,135 @@ final function string NavStuckInfo(bool bFollow)
     return " move=" $ IterMove $ " dest=" $ IterDest $ " goal=" $ FollowGoalText() $ " anchor=" $ string(Pawn.Anchor) $ " mate=" $ string(NavNearestMate());
 }
 
+// True while G is set aside for this bot.
+final function bool NavGoalSkipped(Actor G)
+{
+    return G != None && G == NavSkipGoal && WorldInfo.TimeSeconds < NavSkipUntil;
+}
+
+final function NavSkipGoalFor(Actor G, float Secs, string Why)
+{
+    if (G == None)
+    {
+        return;
+    }
+    NavSkipGoal = G;
+    NavSkipUntil = WorldInfo.TimeSeconds + Secs;
+    EchelonLog("NAV_GOAL_SKIP goal=" $ string(G) $ " secs=" $ string(int(Secs)) $ " why=" $ Why);
+}
+
+// The goal of the move that is stuck: the goal of a route search in the last 20 s, else MoveTarget of a toward move; None for a point goal.
+final function Actor NavStuckGoal()
+{
+    if (FollowLastGoal != None && FollowLastGoalTime > 0.0 && WorldInfo.TimeSeconds - FollowLastGoalTime <= 20.0)
+    {
+        return FollowLastGoal;
+    }
+    if (MoveFlags == 2 && Pawn(MoveTarget) == None)
+    {
+        return MoveTarget;   // an enemy or a player is not a goal to set aside
+    }
+    return None;
+}
+
+// Strike the last link of the current route (the one into the goal), also when the bot is anchored at its start.
+final function NavStrikeLinkInto(Actor G)
+{
+    local int L;
+    local NavigationPoint IterLast, IterPrev;
+    local ReachSpec IterSpec;
+
+    L = RouteCache.Length - 1;
+    while (L >= 0 && RouteCache[L] == None)
+    {
+        L--;
+    }
+    if (L < 0)
+    {
+        return;
+    }
+    IterLast = RouteCache[L];
+    if (L >= 1)
+    {
+        IterPrev = RouteCache[L - 1];
+    }
+    else if (Pawn != None)
+    {
+        IterPrev = Pawn.Anchor;
+    }
+    if (IterLast == None || IterPrev == None || IterPrev == IterLast)
+    {
+        return;
+    }
+    IterSpec = IterPrev.GetReachSpecTo(IterLast);
+    if (IterSpec != None)
+    {
+        FollowStrikeEdge(IterSpec);
+        EchelonLog("NAV_STRIKE_GOAL goal=" $ string(G) $ " from=" $ string(IterPrev) $ " to=" $ string(IterLast));
+    }
+}
+
+// Nearest node within 700 uu (at least 100 uu away) that the bot can walk to, for random steps; false when none of the first 8 checked can.
+final function bool NavReachableSpot(out vector Spot)
+{
+    local NavigationPoint IterN;
+    local float IterD, IterBest;
+    local int IterChecked;
+    local bool bFound;
+
+    IterBest = 999999.0;
+    foreach WorldInfo.RadiusNavigationPoints(class'NavigationPoint', IterN, Pawn.Location, 700.0)
+    {
+        if (PathNode(IterN) == None)
+        {
+            continue;
+        }
+        IterD = VSize(IterN.Location - Pawn.Location);
+        if (IterD < 100.0 || IterD >= IterBest || (mut != None && mut.SurveyNodeInWall(IterN)))
+        {
+            continue;
+        }
+        IterChecked++;
+        if (IterChecked > 8)
+        {
+            break;
+        }
+        if (WalkReachable(IterN))
+        {
+            IterBest = IterD;
+            Spot = IterN.Location;
+            bFound = true;
+        }
+    }
+    return bFound;
+}
+
+// A short random step to a node the bot can walk to; nothing when there is none (it used to walk a random straight line into walls).
+final function NavRandomStep()
+{
+    local vector IterSpot;
+
+    if (NavReachableSpot(IterSpot))
+    {
+        MoveToX(IterSpot);
+    }
+    else
+    {
+        EchelonLog("NAV_RANDOM_STEP none=1");
+    }
+}
+
+// Level-4 breaker for a loop: pause the tether for 10 s and let the hub pick something else.
+final function NavBreakLoop(float IterNow)
+{
+    NavBlockedUntil = IterNow + 10.0;
+    NavLoopSince = IterNow;
+    EchelonLog("NAV_BLOCKED state=" $ string(GetStateName()) $ " reason=loop rank=" $ string(int(BotRank)));
+    AbortMove();
+    HubFail("NavBlocked");
+    EndMoveTime = IterNow - 1.0;
+}
+
 // Progress check for MoveTo/MoveToward and the follow mover. 0.75 s without progress backs off (not in follow, which
 // has its own ladder), 1.5 s strikes the edge and ends the move so the hub replans, 3 s walks back to the last good
 // node, 6 s reports Blocked (the hub skips tethering for 10 s), 5 s of stall teleports to the last good node when neither the bot
@@ -1729,6 +1865,7 @@ final function NavProgressCheck()
     local vector IterDir;
     local ReachSpec IterSpec;
     local NavigationPoint IterEnd;
+    local Actor IterGoal;
 
     if (Pawn == None)
     {
@@ -1758,10 +1895,11 @@ final function NavProgressCheck()
         }
         NavStall = 0.0;
         NavLevel = 0;
-        if (Pawn.Anchor != None && VSizeSq(Pawn.Location - Pawn.Anchor.Location) < 14400.0)
+        if (Pawn.Anchor != None && Pawn.ReachedDestination(Pawn.Anchor))
         {
-            NavLastGood = Pawn.Anchor;
+            NavLastGood = Pawn.Anchor;   // only a node the pawn really stood on
         }
+        NavWalkBackAt = 0.0;
         NavProbeLoc = Pawn.Location;
         NavProbeTime = IterNow;
         return;
@@ -1792,6 +1930,15 @@ final function NavProgressCheck()
             bAdjusting = true;
             AdjustPosition.Position = Pawn.Location + (Normal(IterDir) * 64.0);
             EchelonLog("NAV_STUCK level=1 state=" $ string(GetStateName()) $ " stalled=" $ string(NavStall) $ " rank=" $ string(int(BotRank)) $ NavStuckInfo(false));
+            if (IterNow - NavLoopLast > 8.0)
+            {
+                NavLoopSince = IterNow;
+            }
+            NavLoopLast = IterNow;
+            if (IterNow - NavLoopSince >= 6.0 && IterNow >= NavBlockedUntil)
+            {
+                NavBreakLoop(IterNow);
+            }
             if (mut != None)
             {
                 mut.NavStuckCount++;
@@ -1824,16 +1971,42 @@ final function NavProgressCheck()
             }
             EchelonLog("NAV_STUCK level=2 state=" $ string(GetStateName()) $ " target=" $ string(MoveTarget) $ " rank=" $ string(int(BotRank)) $ NavStuckInfo(false));
             EndMoveTime = IterNow - 1.0;
+            IterGoal = NavStuckGoal();
+            if (IterGoal != None)
+            {
+                if (IterGoal == NavLastStuckGoal && IterNow - NavLastStuckGoalTime < 60.0)
+                {
+                    NavStrikeLinkInto(IterGoal);
+                    NavSkipGoalFor(IterGoal, 30.0, "two_stucks");
+                    NavLastStuckGoal = None;
+                }
+                else
+                {
+                    NavLastStuckGoal = IterGoal;
+                    NavLastStuckGoalTime = IterNow;
+                }
+            }
         }
     }
     if (NavLevel < 3 && NavStall >= 3.0)
     {
         NavLevel = 3;
         EchelonLog("NAV_STUCK level=3 state=" $ string(GetStateName()) $ " lastgood=" $ string(NavLastGood));
-        if (!bFollow && NavLastGood != None)
+        if (!bFollow && NavLastGood != None && NavLastGood != Pawn.Anchor)
         {
+            NavWalkBackAt = IterNow;
             MoveTowardX(NavLastGood, None, false);
         }
+        else if (!bFollow && NavLastGood != None)
+        {
+            EchelonLog("NAV_WALKBACK_SKIP node=" $ string(NavLastGood) $ " reason=is_anchor");
+        }
+    }
+    if (NavLevel >= 3 && NavWalkBackAt > 0.0 && IterNow - NavWalkBackAt >= 1.5 && NavLastGood != None)
+    {
+        EchelonLog("NAV_LASTGOOD_CLEAR node=" $ string(NavLastGood) $ " reason=walkback_stalled");
+        NavLastGood = None;
+        NavWalkBackAt = 0.0;
     }
     if (NavLevel < 4 && NavStall >= 6.0)
     {

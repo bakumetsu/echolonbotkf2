@@ -390,9 +390,13 @@ state Roaming
             }
         }
 
+        if (RandGoal != None && NavGoalSkipped(RandGoal))
+        {
+            RandGoal = None;
+        }
         if (RandGoal == None && !BuildRandomPath())
         {
-            MoveToX(Pawn.Location + (VRand() * 300.0));
+            NavRandomStep();
             return;
         }
 
@@ -406,7 +410,7 @@ state Roaming
         if (!BuildPathToward(RandGoal))
         {
             RandGoal = None;
-            MoveToX(Pawn.Location + (VRand() * 300.0));
+            NavRandomStep();
             return;
         }
 
@@ -515,6 +519,11 @@ state DoObjective extends Roaming
             PickCombatStyle();
             return;
         }
+        if (NavGoalSkipped(ObjectiveGoal))
+        {
+            PickCombatStyle();
+            return;
+        }
 
         if (VSizeSq(ObjectiveGoal.Location - Pawn.Location) > 90000.0)
         {
@@ -561,9 +570,13 @@ state DoObjective extends Roaming
             return;
         }
 
+        if (RandGoal != None && NavGoalSkipped(RandGoal))
+        {
+            RandGoal = None;
+        }
         if (RandGoal == None && !BuildRandomPath())
         {
-            MoveToX(Pawn.Location + (VRand() * 300.0));
+            NavRandomStep();
             return;
         }
         if (WalkReachable(RandGoal))
@@ -575,7 +588,7 @@ state DoObjective extends Roaming
         if (!BuildPathToward(RandGoal))
         {
             RandGoal = None;
-            MoveToX(Pawn.Location + (VRand() * 300.0));
+            NavRandomStep();
             return;
         }
         MoveTowardX(MoveTarget);
@@ -1609,7 +1622,7 @@ state GoShopping
 
     function PickStyle()
     {
-        if (KFGRI.OpenedTrader == None)
+        if (KFGRI.OpenedTrader == None || NavGoalSkipped(KFGRI.OpenedTrader))
         {
             PickCombatStyle();
             return;
