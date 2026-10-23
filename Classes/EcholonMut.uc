@@ -52,7 +52,7 @@ var transient EcholonNavScan NavScan;         // start-of-match link scan state 
 var transient EcholonZonePlanner ZonePlanner;  // zone list builder, logging only (Hold and Relocate zones, step 2)
 var transient bool bZoneStarted;
 var() config int ZoneConfigVer;               // 0 = zone settings never written; 1 = defaults written once (separate from ConfigVer, which resets everything)
-var() config bool bZonePlanner;               // build the zone list at match start (logging only for now)
+var() config bool bZonePlanner;               // build the zone list at match start and hold a zone per normal wave
 var() config int ZoneMinSpots;                // standing spots a zone needs to count as usable
 var() config float ZoneSpotSpacing;           // minimum distance between two picked spots
 var() config float ZonePodRadius;             // first radius tried around a trader pod
@@ -2837,10 +2837,10 @@ function vector GetSlotLocation(EcholonBot B)
     return SquadOrders[GroupIdx].SlotLocs[SlotIdx];
 }
 
-// True when the location is inside the active zone: within its radius (2D) and less than 200 uu above or below the centre.
+// True when the location is inside the active zone: within its radius (2D) and less than 350 uu above or below the centre (spots are picked up to 300 uu off the centre height).
 function bool ZoneInside(vector L)
 {
-    return VSize2D(L - ZoneCenterLoc) <= ZoneRadiusVal + 100.0 && Abs(L.Z - ZoneCenterLoc.Z) < 200.0;
+    return VSize2D(L - ZoneCenterLoc) <= ZoneRadiusVal + 100.0 && Abs(L.Z - ZoneCenterLoc.Z) < 350.0;
 }
 
 function LogHoldTravel()
@@ -2896,6 +2896,7 @@ function EvaluateSquadPhase()
     local bool MemberInside;
     local int i;
     local int MemberIdx;
+    local int OthersAlive;
 
     if (WorldInfo == None || !HasHoldGoals())
         return;
@@ -2934,6 +2935,7 @@ function EvaluateSquadPhase()
         }
 
         MemberInside = false;
+        OthersAlive = 0;
         for (MemberIdx = 0; MemberIdx < Fireteams[i].Members.Length; MemberIdx++)
         {
             M = Fireteams[i].Members[MemberIdx];
@@ -2941,6 +2943,7 @@ function EvaluateSquadPhase()
                 continue;
             if (M.Pawn == None || M.Pawn.Health <= 0)
                 continue;
+            OthersAlive++;
             if (bZoneActive)
             {
                 if (ZoneInside(M.Pawn.Location))
@@ -2957,6 +2960,10 @@ function EvaluateSquadPhase()
                     MemberInside = true;
             }
         }
+
+        // A zone squad down to its leader alone has no follower to wait for.
+        if (bZoneActive && OthersAlive == 0)
+            MemberInside = true;
 
         if (O.Phase == PHASE_ENROUTE && LeaderInside && MemberInside)
         {
@@ -3101,11 +3108,15 @@ function EvaluateRegroupEntries()
                     NewLeader.ResetStuckState();
                     InheritSquadOrder(i, NewLeader);
                     SampleSquadSlots(i);
-                    O = SquadOrders[i];
-                    O.Phase = PHASE_REGROUP;
-                    O.StartTime = Now;
-                    SquadOrders[i] = O;
-                    EchelonLog("REGROUP_ENTER squad=" $ string(i + 1) $ " leaderDead newLeader=" $ string(NewLeader.Name));
+                    // A zone keeps its squads on their role spots: the zone re-deal already set the order.
+                    if (!bZoneActive)
+                    {
+                        O = SquadOrders[i];
+                        O.Phase = PHASE_REGROUP;
+                        O.StartTime = Now;
+                        SquadOrders[i] = O;
+                        EchelonLog("REGROUP_ENTER squad=" $ string(i + 1) $ " leaderDead newLeader=" $ string(NewLeader.Name));
+                    }
                     SyncSquadLeaders();
                 }
             }
@@ -3222,7 +3233,7 @@ function ZonePickStep()
     local KFGameReplicationInfo GRI;
     local EcholonBot L, Core;
     local vector Ref;
-    local int i, n, Pick, ZIdx;
+    local int i, n, Pick, ZIdx, Pass;
     local float Now, D;
     local array<int> Excl, Cands;
     local string BandName, RecentStr;
@@ -3268,29 +3279,37 @@ function ZonePickStep()
     }
     Ref = Ref / float(n);
 
-    for (i = 0; i < RecentZones.Length; i++)
+    // Pass 0 skips the last zones used; if that leaves nothing (a map with 1 or 2 usable zones), pass 1 allows them.
+    for (Pass = 0; Pass < 2 && Cands.Length == 0; Pass++)
     {
-        Excl.AddItem(RecentZones[i]);
-    }
-    for (i = 0; i < ZoneTriedIds.Length; i++)
-    {
-        Excl.AddItem(ZoneTriedIds[i]);
-    }
-
-    BandName = "30-80";
-    Cands = ZonePlanner.CandidateZones(Ref, ZoneMinDist, ZoneMaxDist, Excl);
-    if (Cands.Length == 0)
-    {
-        BandName = "120";
-        Cands = ZonePlanner.CandidateZones(Ref, ZoneMinDist, ZoneWideDist, Excl);
-    }
-    if (Cands.Length == 0)
-    {
-        BandName = "nearest";
-        ZIdx = ZonePlanner.NearestUsable(Ref, Excl);
-        if (ZIdx >= 0)
+        Excl.Length = 0;
+        if (Pass == 0)
         {
-            Cands.AddItem(ZIdx);
+            for (i = 0; i < RecentZones.Length; i++)
+            {
+                Excl.AddItem(RecentZones[i]);
+            }
+        }
+        for (i = 0; i < ZoneTriedIds.Length; i++)
+        {
+            Excl.AddItem(ZoneTriedIds[i]);
+        }
+
+        BandName = "30-80";
+        Cands = ZonePlanner.CandidateZones(Ref, ZoneMinDist, ZoneMaxDist, Excl);
+        if (Cands.Length == 0)
+        {
+            BandName = "120";
+            Cands = ZonePlanner.CandidateZones(Ref, ZoneMinDist, ZoneWideDist, Excl);
+        }
+        if (Cands.Length == 0)
+        {
+            BandName = "nearest";
+            ZIdx = ZonePlanner.NearestUsable(Ref, Excl);
+            if (ZIdx >= 0)
+            {
+                Cands.AddItem(ZIdx);
+            }
         }
     }
     if (Cands.Length == 0)
