@@ -134,6 +134,8 @@ var() config float ZoneMergeDist;             // a pod this close to a Dosh Hold
 var transient EcholonNavGrid NavGrid;         // shared floor-is-lava tile table (N10)
 var() config bool bSurveyNav;                 // use the survey map data (KFEcholonMapData.ini) for routes and steering; opt-in until the playtest passes. ?SurveyNav=1/0 overrides for one match
 var transient bool bSurveyNavNow;             // bSurveyNav after the ?SurveyNav= option
+var transient int SurveyUnpacked;             // chunks unpacked this frame
+var transient int NavStuckCount;              // NAV_STUCK level 1 events this match (NAV_SURVEY_SUMMARY)
 var transient EcholonMapData MapData;         // this map's survey data from KFEcholonMapData.ini (None when the switch is off)
 var() config int NavGridSquads;               // 0 = lava grid for every squad, N = only squad N (1 = first), -1 = off
 var() config bool bNavGridDebug;              // log an ASCII map of the grid around squad 1's leader every 20 s
@@ -460,6 +462,64 @@ function MapDataUnits()
             return;
         }
     }
+}
+
+// Every 0.25 s: queue the survey chunks around each bot so they are unpacked before the bot gets there.
+function SurveyPrefetch()
+{
+    local int I;
+
+    if (NavGrid == None || !NavGrid.bSurveyReady)
+    {
+        return;
+    }
+    for (I = 0; I < ActiveBots.Length; I++)
+    {
+        if (ActiveBots[I] != None && ActiveBots[I].Pawn != None)
+        {
+            NavGrid.SurveyPrefetch(ActiveBots[I].Pawn.Location);
+        }
+    }
+}
+
+// NAV_GRID_UNPACK every 30 s.
+function SurveyGridReport()
+{
+    if (NavGrid == None || !NavGrid.bSurveyReady)
+    {
+        return;
+    }
+    EchelonLog("NAV_GRID_UNPACK unpacked=" $ string(NavGrid.SUnpacked) $ "/" $ string(NavGrid.SKeys.Length) $ " window=" $ string(NavGrid.SUnpackedWindow)
+        $ " max_per_frame=" $ string(NavGrid.SMaxFrame) $ " tiles=" $ string(NavGrid.SUnpacked * 256) $ " queued=" $ string(NavGrid.SQueue.Length));
+    NavGrid.SUnpackedWindow = 0;
+    NavGrid.SMaxFrame = 0;
+}
+
+// End of a playtest match: stucks, relaxes and the estimated frame cost, so a run with bSurveyNav on and one with it off can be compared.
+function SurveyNavSummary()
+{
+    local int On, Relax, Unpacked;
+    local string TotalsText;
+
+    On = 0;
+    Relax = 0;
+    Unpacked = 0;
+    TotalsText = "";
+    if (NavMeter != None)
+    {
+        TotalsText = NavMeter.TotalsText();
+    }
+    if (MapData != None && MapData.bUsable)
+    {
+        On = 1;
+        Relax = MapData.RelaxCount;
+    }
+    if (NavGrid != None)
+    {
+        Unpacked = NavGrid.SUnpacked;
+    }
+    EchelonLog("NAV_SURVEY_SUMMARY map=" $ WorldInfo.GetMapName() $ " survey_nav=" $ string(On) $ " stucks=" $ string(NavStuckCount) $ " relaxes=" $ string(Relax)
+        $ " chunks_unpacked=" $ string(Unpacked) $ " minutes=" $ string(int(WorldInfo.TimeSeconds / 60.0)) $ " " $ TotalsText);
 }
 
 // True when the survey says this node sits inside a wall (never a steer target, crumb or relocation spot).
@@ -797,6 +857,16 @@ event Tick(float DeltaTime)
         if (MapData.Step() && MapData.bUsable)
         {
             MapDataUnits();
+            SetTimer(0.25, true, 'SurveyPrefetch');
+            SetTimer(30.0, true, 'SurveyGridReport');
+        }
+    }
+    if (NavGrid != None && NavGrid.bSurveyReady)
+    {
+        SurveyUnpacked = NavGrid.SurveyUnpackStep();
+        if (SurveyUnpacked > 0 && NavMeter != None)
+        {
+            NavMeter.CountUnpack(SurveyUnpacked);
         }
     }
     if (bSurvey && SurveyGrid != None)
@@ -1240,6 +1310,7 @@ final function PlaytestCheckWaveEnd()
 
         if (Reason != "")
         {
+            SurveyNavSummary();
             EchelonLog("PLAYTEST_DONE reason=" $ Reason $ " waves_done=" $ string(PlaytestWavesDone));
             bPlaytestDone = true;
             SetTimer(5.0, false, 'PlaytestQuit');

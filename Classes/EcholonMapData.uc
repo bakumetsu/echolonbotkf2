@@ -38,12 +38,14 @@ var config array<string> GridChunk;        // "cx,cy,lvl,packed"
 
 // state
 var EcholonMut Mut;
+var EcholonNavGrid Grid;                // receives the packed chunks (the lava grid object of the mutator)
+var int RelaxCount;                     // route searches that had to relax a survey step (for NAV_SURVEY_SUMMARY)
 var bool bFound;                        // the section exists in the ini
 var bool bChecked;                      // header compared with the live map
 var bool bMatch;                        // node count and checksum equal the live ones
 var bool bUsable;                       // found and matching: verdicts may be used
 var bool bDone;                         // every entry resolved
-var int Phase;                          // 0 links, 1 nodes, 2 spots
+var int Phase;                          // 0 links, 1 nodes, 2 spots, 3 grid chunks
 var int Idx;
 var int Frames;
 var int LiveNodes;
@@ -102,6 +104,7 @@ final function Begin(EcholonMut M)
     local int I;
 
     Mut = M;
+    Grid = M.NavGrid;
     bFound = (Map != "");
     LiveNodes = 0;
     LiveSum = 0;
@@ -273,7 +276,7 @@ final function bool Step()
             Idx = 0;
         }
     }
-    else
+    else if (Phase == 2)
     {
         while (Idx < Spot.Length && Items < PER_FRAME)
         {
@@ -293,6 +296,34 @@ final function bool Step()
         }
         if (Idx >= Spot.Length)
         {
+            Phase = 3;
+            Idx = 0;
+            if (Grid != None)
+            {
+                Grid.SurveyPrepare(GridChunk.Length, LevelH);
+            }
+        }
+    }
+    else
+    {
+        while (Idx < GridChunk.Length && Items < PER_FRAME)
+        {
+            Entry = GridChunk[Idx];
+            Idx++;
+            Items++;
+            ParseStringIntoArray(Entry, Parts, ",", false);
+            if (Grid == None || Parts.Length < 4)
+            {
+                continue;
+            }
+            Grid.SurveyAddChunk(int(Parts[0]), int(Parts[1]), int(Parts[2]), Parts[3]);
+        }
+        if (Idx >= GridChunk.Length)
+        {
+            if (Grid != None)
+            {
+                Grid.bSurveyReady = true;
+            }
             bDone = true;
             Report();
         }

@@ -101,6 +101,7 @@ var EFollowStatus FollowStatus;
 var EcholonNavMeter NavMeter;      // shared nav cost counter, set by EcholonMut.RegisterBot
 var EcholonNavBudget NavBudget;    // shared per-frame nav budget, set by EcholonMut.RegisterBot
 var EcholonMapData MapData;       // survey data of this map (None when bSurveyNav is off), set by EcholonMut
+var bool bLastTileSurvey;           // the last NavGridTile answer came from the survey (no floor height to compare)
 var float FollowNarrowSince;      // when this bot began waiting for a squadmate to clear a narrow link (0 = not waiting)
 var float FollowNarrowQuietUntil; // no narrow wait before this time (after a wait that timed out)
 var EcholonNavScan NavScan;        // start-of-match link scan result (bad links), set by EcholonMut.RegisterBot
@@ -498,13 +499,36 @@ function int NavGridEval(int TX, int TY, float RefZ, float Now)
 // Return the cached (or freshly evaluated) state of the tile containing Loc.
 function int NavGridTile(vector Loc, float RefZ, float Now, optional bool bEval)
 {
-    local int TX, TY, Band, TileState;
+    local int TX, TY, Band, TileState, SurveyState, SurveyDist;
     local float FloorZ;
 
     TX = NavGrid.TileOf(Loc.X);
     TY = NavGrid.TileOf(Loc.Y);
     Band = NavGrid.BandOf(RefZ);
+    bLastTileSurvey = false;
     TileState = NavGrid.Lookup(TX, TY, Band, Now, FloorZ);
+    if (TileState == class'EcholonNavGrid'.const.NAV_UNKNOWN && MapData != None && MapData.bUsable && NavGrid.bSurveyReady)
+    {
+        SurveyState = NavGrid.SurveyTile(TX, TY, RefZ, SurveyDist);
+        if (NavMeter != None)
+        {
+            NavMeter.CountGrid(1);
+        }
+        if (SurveyState == class'EcholonNavGrid'.const.SV_CLEAR)
+        {
+            bLastTileSurvey = true;
+            return class'EcholonNavGrid'.const.NAV_SAFE;
+        }
+        if (SurveyState == class'EcholonNavGrid'.const.SV_EDGE)
+        {
+            bLastTileSurvey = true;
+            if (NavSurveyDropOk())
+            {
+                return class'EcholonNavGrid'.const.NAV_SAFE;
+            }
+            return class'EcholonNavGrid'.const.NAV_LAVA;
+        }
+    }
     if (TileState == class'EcholonNavGrid'.const.NAV_UNKNOWN && bEval)
     {
         if (NavBudget == None || NavMeter == None || NavBudget.TakeUs(class'EcholonNavBudget'.const.NAV_PRIO_GRID, 6.0 * NavMeter.UnitTraceUs, Now))
@@ -542,6 +566,11 @@ function int NavGridRayClear(vector Dir, float RefZ, float Now, int MaxTiles, bo
             TY = NavGrid.TileOf(Loc.Y);
             Band = NavGrid.BandOf(RefZ);
             NavGrid.Lookup(TX, TY, Band, Now, FloorZ);
+            if (bLastTileSurvey)
+            {
+                bHasPrev = false;   // the survey grid keeps no floor heights; it already says the tile is standable on this floor
+                continue;
+            }
             // One tile apart: a 35 uu step plus a 45 deg slope still walks (stairs, ramps).
             if (bHasPrev && Abs(FloorZ - PrevFloorZ) > 50.0)
             {
@@ -552,6 +581,104 @@ function int NavGridRayClear(vector Dir, float RefZ, float Now, int MaxTiles, bo
         }
     }
     return MaxTiles;
+}
+
+// True while this bot walks a link the survey marked safe_drop: its drop-edge tiles are not lava then.
+function bool NavSurveyDropOk()
+{
+    local NavigationPoint IterPrev, IterNext;
+
+    if (MapData == None || !MapData.bUsable || Pawn == None || FollowRouteIdx >= FollowRoute.Length)
+    {
+        return false;
+    }
+    IterNext = NavigationPoint(FollowRoute[FollowRouteIdx]);
+    if (FollowRouteIdx > 0)
+    {
+        IterPrev = NavigationPoint(FollowRoute[FollowRouteIdx - 1]);
+    }
+    else
+    {
+        IterPrev = Pawn.Anchor;
+    }
+    if (IterNext == None || IterPrev == None || IterPrev == IterNext)
+    {
+        return false;
+    }
+    return MapData.VerdictOf(IterPrev.GetReachSpecTo(IterNext)) == class'EcholonMapData'.const.VK_SAFE_DROP;
+}
+
+// Sum of the wall distances of the first 3 tiles along Dir (0 when the survey does not know them): more room = a better bend.
+function int NavSurveyClearance(vector Dir, float RefZ)
+{
+    local int I, S, D, Sum;
+    local vector Loc;
+
+    if (MapData == None || !MapData.bUsable || NavGrid == None || !NavGrid.bSurveyReady)
+    {
+        return 0;
+    }
+    Sum = 0;
+    for (I = 1; I <= 3; I++)
+    {
+        Loc.X = Pawn.Location.X + Dir.X * I * class'EcholonNavGrid'.const.NAV_TILE;
+        Loc.Y = Pawn.Location.Y + Dir.Y * I * class'EcholonNavGrid'.const.NAV_TILE;
+        S = NavGrid.SurveyTile(NavGrid.TileOf(Loc.X), NavGrid.TileOf(Loc.Y), RefZ, D);
+        if (S == class'EcholonNavGrid'.const.SV_CLEAR)
+        {
+            Sum += D;
+        }
+    }
+    if (NavMeter != None)
+    {
+        NavMeter.CountGrid(3);
+    }
+    return Sum;
+}
+
+// True when the survey grid alone says the straight walk From -> To is free: every tile along the line (a sample every half tile)
+// is standable on this floor, has room for the body (wall distance 1 or more) and has no hidden collision. A "no" or "don't know"
+// means nothing: the caller then does its real traces. Lines over 40 samples or with a height change over 60 uu are not tried.
+function bool NavSurveyLineClear(vector From, vector To)
+{
+    local int I, N, S, D;
+    local float RefZ;
+    local vector P;
+
+    if (MapData == None || !MapData.bUsable || NavGrid == None || !NavGrid.bSurveyReady || Pawn == None)
+    {
+        return false;
+    }
+    if (Abs(To.Z - From.Z) > 60.0)
+    {
+        return false;
+    }
+    N = int(VSize2D(To - From) / 19.0);
+    if (N > 40)
+    {
+        return false;
+    }
+    N = Max(N, 1);
+    RefZ = From.Z - Pawn.GetCollisionHeight();
+    for (I = 0; I <= N; I++)
+    {
+        P = From + (To - From) * (float(I) / float(N));
+        S = NavGrid.SurveyTile(NavGrid.TileOf(P.X), NavGrid.TileOf(P.Y), RefZ, D);
+        if (S != class'EcholonNavGrid'.const.SV_CLEAR || D < 1)
+        {
+            if (NavMeter != None)
+            {
+                NavMeter.CountGrid(I + 1);
+            }
+            return false;
+        }
+    }
+    if (NavMeter != None)
+    {
+        NavMeter.CountGrid(N + 1);
+        NavMeter.CountSaved(3);
+    }
+    return true;
 }
 
 // Choose the walk direction, bending around lava when the wanted path is blocked.
@@ -565,6 +692,7 @@ function vector NavGridSteer(vector WantDir, optional float WantDist)
     local int I, C, MaxTiles;
     local float Deg, Rad, CosA, SinA;
     local int Angles[4];
+    local bool bSurveyOn;
 
     Now = WorldInfo.TimeSeconds;
 
@@ -572,7 +700,8 @@ function vector NavGridSteer(vector WantDir, optional float WantDist)
     {
         return WantDir;
     }
-    if (Now < NavGridOffUntil || Now >= NavGridArmedUntil)
+    bSurveyOn = (MapData != None && MapData.bUsable && NavGrid.bSurveyReady);
+    if (Now < NavGridOffUntil || (Now >= NavGridArmedUntil && !bSurveyOn))
     {
         return WantDir;
     }
@@ -628,6 +757,10 @@ function vector NavGridSteer(vector WantDir, optional float WantDist)
         H.Z = 0.0;
         C = NavGridRayClear(H, RefZ, Now, MaxTiles, true);
         R.X = 10.0 * float(C) - Abs(Deg) * 0.3;
+        if (bSurveyOn)
+        {
+            R.X += 1.5 * float(NavSurveyClearance(H, RefZ));
+        }
         if (R.X > BestScore)
         {
             BestScore = R.X;
@@ -1453,6 +1586,50 @@ function NavMapDataBenchmark()
         NavMeter.SetSurveyUnit(Us);
     }
     EchelonLog("NAV_MAPDATA_UNIT survey_link_us=" $ string(Us) $ " ops=" $ string(N * 200) $ " ms=" $ string(Elapsed));
+    NavGridBenchmark();
+}
+
+// One-time (NAV_MAPDATA_UNIT, second line): wall-clock cost of unpacking one chunk and of one grid tile lookup.
+function NavGridBenchmark()
+{
+    local int I, TX, TY, Dist, Elapsed, StartMs, EndMs, Y, Mo, Dw, D, H, Mi, S, Ms;
+    local float Z, UnpackUs, GridUs;
+
+    if (NavGrid == None || !NavGrid.bSurveyReady || NavMeter == None || !NavGrid.SurveySampleTile(TX, TY, Z))
+    {
+        return;
+    }
+    UnpackUs = -1.0;
+    GridUs = -1.0;
+    GetSystemTime(Y, Mo, Dw, D, H, Mi, S, Ms);
+    StartMs = ((H * 60 + Mi) * 60 + S) * 1000 + Ms;
+    for (I = 0; I < 200; I++)
+    {
+        NavGrid.UnpackChunk(0);
+    }
+    GetSystemTime(Y, Mo, Dw, D, H, Mi, S, Ms);
+    EndMs = ((H * 60 + Mi) * 60 + S) * 1000 + Ms;
+    if (EndMs >= StartMs)
+    {
+        UnpackUs = float(EndMs - StartMs) * 1000.0 / 200.0;
+    }
+    GetSystemTime(Y, Mo, Dw, D, H, Mi, S, Ms);
+    StartMs = ((H * 60 + Mi) * 60 + S) * 1000 + Ms;
+    for (I = 0; I < 20000; I++)
+    {
+        NavGrid.SurveyTile(TX, TY, Z, Dist);
+    }
+    GetSystemTime(Y, Mo, Dw, D, H, Mi, S, Ms);
+    EndMs = ((H * 60 + Mi) * 60 + S) * 1000 + Ms;
+    if (EndMs >= StartMs)
+    {
+        Elapsed = EndMs - StartMs;
+        GridUs = float(Elapsed) * 1000.0 / 20000.0;
+    }
+    NavGrid.SUnpacked = 1;
+    NavGrid.SUnpackedWindow = 0;
+    NavMeter.SetGridUnits(GridUs, UnpackUs);
+    EchelonLog("NAV_MAPDATA_UNIT unpack_chunk_us=" $ string(UnpackUs) $ " grid_check_us=" $ string(GridUs) $ " grid_ms=" $ string(Elapsed));
 }
 
 // Name of the survey relax step that brings a kind back in (for NAV_SURVEY_RELAX).
@@ -1518,6 +1695,7 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest)
             if (IterStrict && MapData != None && MapData.bUsable && MapData.bDone && IterSurveyLevel < 3)
             {
                 IterSurveyLevel++;
+                MapData.RelaxCount++;
                 EchelonLog("NAV_SURVEY_RELAX step=" $ FollowSurveyStepName(IterSurveyLevel) $ " goal=" $ string(Goal));
                 IterPass--;
                 continue;
@@ -1631,6 +1809,10 @@ function bool FollowWalkClear(vector From, vector To)
     if (Pawn == None)
     {
         return false;
+    }
+    if (NavSurveyLineClear(From, To))
+    {
+        return true;
     }
     R = Pawn.GetCollisionRadius();
     H = Pawn.GetCollisionHeight();
