@@ -21,6 +21,7 @@ const K_WALL = 3;
 const K_OBST = 4;
 const K_DROP = 5;
 const K_DOOR = 6;
+const K_NARROW = 7;          // walkable floor in a gap only one body wide: the body sweep fits only when shifted off the tile centre
 
 const F_STEP = 16;
 const F_CEIL = 32;
@@ -415,6 +416,7 @@ final function string KindName(int K)
     case 4: return "obstacle";
     case 5: return "drop";
     case 6: return "door";
+    case 7: return "narrow";
     }
     return "unknown";
 }

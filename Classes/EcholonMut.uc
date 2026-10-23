@@ -60,6 +60,18 @@ var transient int SurveyTraceLeft;                   // traces the survey bots m
 var transient int SurveyBfsLeft;                     // search nodes the survey bots may still expand this frame
 var transient int SurveyScanLeft;                    // grid slots the bots may still read this frame (far-frontier scans)
 var transient float SurveyDropMax;                   // deepest drop (uu) the bots take; lowered when a fall hurts
+var transient float SurveyStepMax;                   // the pawn's own step height (MaxStepHeight), 35 until read
+var transient float SurveyGravityZ;                  // pawn gravity (positive uu/s^2), read at survey start
+var transient float SurveyMaxFall;                   // pawn MaxFallSpeed: a landing faster than this hurts
+var transient float SurveyJumpReach;                 // highest ledge a jump can reach: (apex x jumps allowed + step) x 0.9
+var transient EcholonSurveyLeads SurveyLeads;        // pass 2 lead list
+var transient bool bPass2Allowed;                    // ?SurveyPass2=0 turns pass 2 off
+var transient bool bPass2Active;                     // pass 1 stalled, bots now try the designer's links
+var transient bool bSurveyPass2Req;                  // mutate SurveyPass2, or ?SurveyPass1Mins= passed: start pass 2 now
+var transient int SurveyPass1Mins;                   // ?SurveyPass1Mins=N: pass 2 starts after N minutes whatever pass 1 is doing (0 = when it stalls)
+var transient int SurveyPass2Tiles0;                 // grid size when pass 2 began (for the gain)
+var transient int SurveyPassageTiles;                // wall tiles turned into narrow floor by a walked lead
+var transient array<int> SurveyLevelDeaths;          // survey bot deaths per floor level (index level + 32); 3 bans the level for transfers
 var transient int SurveyDropLogs;                    // SURVEY_DROP lines written so far (capped)
 var transient int SurveyFrontScan;                   // shared far-frontier scan: cursor over the grid's slots
 var transient array<int> SurveyFrontBuild;           // ... unexpanded floor tile keys found so far in this pass
@@ -74,6 +86,12 @@ var transient float SurveyCostDtMax;
 var transient int SurveyCostTraces;
 var transient int SurveyCostBfs;
 var transient int SurveyCostScan;
+var transient float SurveyUnitTraceUs;              // unit costs measured once at survey start (SurveyBenchmark), microseconds
+var transient float SurveyUnitFindUs;                // one grid lookup
+var transient float SurveyUnitSlotUs;                // one hash slot read
+var transient float SurveyCostEst;                   // sum of the estimated survey cost per frame (us) in this window
+var transient float SurveyCostEstMax;
+var transient int SurveyCostOver;                    // frames whose estimate was above 4000 us
 var() config int SurveyBots;                         // survey bot count (0 or less = 4); ?SurveyBots=N overrides for one match
 var() config int SurveyMinutes;                      // time limit of a survey (0 or less = 60); ?SurveyMinutes=N overrides
 var() config int SurveyTraces;                       // traces per frame for all survey bots together (0 or less = 120)
@@ -89,7 +107,9 @@ var transient float SurveyNextProgress;
 var transient bool bSurveyDone;                      // the survey ended; the grid is being written to the log
 var transient bool bSurveyStopReq;                   // mutate SurveyStop
 var transient int SurveyLastExpanded;                // expanded-tile total at the last growth
-var transient float SurveyLastGrowth;                // when that total last grew (the survey ends as stalled after 3 minutes without)
+var transient float SurveyLastGrowth;                // when that total last grew by 30 or more in a minute (the survey ends as stalled after 3 minutes without)
+var transient float SurveyGrowthCheckAt;             // the growth check runs once a minute
+var transient int SurveyLastLeadsDone;               // pass 2: leads finished at the last check (a finished lead counts as growth)
 var transient string SurveyDoneReason;
 var transient bool bSurveyExporting;
 var transient int SurveyExpLvl;                      // GRID_ROW export cursor
@@ -860,6 +880,8 @@ function InitMutator(string Options, out string ErrorMessage)
     bSurvey = class'GameInfo'.static.ParseOption(Options, "Survey") ~= "1";
     if (bSurvey)
     {
+        bPass2Allowed = class'GameInfo'.static.GetIntOption(Options, "SurveyPass2", 1) != 0;
+        SurveyPass1Mins = class'GameInfo'.static.GetIntOption(Options, "SurveyPass1Mins", 0);
         SurveyBotsNow = class'GameInfo'.static.GetIntOption(Options, "SurveyBots", SurveyBots);
         if (SurveyBotsNow <= 0)
             SurveyBotsNow = 4;
@@ -4407,7 +4429,9 @@ function SurveyBegin()
     }
     SurveyGrid = new class'EcholonBot.EcholonSurveyGrid';
     SurveyGrid.Clear();
+    SurveyLevelDeaths.Length = 64;
     SurveyDropMax = 180.0;      // until SurveyComputeLimits has read the pawn
+    SurveyStepMax = 35.0;
     foreach WorldInfo.AllActors(class'PhysicsVolume', V)
     {
         if (V.bPainCausing || V.bWaterVolume)
@@ -4429,6 +4453,7 @@ function SurveyBegin()
     EchelonLog("SURVEY_BEGIN map=" $ WorldInfo.GetMapName() $ " bots=" $ string(SurveyBotList.Length) $ " starts=" $ string(SurveyStarts.Length)
         $ " hazards=" $ string(SurveyHazards.Length));
     SurveyComputeLimits();
+    SurveyBenchmark();
     NavDumpBegin(true);
 }
 
@@ -4436,9 +4461,9 @@ function SurveyBegin()
 // and a fall of h uu lands at sqrt(2 g h), so h = 0.85 MaxFallSpeed^2 / (2 g) with a margin. Logged once.
 function SurveyComputeLimits()
 {
-    local int I;
+    local int I, Jumps;
     local Pawn P;
-    local float G, V;
+    local float G, V, Apex;
 
     for (I = 0; I < SurveyBotList.Length; I++)
     {
@@ -4463,6 +4488,20 @@ function SurveyComputeLimits()
         V = 1325.0;
     }
     SurveyDropMax = 0.85 * V * V / (2.0 * G);
+    if (P.MaxStepHeight > 1.0)
+    {
+        SurveyStepMax = P.MaxStepHeight;
+    }
+    SurveyGravityZ = G;
+    SurveyMaxFall = V;
+    Jumps = 1;
+    if (KFPawn(P) != None && KFPawn(P).NumJumpsAllowed > 1)
+    {
+        Jumps = KFPawn(P).NumJumpsAllowed;
+    }
+    Apex = P.JumpZ * P.JumpZ / (2.0 * G);
+    SurveyJumpReach = (Apex * float(Jumps) + SurveyStepMax) * 0.9;
+    EchelonLog("SURVEY_JUMP_LIMITS jump_z=" $ string(int(P.JumpZ)) $ " jumps=" $ string(Jumps) $ " gravity=" $ string(int(G)) $ " apex=" $ string(int(Apex)) $ " step=" $ string(int(SurveyStepMax)) $ " reach=" $ string(int(SurveyJumpReach)));
     EchelonLog("SURVEY_LIMITS safe_fall=" $ string(int(SurveyDropMax)) $ " max_fall_speed=" $ string(int(V)) $ " gravity=" $ string(int(G))
         $ " step=" $ string(int(P.MaxStepHeight)) $ " jump_z=" $ string(int(P.JumpZ)) $ " jump_apex=" $ string(int(P.JumpZ * P.JumpZ / (2.0 * G))));
 }
@@ -4569,6 +4608,12 @@ function SurveyPlace(EcholonSurveyBot B, NavigationPoint Spot)
     B.Pawn.SetAnchor(Spot);
     B.Possess(B.Pawn, false);
     B.Pawn.SetMovementPhysics();
+    // the real bots jump higher and twice (EcholonBotBase.Restart); the survey pawns match so the links they find hold for the bots
+    B.Pawn.JumpZ = FMax(B.Pawn.JumpZ, 750.0);
+    if (KFPawn(B.Pawn) != None)
+    {
+        KFPawn(B.Pawn).NumJumpsAllowed = 2;
+    }
     KF.SetTeam(B, KF.Teams[0]);
     KF.SetPlayerDefaults(B.Pawn);
     if (KFPawn(B.Pawn) != None)
@@ -4577,7 +4622,7 @@ function SurveyPlace(EcholonSurveyBot B, NavigationPoint Spot)
     }
 }
 
-// A dead survey bot gets a new pawn; it is put back where it last stood on a good tile.
+// A dead survey bot gets a new pawn at its player start (not where it died: that can be a pit).
 function SurveyRespawn(EcholonSurveyBot B)
 {
     local PlayerStart Spot;
@@ -4588,10 +4633,6 @@ function SurveyRespawn(EcholonSurveyBot B)
     }
     Spot = SurveyStarts[B.BotIdx % SurveyStarts.Length];
     SurveyPlace(B, Spot);
-    if (B.Pawn != None && VSize(B.LastGoodPos) > 0.0)
-    {
-        B.Pawn.SetLocation(B.LastGoodPos);
-    }
 }
 
 // Per frame: refresh the budgets, keep zed spawns off, run every survey bot (the first one rotates).
@@ -4603,6 +4644,10 @@ function SurveyTickAll(float DT)
     SurveyBfsLeft = SurveyBfsNow;
     SurveyScanLeft = 12000;
     SurveyFrontierStep();
+    if (bPass2Active && SurveyLeads != None && !SurveyLeads.bBuilt)
+    {
+        SurveyLeads.BuildStep();
+    }
     if (KF != None && KF.SpawnManager != None)
     {
         KF.SpawnManager.TimeUntilNextSpawn = 9999.0;
@@ -4630,6 +4675,95 @@ function SurveyTickAll(float DT)
     SurveyCostTraces += SurveyTracesNow - SurveyTraceLeft;
     SurveyCostBfs += SurveyBfsNow - SurveyBfsLeft;
     SurveyCostScan += 12000 - SurveyScanLeft;
+    SurveyAccountFrame();
+}
+
+// Estimated cost of this frame's survey work (us): traces, search nodes (about 12 grid lookups each) and slot reads, times the unit costs.
+function SurveyAccountFrame()
+{
+    local float Est;
+
+    Est = float(SurveyTracesNow - SurveyTraceLeft) * SurveyUnitTraceUs + float(SurveyBfsNow - SurveyBfsLeft) * 12.0 * SurveyUnitFindUs
+        + float(12000 - SurveyScanLeft) * SurveyUnitSlotUs;
+    SurveyCostEst += Est;
+    if (Est > SurveyCostEstMax)
+    {
+        SurveyCostEstMax = Est;
+    }
+    if (Est > 4000.0)
+    {
+        SurveyCostOver++;
+    }
+}
+
+// Measure the unit costs once. Actor.Clock returns 0 in the retail game, so the time comes from GetSystemTime (millisecond steps, so
+// the loops are long enough): 6000 body-sized traces, 40000 grid lookups (on the empty grid, a little faster than a full one) and
+// 200000 hash slot reads.
+function SurveyBenchmark()
+{
+    local int I, Y, Mo, Dw, D, H, Mi, S, Ms, StartMs, EndMs, Sink;
+    local float Angle;
+    local vector Start, End, Ext, HitLoc, HitNorm;
+    local Pawn P;
+
+    for (I = 0; I < SurveyBotList.Length; I++)
+    {
+        if (SurveyBotList[I] != None && SurveyBotList[I].Pawn != None)
+        {
+            P = SurveyBotList[I].Pawn;
+            break;
+        }
+    }
+    if (P == None || SurveyGrid == None)
+    {
+        return;
+    }
+    Start = P.Location;
+    Ext.X = 36.0;
+    Ext.Y = 36.0;
+    Ext.Z = 8.0;
+    GetSystemTime(Y, Mo, Dw, D, H, Mi, S, Ms);
+    StartMs = ((H * 60 + Mi) * 60 + S) * 1000 + Ms;
+    for (I = 0; I < 6000; I++)
+    {
+        Angle = float(I % 8) * 0.785398;
+        End = Start;
+        End.X += Cos(Angle) * 400.0;
+        End.Y += Sin(Angle) * 400.0;
+        Trace(HitLoc, HitNorm, End, Start, true, Ext);
+    }
+    GetSystemTime(Y, Mo, Dw, D, H, Mi, S, Ms);
+    EndMs = ((H * 60 + Mi) * 60 + S) * 1000 + Ms;
+    if (EndMs < StartMs)
+    {
+        EndMs += 86400000;      // the clock passed midnight
+    }
+    SurveyUnitTraceUs = FMax(0.5, float(EndMs - StartMs) * 1000.0 / 6000.0);
+    StartMs = EndMs;
+    for (I = 0; I < 40000; I++)
+    {
+        Sink += SurveyGrid.GetData(SurveyGrid.MakeKey(I % 300 - 150, (I / 300) % 300 - 150, 0)) & 1;
+    }
+    GetSystemTime(Y, Mo, Dw, D, H, Mi, S, Ms);
+    EndMs = ((H * 60 + Mi) * 60 + S) * 1000 + Ms;
+    if (EndMs < StartMs)
+    {
+        EndMs += 86400000;      // the clock passed midnight
+    }
+    SurveyUnitFindUs = FMax(0.05, float(EndMs - StartMs) * 1000.0 / 40000.0);
+    StartMs = EndMs;
+    for (I = 0; I < 200000; I++)
+    {
+        Sink += SurveyGrid.Keys[I % SurveyGrid.Keys.Length] & 1;
+    }
+    GetSystemTime(Y, Mo, Dw, D, H, Mi, S, Ms);
+    EndMs = ((H * 60 + Mi) * 60 + S) * 1000 + Ms;
+    if (EndMs < StartMs)
+    {
+        EndMs += 86400000;      // the clock passed midnight
+    }
+    SurveyUnitSlotUs = FMax(0.02, float(EndMs - StartMs) * 1000.0 / 200000.0);
+    EchelonLog("SURVEY_UNIT_COST trace_us=" $ string(SurveyUnitTraceUs) $ " find_us=" $ string(SurveyUnitFindUs) $ " slot_us=" $ string(SurveyUnitSlotUs) $ " sink=" $ string(Sink));
 }
 
 // One shared pass over the grid's slots (12000 a frame, one pass a second at most): the unexplored floor tiles become the list
@@ -4657,8 +4791,9 @@ function SurveyFrontierStep()
             continue;
         }
         D = SurveyGrid.Data[Slot];
-        if (SurveyGrid.DKind(D) == class'EcholonSurveyGrid'.const.K_FLOOR
-            && (SurveyGrid.DFlags(D) & (class'EcholonSurveyGrid'.const.F_EXPANDED | class'EcholonSurveyGrid'.const.F_BLOCKED)) == 0)
+        if ((SurveyGrid.DKind(D) == class'EcholonSurveyGrid'.const.K_FLOOR || SurveyGrid.DKind(D) == class'EcholonSurveyGrid'.const.K_NARROW)
+            && (SurveyGrid.DFlags(D) & (class'EcholonSurveyGrid'.const.F_EXPANDED | class'EcholonSurveyGrid'.const.F_BLOCKED)) == 0
+            && SurveyLevelDeaths[SurveyGrid.KeyLvl(K) + 32] < 3)
         {
             SurveyFrontBuild.AddItem(K);
         }
@@ -4672,7 +4807,7 @@ function SurveyFrontierStep()
 // 1 s timer: progress line every 30 s, and the end conditions.
 function SurveyCheck()
 {
-    local int I, IdleBots, Alive, Expanded;
+    local int I, IdleBots, Alive, Expanded, InLead;
     local float Mins;
     local EcholonSurveyBot B;
 
@@ -4681,6 +4816,11 @@ function SurveyCheck()
         return;
     }
     Mins = (WorldInfo.TimeSeconds - SurveyStartTime) / 60.0;
+    if (KF != None)
+    {
+        // deaths make the game recount the living players; without them it would end the wave as a wipe
+        KF.ForceLivingPlayerCount(byte(SurveyBotList.Length));
+    }
     if (WorldInfo.TimeSeconds >= SurveyNextProgress)
     {
         SurveyNextProgress = WorldInfo.TimeSeconds + 30.0;
@@ -4698,27 +4838,73 @@ function SurveyCheck()
             {
                 IdleBots++;
             }
+            if (B.Phase == B.SP_LEAD)
+            {
+                InLead++;
+            }
         }
     }
-    if (WorldInfo.TimeSeconds - SurveyStartTime > 60.0)
+    if (WorldInfo.TimeSeconds - SurveyStartTime > 60.0 && WorldInfo.TimeSeconds - SurveyGrowthCheckAt >= 60.0)
     {
+        // growth is 0.1 percent of the expanded tiles (at least 30) in the last minute, or in pass 2 a lead that finished; a
+        // trickle does not keep the survey alive (Paris and Dystopia trickled for 15 minutes after they were mapped)
         Expanded = SurveyExpandedTotal();
-        if (Expanded > SurveyLastExpanded || SurveyLastGrowth == 0.0)
+        if (Expanded - SurveyLastExpanded >= Max(30, Expanded / 1000) || SurveyLastGrowth == 0.0)
         {
-            SurveyLastExpanded = Expanded;
             SurveyLastGrowth = WorldInfo.TimeSeconds;
         }
+        if (bPass2Active && SurveyLeads != None && SurveyLeads.NOk + SurveyLeads.NFailed > SurveyLastLeadsDone)
+        {
+            SurveyLastLeadsDone = SurveyLeads.NOk + SurveyLeads.NFailed;
+            SurveyLastGrowth = WorldInfo.TimeSeconds;
+        }
+        SurveyLastExpanded = Expanded;
+        SurveyGrowthCheckAt = WorldInfo.TimeSeconds;
     }
     if (bSurveyStopReq)
         SurveyFinish("stop");
-    else if (SurveyLastGrowth > 0.0 && WorldInfo.TimeSeconds - SurveyLastGrowth > 180.0)
-        SurveyFinish("stalled");
     else if (SurveyGrid.bFull)
         SurveyFinish("grid_full");
     else if (Mins >= float(SurveyMinutesNow))
         SurveyFinish("time");
+    else if (bPass2Allowed && !bPass2Active && NavDump != None && NavDump.bDone
+        && (bSurveyPass2Req || (SurveyPass1Mins > 0 && Mins >= float(SurveyPass1Mins))
+            || (SurveyLastGrowth > 0.0 && WorldInfo.TimeSeconds - SurveyLastGrowth > 180.0) || (Alive > 0 && IdleBots == Alive)))
+        SurveyPass2Begin();
+    else if (bPass2Active && SurveyLeads != None && !SurveyLeads.bBuilt)
+        return;      // the lead list is still being built: the idle bots are waiting for it
+    else if (bPass2Active && SurveyLeads != None && SurveyLeads.Remaining() == 0 && InLead == 0 && SurveyLeads.NOkRound > 0 && SurveyLeads.Round < 8)
+    {
+        // every lead of this round is done and some worked: they opened new floor, so read the links again for the next round
+        EchelonLog("SURVEY_PASS2 round=" $ string(SurveyLeads.Round) $ " done ok=" $ string(SurveyLeads.NOkRound) $ " tiles=" $ string(SurveyGrid.Used));
+        SurveyLeads.Rebuild();
+        SurveyLastGrowth = WorldInfo.TimeSeconds;
+    }
+    else if (SurveyLastGrowth > 0.0 && WorldInfo.TimeSeconds - SurveyLastGrowth > 180.0)
+        SurveyFinish("stalled");
     else if (Alive > 0 && IdleBots == Alive)
         SurveyFinish("no_frontier");
+}
+
+// Pass 1 has stalled: build the lead list from the designer's links and let the idle bots try them (pass 2).
+function SurveyPass2Begin()
+{
+    local int I;
+
+    bPass2Active = true;
+    SurveyPass2Tiles0 = SurveyGrid.Used;
+    SurveyLeads = new class'EcholonBot.EcholonSurveyLeads';
+    SurveyLeads.Begin(self);
+    SurveyLastGrowth = WorldInfo.TimeSeconds;
+    SurveyLastExpanded = SurveyExpandedTotal();
+    for (I = 0; I < SurveyBotList.Length; I++)
+    {
+        if (SurveyBotList[I] != None)
+        {
+            SurveyBotList[I].IdleFails = 0;
+        }
+    }
+    EchelonLog("SURVEY_PASS2 begin tiles=" $ string(SurveyGrid.Used) $ " nodes=" $ string(SurveyLeads.Nodes.Length) $ " jump_reach=" $ string(int(SurveyJumpReach)));
 }
 
 // SURVEY_COST every 30 s: the frame time while the survey runs (Actor.Clock returns 0 in the retail game, so the frame delta is the
@@ -4734,16 +4920,19 @@ function SurveyLogCost()
     }
     N = float(SurveyCostFrames);
     A10 = int(SurveyCostDt / N * 10000.0);
-    EchelonLog("SURVEY_COST frames=" $ string(SurveyCostFrames) $ " avg_ms=" $ string(A10 / 10) $ "." $ string(A10 % 10) $ " max_ms=" $ string(int(SurveyCostDtMax * 1000.0))
-        $ " traces_avg=" $ string(int(float(SurveyCostTraces) / N)) $ "/" $ string(SurveyTracesNow)
-        $ " bfs_avg=" $ string(int(float(SurveyCostBfs) / N)) $ "/" $ string(SurveyBfsNow)
-        $ " scan_avg=" $ string(int(float(SurveyCostScan) / N)) $ "/12000 front=" $ string(SurveyFrontList.Length));
+    EchelonLog("SURVEY_COST frames=" $ string(SurveyCostFrames) $ " est_avg_us=" $ string(int(SurveyCostEst / N)) $ " est_max_us=" $ string(int(SurveyCostEstMax))
+        $ " over_4ms=" $ string(SurveyCostOver) $ " traces_avg=" $ string(int(float(SurveyCostTraces) / N)) $ "/" $ string(SurveyTracesNow)
+        $ " bfs_avg=" $ string(int(float(SurveyCostBfs) / N)) $ "/" $ string(SurveyBfsNow) $ " scan_avg=" $ string(int(float(SurveyCostScan) / N)) $ "/12000"
+        $ " front=" $ string(SurveyFrontList.Length) $ " frame_ms_avg=" $ string(A10 / 10) $ "." $ string(A10 % 10) $ " (frame time includes the cap, not only the survey)");
     SurveyCostFrames = 0;
     SurveyCostDt = 0.0;
     SurveyCostDtMax = 0.0;
     SurveyCostTraces = 0;
     SurveyCostBfs = 0;
     SurveyCostScan = 0;
+    SurveyCostEst = 0.0;
+    SurveyCostEstMax = 0.0;
+    SurveyCostOver = 0;
 }
 
 // Tiles all bots have expanded so far.
@@ -4823,6 +5012,11 @@ function SurveyFinish(string Reason)
     SurveyExpTiles = 0;
     SurveyExpSlot = 0;
     SurveyExpPhase = 0;
+    if (bPass2Active && SurveyLeads != None)
+    {
+        EchelonLog("SURVEY_PASS2 end leads=" $ string(SurveyLeads.List.Length) $ " ok=" $ string(SurveyLeads.NOk) $ " failed=" $ string(SurveyLeads.NFailed) $ " left=" $ string(SurveyLeads.Remaining())
+            $ " tiles_gained=" $ string(SurveyGrid.Used - SurveyPass2Tiles0) $ " passage_tiles=" $ string(SurveyPassageTiles));
+    }
     SurveyRowMark.Length = 0;
     SurveyRowMark.Length = 262144;
     if (SurveyGrid.ClampCount > 0)
@@ -4955,6 +5149,11 @@ function Mutate(string MutateString, PlayerController Sender)
         {
             bSurveyStopReq = true;
             PMsg(Sender, "Survey: stop requested");
+        }
+        else if (MutateString ~= "SurveyPass2")
+        {
+            bSurveyPass2Req = true;
+            PMsg(Sender, "Survey: pass 2 requested");
         }
         else if (Left(MutateString, 11) ~= "SetNumBots ")
         {

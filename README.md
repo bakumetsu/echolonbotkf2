@@ -5,7 +5,7 @@ A ground-up rewrite of the KF2Bots single-player bot mod for Killing Floor 2 (UE
 ## Layout
 
 ```
-Classes/              the mod's UnrealScript source (19 classes)
+Classes/              the mod's UnrealScript source (20 classes)
 avatars/              bot avatar server and the KF2-Avatars launcher source (see avatars/README.md)
 docs/ARCHITECTURE.md  class chain, milestone plan, every class's symbols, single-writer rules
 ```
@@ -36,7 +36,7 @@ With the local kit, run `python kit\tools\playtest_runner.py --map KF-BioticsLab
 
 ## Map survey and bot trace
 
-Add `?Survey=1` to the map URL and the match becomes a map survey: no zeds, a few survey bots (`?SurveyBots=N`, default 4) feel the map blind and record a tile grid, and the game ends after `?SurveyMinutes=N` minutes (default 60) or when nothing is left to explore. The grid is written to the log as `GRID_ROW` lines. The ini key `bNavTrace` (default off) logs the map's path nodes and links (`NAVDUMP_` lines) and each bot's position and route every 0.25 s (`TRACE_` lines). With both off, none of this code runs. The viewer that draws the log lives in the local-only kit (`kit/tools/nav_viz.py`, see `kit/README.md`), not in GitHub. Details are in `docs/ARCHITECTURE.md` ("Survey mode, node dump and bot trace").
+Add `?Survey=1` to the map URL and the match becomes a map survey: no zeds, a few survey bots (`?SurveyBots=N`, default 4) feel the map blind and record a tile grid, and the game ends after `?SurveyMinutes=N` minutes (default 60) or when nothing is left to explore. The grid is written to the log as `GRID_ROW` lines. The ini key `bNavTrace` (default off) logs the map's path nodes and links (`NAVDUMP_` lines) and each bot's position and route every 0.25 s (`TRACE_` lines). When the walking survey stalls, pass 2 tries the designer's links that it did not walk (jumps, drops, windows, narrow doorways) and logs each success as a link (`?SurveyPass2=0` turns it off, `mutate SurveyPass2` starts it now). With both off, none of this code runs. The viewer that draws the log lives in the local-only kit (`kit/tools/nav_viz.py`, see `kit/README.md`), not in GitHub. Details are in `docs/ARCHITECTURE.md` ("Survey mode, node dump and bot trace").
 
 ## Docs before every push
 
