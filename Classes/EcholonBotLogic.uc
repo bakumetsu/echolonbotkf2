@@ -384,7 +384,7 @@ function UpdateGruntOffset()
         GruntTarget = SquadLeader.Pawn.Location;
         ApplyWedgeTarget(GruntTarget);
         GruntTarget = ApplyZStep(GruntTarget);
-        MoveToX(GruntTarget);
+        MoveToX(NavSnapSpot(GruntTarget, SquadLeader.Pawn.Location));
         return;
     }
 
@@ -404,6 +404,7 @@ function UpdateGruntOffset()
     {
         GruntTarget = SquadLeader.Pawn.Location;
     }
+    GruntTarget = NavSnapSpot(GruntTarget, SquadLeader.Pawn.Location);
 
     MoveToX(GruntTarget);
 }

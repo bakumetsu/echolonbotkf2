@@ -372,6 +372,9 @@ var transient float NextReloadAttempt;
 var transient float NextWeaponSwitchTime;
 var transient float NextFallbackPoll;
 var transient float NextWeaponLog;         // next COMBAT_WEAPON line (one per 5 s per bot while it fires)
+var transient vector NavSnapIn;              // last Grunt spot asked for and its snapped answer (kept 2 s)
+var transient vector NavSnapOut;
+var transient float NavSnapUntil;
 var transient int NavReswitchTries;        // switches to a gun tried while holding the knife; after 3 the bot fights with it
 var transient float NextRangedSwitch;      // next time a bot holding the knife in a fight may switch to a gun
 var transient KFWeapon FallbackPrimary;
@@ -1847,6 +1850,87 @@ final function bool NavReachableSpot(out vector Spot)
     return bFound;
 }
 
+// False when the survey grid says Spot is a wall, a drop edge or touches a wall (wall distance 0); true when it says nothing or says fine.
+final function bool NavSpotRoomy(vector Spot)
+{
+    local int IterS, IterD;
+
+    if (MapData == None || !MapData.bUsable || NavGrid == None || !NavGrid.bSurveyReady)
+    {
+        return true;
+    }
+    IterS = NavGrid.SurveyTile(NavGrid.TileOf(Spot.X), NavGrid.TileOf(Spot.Y), Spot.Z - 45.0, IterD);
+    if (IterS == class'EcholonNavGrid'.const.SV_NOFLOOR || IterS == class'EcholonNavGrid'.const.SV_EDGE)
+    {
+        return false;
+    }
+    return IterS != class'EcholonNavGrid'.const.SV_CLEAR || IterD >= 1;
+}
+
+// A Grunt's spot (formation slot, point near the leader, overwatch target) as a spot this bot can walk to: Spot itself when the engine says it is
+// reachable (and the survey grid says it has room), else the nearest path node within 300 uu of it that is; Fallback (the leader's position)
+// when there is none. The answer is kept for 2 s while the spot moves less than 100 uu, so this is not a search every tick.
+final function vector NavSnapSpot(vector Spot, vector Fallback)
+{
+    local NavigationPoint IterN;
+    local float IterD, IterBest, IterNow;
+    local int IterChecked;
+    local bool bFound;
+    local vector IterOut;
+
+    IterNow = WorldInfo.TimeSeconds;
+    if (IterNow < NavSnapUntil && VSizeSq(Spot - NavSnapIn) < 10000.0)
+    {
+        return NavSnapOut;
+    }
+    NavSnapIn = Spot;
+    NavSnapUntil = IterNow + 2.0;
+    NavSnapOut = Spot;
+    if (Pawn == None || !NavAllowReach())
+    {
+        return Spot;
+    }
+    if (NavSpotRoomy(Spot) && WalkPointReachable(Spot))
+    {
+        return Spot;
+    }
+    IterBest = 999999.0;
+    foreach WorldInfo.RadiusNavigationPoints(class'NavigationPoint', IterN, Spot, 300.0)
+    {
+        if (PathNode(IterN) == None || (mut != None && mut.SurveyNodeInWall(IterN)) || !NavSpotRoomy(IterN.Location))
+        {
+            continue;
+        }
+        IterD = VSize(IterN.Location - Spot);
+        if (IterD >= IterBest)
+        {
+            continue;
+        }
+        IterChecked++;
+        if (IterChecked > 6)
+        {
+            break;
+        }
+        if (WalkReachable(IterN))
+        {
+            IterBest = IterD;
+            IterOut = IterN.Location;
+            bFound = true;
+        }
+    }
+    if (bFound)
+    {
+        NavSnapOut = IterOut;
+        EchelonLog("NAV_SNAP spot=" $ FollowVecText(Spot) $ " to=" $ FollowVecText(IterOut) $ " dist=" $ string(int(IterBest)));
+    }
+    else
+    {
+        NavSnapOut = Fallback;
+        EchelonLog("NAV_SNAP_FAIL spot=" $ FollowVecText(Spot) $ " follow=1");
+    }
+    return NavSnapOut;
+}
+
 // A short random step to a node the bot can walk to; nothing when there is none (it used to walk a random straight line into walls).
 final function NavRandomStep()
 {
@@ -2861,7 +2945,7 @@ function vector ComputeFormationOffset(EcholonBot Leader, bool bSingleFile)
         Offset = Leader.Pawn.Location + (Forward * PERIMETER_RADIUS * cos(Angle * DEG_TO_RAD)) + (Right * PERIMETER_RADIUS * sin(Angle * DEG_TO_RAD));
     }
 
-    return Offset;
+    return NavSnapSpot(Offset, Leader.Pawn.Location);
 }
 
 final function int CountNearbyZeds(float Radius)

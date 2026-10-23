@@ -326,7 +326,7 @@ state Roaming
                 {
                     if (WalkReachable(GroupLeader.Pawn))
                     {
-                        MoveToX(GetPointNear(GroupLeader.Pawn, 600.0));
+                        MoveToX(NavSnapSpot(GetPointNear(GroupLeader.Pawn, 600.0), GroupLeader.Pawn.Location));
                         return;
                     }
                     if (BuildPathToward(GroupLeader.Pawn))
@@ -339,7 +339,7 @@ state Roaming
                 {
                     if (Rand(3) == 0)
                     {
-                        MoveToX(GetPointNear(GroupLeader.Pawn, 600.0));
+                        MoveToX(NavSnapSpot(GetPointNear(GroupLeader.Pawn, 600.0), GroupLeader.Pawn.Location));
                     }
                     else
                     {
@@ -364,7 +364,7 @@ state Roaming
                     {
                         if (WalkReachable(FollowingHuman))
                         {
-                            MoveToX(GetPointNear(FollowingHuman, 600.0));
+                            MoveToX(NavSnapSpot(GetPointNear(FollowingHuman, 600.0), FollowingHuman.Location));
                             return;
                         }
                         if (BuildPathToward(FollowingHuman))
@@ -377,7 +377,7 @@ state Roaming
                     {
                         if (Rand(3) == 0)
                         {
-                            MoveToX(GetPointNear(FollowingHuman, 600.0));
+                            MoveToX(NavSnapSpot(GetPointNear(FollowingHuman, 600.0), FollowingHuman.Location));
                         }
                         else
                         {
