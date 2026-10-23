@@ -15,6 +15,10 @@ const SP_PLAN = 2;
 const SP_WALK = 3;
 const SP_IDLE = 4;
 const SP_DEAD = 5;
+const SP_LEAD = 6;
+const LP_PLACE = 0;
+const LP_RUN = 1;
+const LP_AIR = 2;
 // Copies of the tile constants in EcholonSurveyGrid (keep in sync with that class).
 const TILE = 38.0;
 const K_FLOOR = 1;
@@ -23,6 +27,7 @@ const K_WALL = 3;
 const K_OBST = 4;
 const K_DROP = 5;
 const K_DOOR = 6;
+const K_NARROW = 7;
 const F_STEP = 16;
 const F_CEIL = 32;
 const F_HAZARD = 64;
@@ -37,10 +42,8 @@ const MOMENTUM = 0.25;      // seconds a bot keeps moving after a path ends, so 
 const VIS_SIZE = 131072;
 const VIS_MASK = 131071;
 const SEARCH_CAP = 60000;
-const STEP_UP = 40.0;       // the down trace starts this far above the current floor
-const STEP_DOWN = 60.0;     // ... and reaches this far below it; no floor in that span is a drop edge
-const STEP_MAX = 35.0;      // highest step a bot climbs (Pawn.MaxStepHeight)
-const KNEE = 45.0;          // height above the floor of the body-sized wall trace
+// The step height is the pawn's own (Mut.SurveyStepMax, 70 uu for a KF2 human): the down trace starts a little above it, a floor within it
+// is a step, the body-sized wall trace runs just above it (Knee), and no floor within a step below is a drop edge.
 const DROP_PROBE = 900.0;   // how far the second down trace looks for the landing (the safe fall limit itself is Mut.SurveyDropMax, computed from the pawn's fall damage settings)
 const ARRIVE_DIST = 10.0;   // 2D distance at which the last tile of a path counts as reached
 const PASS_DIST = 12.0;     // ... and an intermediate tile (also reached when the bot passed it within 40 uu)
@@ -108,6 +111,26 @@ var int NTraces;
 var int NTeleports;
 var int NDeaths;
 var int NBlockedByBot;
+var int LeadIdx;             // pass 2: the lead being tried (index in Mut.SurveyLeads.List), -1 none
+var NavigationPoint LeadA;
+var NavigationPoint LeadB;
+var int LeadType;
+var byte LeadPhase;
+var bool bLeadJump;          // this lead needs a jump
+var bool bLeadDrop;          // this lead is a drop
+var bool bLeadJumped;
+var bool bLeadJumped2;
+var float LeadT0;
+var float LeadTimeout;
+var float LeadJumpAt;        // jump when this close (2D) to the link's end
+var float LeadStartZ;
+var float LeadApexZ;
+var vector LeadStartPos;
+var vector LeadProgPos;
+var float LeadProgT;
+var int LeadHealth0;
+var int NLeadOk;
+var int NLeadFail;
 var int BotBlockRun;         // blocked-by-bot waits in a row on this step
 
 // ---- stage C: the cane ----
@@ -158,12 +181,15 @@ final function BeginExpand()
 
 final function int FeelNeighbour(int D)
 {
-    local int PTX, PTY, PL, QTX, QTY, Delta, QKey, QD, QL, Kind, Flags, DeltaIdx;
-    local float PX, PY, QX, QY, ZQ, NZ, LandZ, Fall;
-    local vector Start, End, HitLoc, HitNorm, Ext;
-    local Actor Hit;
+    local int PTX, PTY, PL, QTX, QTY, Delta, QKey, QD, QL, Kind, Flags, DeltaIdx, Si;
+    local float PX, PY, QX, QY, ZQ, NZ, LandZ, Fall, StepMax, Knee, Shift;
+    local vector Start, End, HitLoc, HitNorm, Ext, Perp;
+    local Actor Hit, Hit2;
     local string SafeStr;
+    local bool bNarrow;
 
+    StepMax = Mut.SurveyStepMax;
+    Knee = StepMax + 8.0;
     PTX = Grid.KeyTX(ExpKey);
     PTY = Grid.KeyTY(ExpKey);
     PL = Grid.KeyLvl(ExpKey);
@@ -186,14 +212,20 @@ final function int FeelNeighbour(int D)
         QD = Grid.GetData(QKey);
         if (QD != 0)
         {
-            if (Grid.DKind(QD) == K_FLOOR || Grid.DKind(QD) == K_STEEP)
+            if (Grid.DKind(QD) == K_FLOOR || Grid.DKind(QD) == K_STEEP || Grid.DKind(QD) == K_NARROW)
             {
-                if (Abs(Grid.DZ(QD) - ExpZ) <= STEP_MAX + 2.0)
+                if (Abs(Grid.DZ(QD) - ExpZ) <= StepMax + 2.0)
                 {
-                    if (Grid.DKind(QD) == K_FLOOR && (Grid.DFlags(QD) & (F_HAZARD | F_MOVER | F_BLOCKED | F_HIDDEN)) == 0)
+                    if (Grid.DKind(QD) == K_NARROW)
                     {
-                        Start = V3(PX, PY, ExpZ + KNEE);
-                        End = V3(QX, QY, Grid.DZ(QD) + KNEE);
+                        // a gap only one body wide: known, but walking tile centre to tile centre through it gets stuck, so no link
+                        // here; pass 2 walks the designer's link line through it instead
+                        QL = PL + Delta;
+                    }
+                    else if (Grid.DKind(QD) == K_FLOOR && (Grid.DFlags(QD) & (F_HAZARD | F_MOVER | F_BLOCKED | F_HIDDEN)) == 0)
+                    {
+                        Start = V3(PX, PY, ExpZ + Knee);
+                        End = V3(QX, QY, Grid.DZ(QD) + Knee);
                         Ext = V3(BodyR, BodyR, 6.0);
                         Hit = CaneTrace(HitLoc, HitNorm, End, Start, Ext);
                         if (Pawn(Hit) != None)
@@ -217,8 +249,8 @@ final function int FeelNeighbour(int D)
     }
 
     // c. new neighbour: DOWN trace (point)
-    Start = V3(QX, QY, ExpZ + STEP_UP);
-    End = V3(QX, QY, ExpZ - STEP_DOWN);
+    Start = V3(QX, QY, ExpZ + StepMax + 5.0);
+    End = V3(QX, QY, ExpZ - StepMax);
     Hit = CaneTrace(HitLoc, HitNorm, End, Start);
     if (Pawn(Hit) != None)
         return 1;
@@ -226,7 +258,7 @@ final function int FeelNeighbour(int D)
     if (Hit == None)
     {
         // drop edge: second trace to find landing
-        Start = V3(QX, QY, ExpZ - STEP_DOWN);
+        Start = V3(QX, QY, ExpZ - StepMax);
         End = V3(QX, QY, ExpZ - DROP_PROBE);
         Hit = CaneTrace(HitLoc, HitNorm, End, Start);
         if (Hit != None)
@@ -266,7 +298,7 @@ final function int FeelNeighbour(int D)
     if (Hit.IsA('InterpActor') || Hit.IsA('Mover'))
         Flags = Flags | F_MOVER;
 
-    if (ZQ - ExpZ > STEP_MAX)
+    if (ZQ - ExpZ > StepMax)
     {
         Grid.PutData(Grid.MakeKey(QTX, QTY, PL), Grid.PackData(K_WALL, 0, ExpZ));
         return 0;
@@ -280,8 +312,8 @@ final function int FeelNeighbour(int D)
     QKey = Grid.MakeKey(QTX, QTY, QL);
 
     // KNEE (wall) trace
-    Start = V3(PX, PY, ExpZ + KNEE);
-    End = V3(QX, QY, ZQ + KNEE);
+    Start = V3(PX, PY, ExpZ + Knee);
+    End = V3(QX, QY, ZQ + Knee);
     Ext = V3(BodyR, BodyR, 6.0);
     Hit = CaneTrace(HitLoc, HitNorm, End, Start, Ext);
     if (Pawn(Hit) != None)
@@ -291,16 +323,44 @@ final function int FeelNeighbour(int D)
         // A diagonal sweep also clips the corners beside it: leave the tile unknown, the straight neighbours decide it.
         if ((D & 1) != 0)
             return 0;
-        if (Hit.IsA('KFDoorActor'))
-            Kind = K_DOOR;
-        else if (WorldInfo(Hit) != None || Hit.IsA('StaticMeshCollectionActor'))
-            Kind = K_WALL;
-        else if (Hit.CollisionComponent != None && (FMax(Hit.CollisionComponent.Bounds.BoxExtent.X, Hit.CollisionComponent.Bounds.BoxExtent.Y) > 200.0 || Hit.CollisionComponent.Bounds.BoxExtent.Z > 150.0))
-            Kind = K_WALL;
-        else
-            Kind = K_OBST;
-        Grid.PutData(Grid.MakeKey(QTX, QTY, PL), Grid.PackData(Kind, 0, ExpZ));
-        return 0;
+        bNarrow = false;
+        if (!Hit.IsA('KFDoorActor'))
+        {
+            // A doorway only one body wide fails the centred sweep. Feel the same sweep shifted a quarter and half a tile to
+            // each side before calling the tile a wall; a clear shifted sweep makes it a narrow gap (walkable).
+            Perp = Normal(V3(PY - QY, QX - PX, 0.0));
+            for (Si = 0; Si < 4 && !bNarrow; Si++)
+            {
+                if (Si == 0)
+                    Shift = 9.5;
+                else if (Si == 1)
+                    Shift = -9.5;
+                else if (Si == 2)
+                    Shift = 19.0;
+                else
+                    Shift = -19.0;
+                Start = V3(PX + Perp.X * Shift, PY + Perp.Y * Shift, ExpZ + Knee);
+                End = V3(QX + Perp.X * Shift, QY + Perp.Y * Shift, ZQ + Knee);
+                Hit2 = CaneTrace(HitLoc, HitNorm, End, Start, Ext);
+                if (Pawn(Hit2) != None)
+                    return 1;
+                if (Hit2 == None)
+                    bNarrow = true;
+            }
+        }
+        if (!bNarrow)
+        {
+            if (Hit.IsA('KFDoorActor'))
+                Kind = K_DOOR;
+            else if (WorldInfo(Hit) != None || Hit.IsA('StaticMeshCollectionActor'))
+                Kind = K_WALL;
+            else if (Hit.CollisionComponent != None && (FMax(Hit.CollisionComponent.Bounds.BoxExtent.X, Hit.CollisionComponent.Bounds.BoxExtent.Y) > 200.0 || Hit.CollisionComponent.Bounds.BoxExtent.Z > 150.0))
+                Kind = K_WALL;
+            else
+                Kind = K_OBST;
+            Grid.PutData(Grid.MakeKey(QTX, QTY, PL), Grid.PackData(Kind, 0, ExpZ));
+            return 0;
+        }
     }
 
     // CEILING trace (point)
@@ -325,8 +385,11 @@ final function int FeelNeighbour(int D)
     if (Abs(ZQ - ExpZ) > 8.0)
         Flags = Flags | F_STEP;
 
-    Grid.PutData(QKey, Grid.PackData(K_FLOOR, Flags, ZQ));
-    if ((Flags & (F_HAZARD | F_MOVER)) == 0)
+    if (bNarrow)
+        Grid.PutData(QKey, Grid.PackData(K_NARROW, Flags, ZQ));
+    else
+        Grid.PutData(QKey, Grid.PackData(K_FLOOR, Flags, ZQ));
+    if ((Flags & (F_HAZARD | F_MOVER)) == 0 && !bNarrow)
         Grid.PutLinks(ExpKey, Grid.LinkSet(Grid.GetLinks(ExpKey), D, QL - PL));
     return 0;
 }
@@ -429,7 +492,7 @@ final function int StepSearch()
                 ND = Grid.GetData(NK);
                 if (ND == 0)
                     continue;
-                if (Grid.DKind(ND) != K_FLOOR)
+                if (Grid.DKind(ND) != K_FLOOR && Grid.DKind(ND) != K_NARROW)
                     continue;
                 if (Grid.DHas(ND, F_BLOCKED))
                     continue;
@@ -499,6 +562,7 @@ final function Setup(EcholonMut M, int Idx)
     SearchId = 0;
     ClaimKey = 0;
     IdleFails = 0;
+    LeadIdx = -1;
 }
 
 // PawnOk: true when the controller has a living pawn.
@@ -767,7 +831,7 @@ final function StepWalk()
     Pawn.Acceleration = MoveDir * 2000.0;
     Pawn.SetRotation(rotator(MoveDir));
 
-    if ((Now - BumpTime) < 0.25 && (MoveDir dot BumpNormal) < -0.5)
+    if ((Now - BumpTime) < 0.25 && (MoveDir dot BumpNormal) < -0.5 && Grid.DKind(Grid.GetData(WalkToKey)) != K_NARROW)
     {
         HiddenFound("bump", "actor=" $ BumpActorName);
         return;
@@ -797,8 +861,17 @@ final function SurveyTick(float DT)
     {
         if (Phase != SP_DEAD && Phase != SP_WAIT)
         {
-            Mut.EchelonLog("SURVEY_DEATH bot=" $ string(BotIdx) $ " tile=" $ TileText(CurKey));
+            Mut.EchelonLog("SURVEY_DEATH bot=" $ string(BotIdx) $ " tile=" $ TileText(CurKey) $ " level_deaths=" $ string(Mut.SurveyLevelDeaths[CurLvl + 32] + 1));
             NDeaths++;
+            // a death marks the tile and counts against its floor level; a level with 3 deaths is not transferred to any more
+            Grid.AddFlags(CurKey, F_BLOCKED);
+            Mut.SurveyLevelDeaths[CurLvl + 32] = Mut.SurveyLevelDeaths[CurLvl + 32] + 1;
+            if (LeadIdx >= 0)
+            {
+                Mut.SurveyLeads.Finish(LeadIdx, false);
+                Mut.EchelonLog("SURVEY_LEAD_FAIL bot=" $ string(BotIdx) $ " type=" $ LeadTypeName() $ " from=" $ string(LeadA) $ " to=" $ string(LeadB) $ " reason=died");
+                LeadIdx = -1;
+            }
             Phase = SP_DEAD;
             DeadSince = WorldInfo.TimeSeconds;
             ClaimKey = 0;
@@ -837,24 +910,35 @@ final function SurveyTick(float DT)
             }
             else if (R == 2)
             {
-                // nothing reachable on foot: go to the nearest unexplored floor on the mutator's shared list
-                Far = PickFarFrontier();
-                if (Far != 0)
+                // nothing reachable on foot: in pass 2 a lead comes first (the far-frontier pockets never run out), else go to the
+                // nearest unexplored floor on the mutator's shared list
+                if (TryClaimLead())
                 {
-                    TransferTo(Far);
+                    Pawn.Acceleration = V3(0.0, 0.0, 0.0);
                 }
                 else
                 {
-                    IdleFails++;
-                    Phase = SP_IDLE;
-                    IdleSince = WorldInfo.TimeSeconds;
-                    if (IdleFails == 1)
-                        Mut.EchelonLog("SURVEY_IDLE bot=" $ string(BotIdx) $ " expanded=" $ string(NExpanded));
+                    Far = PickFarFrontier();
+                    if (Far != 0)
+                    {
+                        TransferTo(Far);
+                    }
+                    else
+                    {
+                        IdleFails++;
+                        Phase = SP_IDLE;
+                        IdleSince = WorldInfo.TimeSeconds;
+                        if (IdleFails == 1)
+                            Mut.EchelonLog("SURVEY_IDLE bot=" $ string(BotIdx) $ " expanded=" $ string(NExpanded));
+                    }
                 }
             }
             break;
         case SP_WALK:
             StepWalk();
+            break;
+        case SP_LEAD:
+            StepLead();
             break;
         case SP_IDLE:
             Pawn.Acceleration = V3(0.0, 0.0, 0.0);
@@ -877,7 +961,7 @@ final function int PickFarFrontier()
     {
         K = Mut.SurveyFrontList[I];
         D = Grid.GetData(K);
-        if (D == 0 || Grid.DKind(D) != K_FLOOR || (Grid.DFlags(D) & (F_EXPANDED | F_BLOCKED)) != 0)
+        if (D == 0 || (Grid.DKind(D) != K_FLOOR && Grid.DKind(D) != K_NARROW) || (Grid.DFlags(D) & (F_EXPANDED | F_BLOCKED)) != 0)
             continue;
         X = Grid.CenterOf(Grid.KeyTX(K)) - Pawn.Location.X;
         Y = Grid.CenterOf(Grid.KeyTY(K)) - Pawn.Location.Y;
@@ -924,10 +1008,402 @@ final function TransferTo(int Key)
     BeginExpand();
 }
 
+// ---- Pass 2: trying a lead (a designer link pass 1 did not walk) ----
+
+// Called when the walking search and the far-frontier list have nothing: take the best unclaimed lead, if pass 2 runs.
+final function bool TryClaimLead()
+{
+    local int I;
+    local float Dz;
+
+    if (!Mut.bPass2Active || Mut.SurveyLeads == None || !Mut.SurveyLeads.bBuilt)
+    {
+        return false;
+    }
+    I = Mut.SurveyLeads.Claim(BotIdx, Pawn.Location);
+    if (I < 0)
+    {
+        return false;
+    }
+    LeadIdx = I;
+    LeadA = Mut.SurveyLeads.List[I].A;
+    LeadB = Mut.SurveyLeads.List[I].B;
+    LeadType = Mut.SurveyLeads.List[I].Type;
+    Dz = Mut.SurveyLeads.List[I].Dz;
+    bLeadDrop = (Dz < -60.0);
+    bLeadJump = (!bLeadDrop && (Mut.SurveyLeads.List[I].bJump || Dz > Mut.SurveyStepMax * 0.8));
+    LeadPhase = LP_PLACE;
+    Phase = SP_LEAD;
+    ClaimKey = 0;
+    Pawn.Acceleration = V3(0.0, 0.0, 0.0);
+    Mut.EchelonLog("SURVEY_LEAD bot=" $ string(BotIdx) $ " type=" $ LeadTypeName() $ " from=" $ string(LeadA) $ " to=" $ string(LeadB) $ " dz=" $ string(int(Dz))
+        $ " dist=" $ string(int(Mut.SurveyLeads.List[I].Dist)) $ " try=" $ string(Mut.SurveyLeads.List[I].Tries + 1));
+    return true;
+}
+
+final function string LeadTypeName()
+{
+    switch (LeadType)
+    {
+        case 0:
+            return "unreached";
+        case 1:
+            return "through";
+        case 2:
+            return "shortcut";
+    }
+    return "drop";
+}
+
+// The centre of the mapped floor tile nearest to Loc (floor within a body height below it), +4 uu; false when there is none.
+final function bool FindFloorNear(vector Loc, int Radius, out vector Pos)
+{
+    local int TX, TY, DX, DY, L0, Dl, D, Kind;
+    local float Z, Dd, BestD, Cx, Cy;
+    local bool bFound;
+
+    TX = Grid.TileOf(Loc.X);
+    TY = Grid.TileOf(Loc.Y);
+    L0 = Grid.LevelOf(Loc.Z - BodyH);
+    BestD = 1000000000000.0;
+    bFound = false;
+    for (DX = -Radius; DX <= Radius; DX++)
+    {
+        for (DY = -Radius; DY <= Radius; DY++)
+        {
+            for (Dl = -1; Dl <= 1; Dl++)
+            {
+                D = Grid.GetData(Grid.MakeKey(TX + DX, TY + DY, L0 + Dl));
+                if (D == 0)
+                {
+                    continue;
+                }
+                Kind = Grid.DKind(D);
+                if ((Kind != K_FLOOR && Kind != K_NARROW) || (Grid.DFlags(D) & (F_HAZARD | F_MOVER | F_BLOCKED)) != 0)
+                {
+                    continue;
+                }
+                Z = Grid.DZ(D);
+                if (Z < Loc.Z - BodyH - 100.0 || Z > Loc.Z - BodyH + 40.0)
+                {
+                    continue;
+                }
+                Cx = Grid.CenterOf(TX + DX);
+                Cy = Grid.CenterOf(TY + DY);
+                Dd = (Cx - Loc.X) * (Cx - Loc.X) + (Cy - Loc.Y) * (Cy - Loc.Y);
+                if (Dd < BestD)
+                {
+                    BestD = Dd;
+                    Pos = V3(Cx, Cy, Z + BodyH + 4.0);
+                    bFound = true;
+                }
+            }
+        }
+    }
+    return bFound;
+}
+
+// One try of the lead starts here: stand on mapped floor next to the link's start (for a jump, a run-up behind it), face the end.
+final function LeadPlace()
+{
+    local vector Dir, Pos, HitLoc, HitNorm;
+    local Actor Hit;
+    local bool bFound;
+    local int Tries;
+
+    Tries = Mut.SurveyLeads.List[LeadIdx].Tries;
+    Dir = Normal(V3(LeadB.Location.X - LeadA.Location.X, LeadB.Location.Y - LeadA.Location.Y, 0.0));
+    bFound = false;
+    if (bLeadJump)
+    {
+        bFound = FindFloorNear(LeadA.Location - Dir * 100.0, 1, Pos);
+    }
+    if (!bFound)
+    {
+        bFound = FindFloorNear(LeadA.Location, 3, Pos);
+    }
+    if (!bFound)
+    {
+        LeadFail("no_floor", true);
+        return;
+    }
+    if (bLeadJump && Tries == 0)
+    {
+        // is there room to stand where the link ends?
+        Hit = Trace(HitLoc, HitNorm, LeadB.Location + V3(0.0, 0.0, 2.0), LeadB.Location, true, V3(BodyR * 0.8, BodyR * 0.8, BodyH * 0.8),, TRACEFLAG_Blocking);
+        if (Hit != None && Pawn(Hit) == None)
+        {
+            LeadFail("no_room", true);
+            return;
+        }
+    }
+    Pawn.SetLocation(Pos);
+    Pawn.Velocity = V3(0.0, 0.0, 0.0);
+    Pawn.Acceleration = V3(0.0, 0.0, 0.0);
+    Pawn.SetPhysics(PHYS_Walking);
+    LeadStartPos = Pos;
+    LeadStartZ = Pos.Z;
+    LeadApexZ = Pos.Z;
+    LeadHealth0 = Pawn.Health;
+    bLeadJumped = false;
+    bLeadJumped2 = false;
+    LeadT0 = WorldInfo.TimeSeconds;
+    LeadTimeout = VSize(LeadB.Location - Pos) / 250.0 + 6.0;
+    LeadProgPos = Pos;
+    LeadProgT = WorldInfo.TimeSeconds;
+    if (Tries % 3 == 0)
+        LeadJumpAt = 190.0;
+    else if (Tries % 3 == 1)
+        LeadJumpAt = 120.0;
+    else
+        LeadJumpAt = 260.0;
+    bWasFalling = false;
+    LeadPhase = LP_RUN;
+}
+
+// One frame of a try: run at the link's end, jump when close enough, steer in the air, judge the landing.
+final function StepLead()
+{
+    local float Now, Dist2D;
+    local vector ToB, MoveDir;
+
+    if (LeadIdx < 0)
+    {
+        BeginSearch();
+        return;
+    }
+    if (LeadPhase == LP_PLACE)
+    {
+        LeadPlace();
+        return;
+    }
+    Now = WorldInfo.TimeSeconds;
+    ToB = LeadB.Location - Pawn.Location;
+    ToB.Z = 0.0;
+    Dist2D = VSize(ToB);
+    MoveDir = Normal(ToB);
+    if (Pawn.Location.Z > LeadApexZ)
+    {
+        LeadApexZ = Pawn.Location.Z;
+    }
+    if (LeadPhase == LP_RUN)
+    {
+        if (Dist2D < 70.0 && Abs(Pawn.Location.Z - LeadB.Location.Z) < 110.0 && Pawn.Physics != PHYS_Falling)
+        {
+            LeadSuccess();
+            return;
+        }
+        if (bLeadJump && !bLeadJumped && Dist2D <= LeadJumpAt && Pawn.Physics == PHYS_Walking)
+        {
+            Pawn.Acceleration = MoveDir * 2000.0;
+            Pawn.DoJump(false);
+            bLeadJumped = true;
+            LeadPhase = LP_AIR;
+            return;
+        }
+        if (Pawn.Physics == PHYS_Falling && bLeadDrop)
+        {
+            LeadPhase = LP_AIR;
+            return;
+        }
+        Pawn.Acceleration = MoveDir * 2000.0;
+        Pawn.SetRotation(rotator(MoveDir));
+        if (VSize(Pawn.Location - LeadProgPos) > 8.0)
+        {
+            LeadProgPos = Pawn.Location;
+            LeadProgT = Now;
+        }
+        else if (Now - LeadProgT > 2.0)
+        {
+            LeadFail("blocked", false);
+            return;
+        }
+        if (Now - LeadT0 > LeadTimeout)
+        {
+            LeadFail("timeout", false);
+        }
+        return;
+    }
+    // LP_AIR
+    Pawn.Acceleration = MoveDir * 2000.0;
+    if (bLeadJumped && !bLeadJumped2 && Pawn.Velocity.Z < 30.0 && Pawn.Physics == PHYS_Falling && Pawn.Location.Z < LeadB.Location.Z - 20.0)
+    {
+        // a second jump at the top of the first, as the real bots have (NumJumpsAllowed 2)
+        Pawn.DoJump(false);
+        bLeadJumped2 = true;
+    }
+    if (Pawn.Physics != PHYS_Falling)
+    {
+        if (Dist2D < 90.0 && Abs(Pawn.Location.Z - LeadB.Location.Z) < 110.0)
+        {
+            LeadSuccess();
+        }
+        else if (Dist2D >= 90.0 && LeadApexZ - LeadStartZ < LeadB.Location.Z - LeadStartZ - 20.0)
+        {
+            LeadFail("short", false);
+        }
+        else if (Dist2D >= 90.0)
+        {
+            LeadFail("short_far", false);
+        }
+        else
+        {
+            LeadFail("slid", false);
+        }
+        return;
+    }
+    if (Now - LeadT0 > LeadTimeout + 3.0)
+    {
+        LeadFail("timeout", false);
+    }
+}
+
+// The kind of link a success records.
+final function string LeadKind()
+{
+    if (bLeadDrop)
+        return "drop";
+    if (bLeadJumped)
+    {
+        if (LeadType == 1)
+            return "window";
+        return "jump";
+    }
+    if (LeadType == 2)
+        return "shortcut";
+    if (LeadType == 1)
+        return "through";
+    return "walk";
+}
+
+// Wall, obstacle and door tiles along the line a bot walked through become narrow floor (the designer's link proved the way).
+final function MarkPassage(vector A, vector B)
+{
+    local int Steps, K, TX, TY, L0, Dl, Key, D, Kind, N;
+    local float F, Z, Tz;
+    local vector P;
+
+    Steps = Max(1, int(VSize(B - A) / 19.0));
+    for (K = 0; K <= Steps; K++)
+    {
+        F = float(K) / float(Steps);
+        P = A + (B - A) * F;
+        TX = Grid.TileOf(P.X);
+        TY = Grid.TileOf(P.Y);
+        Z = P.Z;
+        L0 = Grid.LevelOf(Z - 45.0);
+        for (Dl = -1; Dl <= 1; Dl++)
+        {
+            Key = Grid.MakeKey(TX, TY, L0 + Dl);
+            D = Grid.GetData(Key);
+            if (D != 0)
+            {
+                Kind = Grid.DKind(D);
+                Tz = Grid.DZ(D);
+                if ((Kind == K_WALL || Kind == K_OBST || Kind == K_DOOR) && Tz >= Z - 130.0 && Tz <= Z + 60.0)
+                {
+                    Grid.PutData(Key, Grid.PackData(K_NARROW, 0, Tz));
+                    N++;
+                }
+            }
+        }
+    }
+    Mut.SurveyPassageTiles += N;
+}
+
+// The try worked: record the link, mark the tiles walked through, and start exploring from here (new floor).
+final function LeadSuccess()
+{
+    local int Dmg, TX, TY, Key, OneWay;
+    local float FloorZ, Dz;
+    local string Kind;
+
+    Kind = LeadKind();
+    Dmg = Max(0, LeadHealth0 - Pawn.Health);
+    Dz = LeadB.Location.Z - LeadA.Location.Z;
+    OneWay = 1;
+    if (!bLeadDrop && !bLeadJumped)
+    {
+        OneWay = 0;
+    }
+    else if (bLeadJumped && Dz > 0.0 && Dz <= Mut.SurveyDropMax)
+    {
+        OneWay = 0;
+    }
+    if (Dmg > 0 && bLeadDrop)
+    {
+        Mut.EchelonLog("SURVEY_DROP_DAMAGE bot=" $ string(BotIdx) $ " fall=" $ string(int(-Dz)) $ " health_lost=" $ string(Dmg) $ " lead=1");
+    }
+    Mut.EchelonLog("SURVEY_LINK kind=" $ Kind $ " from=" $ string(LeadA) $ " to=" $ string(LeadB) $ " from_at=" $ LeadXYZ(LeadStartPos) $ " to_at=" $ LeadXYZ(Pawn.Location)
+        $ " oneway=" $ string(OneWay) $ " dmg=" $ string(Dmg) $ " tries=" $ string(Mut.SurveyLeads.List[LeadIdx].Tries + 1));
+    if (!bLeadJumped && !bLeadDrop)
+    {
+        MarkPassage(LeadStartPos, Pawn.Location);
+    }
+    Mut.SurveyLeads.Finish(LeadIdx, true);
+    NLeadOk++;
+    LeadIdx = -1;
+    Pawn.Acceleration = V3(0.0, 0.0, 0.0);
+    TX = Grid.TileOf(Pawn.Location.X);
+    TY = Grid.TileOf(Pawn.Location.Y);
+    FloorZ = Pawn.Location.Z - BodyH;
+    Key = Grid.MakeKey(TX, TY, Grid.LevelOf(FloorZ));
+    if (Grid.GetData(Key) == 0)
+    {
+        Grid.PutData(Key, Grid.PackData(K_FLOOR, 0, FloorZ));
+    }
+    SetCurTile(Key);
+    LastGoodKey = Key;
+    LastGoodPos = Pawn.Location;
+    if (Grid.DHas(Grid.GetData(Key), F_EXPANDED))
+    {
+        ClaimKey = 0;
+        BeginSearch();
+    }
+    else
+    {
+        ClaimKey = Key;
+        BeginExpand();
+    }
+}
+
+final function string LeadXYZ(vector V)
+{
+    return string(int(V.X)) $ "," $ string(int(V.Y)) $ "," $ string(int(V.Z));
+}
+
+// The try failed: log it; another try (3 in all, a different jump distance each) unless it can never work.
+final function LeadFail(string Reason, bool bFinal)
+{
+    local int Tries;
+
+    Tries = Mut.SurveyLeads.List[LeadIdx].Tries + 1;
+    Mut.SurveyLeads.List[LeadIdx].Tries = Tries;
+    if (bLeadJump)
+    {
+        Mut.EchelonLog("SURVEY_JUMP_FAIL bot=" $ string(BotIdx) $ " at=" $ LeadXYZ(LeadStartPos) $ " ledge=" $ LeadXYZ(LeadB.Location) $ " reason=" $ Reason $ " try=" $ string(Tries));
+    }
+    else
+    {
+        Mut.EchelonLog("SURVEY_LEAD_FAIL bot=" $ string(BotIdx) $ " type=" $ LeadTypeName() $ " from=" $ string(LeadA) $ " to=" $ string(LeadB) $ " reason=" $ Reason $ " try=" $ string(Tries));
+    }
+    if (bFinal || Tries >= 3)
+    {
+        Mut.SurveyLeads.Finish(LeadIdx, false);
+        NLeadFail++;
+        LeadIdx = -1;
+        Pawn.Acceleration = V3(0.0, 0.0, 0.0);
+        TeleportToGood();
+        BeginSearch();
+        return;
+    }
+    LeadPhase = LP_PLACE;
+}
+
 // StatLine: one-line summary of this bot's counters.
 final function string StatLine()
 {
-    return "expanded=" $ string(NExpanded) $ " transfers=" $ string(NTransfers) $ " hidden=" $ string(NHidden) $ " stuck=" $ string(NStuck) $ " bybot=" $ string(NBlockedByBot) $ " teleports=" $ string(NTeleports) $ " deaths=" $ string(NDeaths) $ " searches=" $ string(NSearches) $ " traces=" $ string(NTraces);
+    return "expanded=" $ string(NExpanded) $ " leads_ok=" $ string(NLeadOk) $ " leads_fail=" $ string(NLeadFail) $ " transfers=" $ string(NTransfers) $ " hidden=" $ string(NHidden) $ " stuck=" $ string(NStuck) $ " bybot=" $ string(NBlockedByBot) $ " teleports=" $ string(NTeleports) $ " deaths=" $ string(NDeaths) $ " searches=" $ string(NSearches) $ " traces=" $ string(NTraces);
 }
 
 defaultproperties
