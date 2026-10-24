@@ -235,6 +235,14 @@ var() config bool bEnableFastTraceHealing;
 // Set bDisableAuditLog=True in the mutator's ini section to silence every [EcholonAudit] log line.
 // Off by default (logs on) so a missing ini key keeps the debug trail.
 var() config bool bDisableAuditLog;
+// Test-only (playtest): above 0, the playtest presses "next bot" on the spectator camera every this many seconds,
+// so the bot cycle can be proven from the log. 0 = off (normal play and normal playtests are unchanged).
+var() config float PlaytestCamCycleSecs;
+// Test-only: the forced cycle watches in first person instead of third person.
+var() config bool bPlaytestCamCycleFirstPerson;
+var transient float PlaytestNextCamCycle;
+var transient bool bPlaytestCamCycleInit;
+
 // Bots crouch (cover, squad holds, overwatch). Off unless set to True: crouching bots looked out
 // of place in playtests (2026-10-19).
 var() config bool bAllowBotCrouch;
@@ -1184,6 +1192,32 @@ final function PlaytestStepCamera(PlayerController PC, int Dir, optional bool bM
     }
 }
 
+// Test-only: one forced "next bot" press. The first call also sets the camera mode and logs the bot list once
+// (PLAYTEST_CAMERA_ORDER: each ActiveBots slot with its alive flag).
+final function PlaytestCamCycleStep(PlayerController PC)
+{
+    local int I;
+    local string Order;
+
+    if (!bPlaytestCamCycleInit)
+    {
+        bPlaytestCamCycleInit = true;
+        if (bPlaytestCamCycleFirstPerson)
+            PlaytestCamMode = 'FirstPerson';
+        for (I = 0; I < ActiveBots.Length; I++)
+        {
+            if (ActiveBots[I] != None)
+            {
+                if (Order != "")
+                    Order $= ",";
+                Order $= ActiveBots[I].LogTag() $ ":" $ string(ActiveBots[I].Pawn != None && ActiveBots[I].Pawn.IsAliveAndWell());
+            }
+        }
+        EchelonLog("PLAYTEST_CAMERA_ORDER cycle_secs=" $ string(PlaytestCamCycleSecs) $ " list=" $ Order);
+    }
+    PlaytestStepCamera(PC, 1, true);
+}
+
 // Camera-mode key (middle click): third person -> first person -> free turning orbit -> third person,
 // on the bot being watched. While the camera flies free it only changes the mode used when a bot is
 // watched again.
@@ -1548,6 +1582,12 @@ function PlaytestTick()
     }
 
     PlaytestCheckStuckWave();
+
+    if (PlaytestCamCycleSecs > 0.0 && !bPlaytestFreeFly && WorldInfo.TimeSeconds >= PlaytestNextCamCycle)
+    {
+        PlaytestNextCamCycle = WorldInfo.TimeSeconds + PlaytestCamCycleSecs;
+        PlaytestCamCycleStep(PC);
+    }
 
     if (WorldInfo.TimeSeconds >= PlaytestNextReportTime)
     {
