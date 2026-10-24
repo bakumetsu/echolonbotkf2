@@ -220,6 +220,11 @@ simulated function Weapon GetBestWeapon(optional bool bForceADifferentWeapon, op
                     break;
             }
 
+            if (Class'EcholonMut'.default.BotTestWeapon != "" && string(W.Class.Name) ~= Class'EcholonMut'.default.BotTestWeapon)
+            {
+                Rating *= 100.0;  // test only (BotTestWeapon): the named weapon always wins
+            }
+
             if (Class'EcholonMut'.default.bBotsUnlimitedAmmo)
             {
                 W.SpareAmmoCount[0] = 9999;
