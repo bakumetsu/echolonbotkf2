@@ -238,6 +238,11 @@ var() config bool bDisableAuditLog;
 // Bots crouch (cover, squad holds, overwatch). Off unless set to True: crouching bots looked out
 // of place in playtests (2026-10-19).
 var() config bool bAllowBotCrouch;
+// Test only: class name of a weapon (e.g. KFWeap_Flame_CaulkBurn) every bot picks as its favorite. Empty = normal behaviour.
+var() config string BotTestWeapon;
+var transient int FlameHits;                  // flame damage events by bots since the last COMBAT_FLAME_DMG line
+var transient int FlameDmg;                   // flame damage by bots since the last COMBAT_FLAME_DMG line
+var transient float NextFlameLog;             // next COMBAT_FLAME_DMG line
 // Count bots as voters in the skip-trader vote (stock behaviour). Off by default: only human
 // players vote, and the vote passes when every human votes yes (EcholonVoteCollector).
 var() config bool bBotsCountInSkipTraderVote;
@@ -5618,6 +5623,29 @@ function Mutate(string MutateString, PlayerController Sender)
 
 function NetDamage(int OriginalDamage, out int Damage, Pawn injured, Controller InstigatedBy, Vector HitLocation, out Vector Momentum, Class<DamageType> DamageType, Actor DamageCauser)
 {
+	local string Causer;
+
+	if ((Damage > 0) && (EcholonBot(InstigatedBy) != None) && (Class<KFDT_Fire>(DamageType) != None) && (injured != None))
+	{
+		FlameHits++;
+		FlameDmg += Damage;
+		if (injured.Health <= Damage && InstigatedBy.Pawn != None)
+		{
+			EchelonLog("COMBAT_FLAME_KILL killer=" $ string(InstigatedBy.Pawn.Name) $ " type=" $ string(DamageType.Name));
+		}
+		if (WorldInfo.TimeSeconds >= NextFlameLog)
+		{
+			Causer = "none";
+			if (DamageCauser != None)
+			{
+				Causer = string(DamageCauser.Class.Name);
+			}
+			NextFlameLog = WorldInfo.TimeSeconds + 2.0;
+			EchelonLog("COMBAT_FLAME_DMG hits=" $ string(FlameHits) $ " dmg=" $ string(FlameDmg) $ " type=" $ string(DamageType.Name) $ " causer=" $ Causer);
+			FlameHits = 0;
+			FlameDmg = 0;
+		}
+	}
     if ((Damage > 0) && (EcholonBot(injured.Controller) != None))
     {
         if (((InstigatedBy != None) && (InstigatedBy != injured.Controller)) && (injured.GetTeamNum() == InstigatedBy.GetTeamNum()))
