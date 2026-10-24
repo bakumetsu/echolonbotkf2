@@ -1627,7 +1627,7 @@ state GoShopping
             PickCombatStyle();
             return;
         }
-        if (WalkReachable(KFGRI.OpenedTrader))
+        if (WorldInfo.TimeSeconds >= TraderStraightBanUntil && WalkReachable(KFGRI.OpenedTrader))
         {
             TraderRetryCount = 0;
             MoveToX(KFGRI.OpenedTrader.Location);
@@ -1665,7 +1665,8 @@ state GoShopping
         }
         else
         {
-            if (Pawn.IsOverlapping(KFGRI.OpenedTrader))
+            if (Pawn.IsOverlapping(KFGRI.OpenedTrader)
+                || (VSize2D(Pawn.Location - KFGRI.OpenedTrader.Location) < TRADER_ARRIVE_DIST && Abs(Pawn.Location.Z - KFGRI.OpenedTrader.Location.Z) < 150.0))
             {
                 AbortMove();
                 SetTimer(0.0, false);
