@@ -1638,6 +1638,11 @@ state GoShopping
             TraderRetryCount = 0;
             MoveTowardX(MoveTarget);
         }
+        else if (WorldInfo.TimeSeconds < TraderStraightBanUntil && WalkReachable(KFGRI.OpenedTrader))
+        {
+            // The route search failed while the straight walk is banned: walk straight rather than count a retry towards TRADER_GIVEUP.
+            MoveToX(KFGRI.OpenedTrader.Location);
+        }
         else
         {
             AbortMove();
