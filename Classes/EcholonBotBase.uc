@@ -373,6 +373,8 @@ var transient float NextReloadAttempt;
 var transient float NextWeaponSwitchTime;
 var transient float NextFallbackPoll;
 var transient float NextWeaponLog;         // next COMBAT_WEAPON line (one per 5 s per bot while it fires)
+var transient float NextFlameLog;          // next COMBAT_FLAME line (one per 2 s per bot while a flame weapon fires)
+var transient float NextFlameAlign;        // next flame spray re-aim (10 per second while a flame weapon fires)
 var transient vector NavSnapIn;              // last Grunt spot asked for and its snapped answer (kept 2 s)
 var transient vector NavSnapOut;
 var transient float NavSnapUntil;
@@ -1045,6 +1047,19 @@ function bool FireWeaponAt(Actor inActor)
 	// Keep the aim on the target we are shooting now, also while a burst is running: Target used to be set
 	// only when a burst started, so the next zed was ignored until the burst stopped.
 	Target = inActor;
+	if (KFWeap_FlameBase(Pawn.Weapon) != None && Pawn.IsFiring())
+	{
+		if (WorldInfo.TimeSeconds >= NextFlameAlign)
+		{
+			NextFlameAlign = WorldInfo.TimeSeconds + 0.1;
+			AlignFlameSpray(inActor);
+		}
+		if (WorldInfo.TimeSeconds >= NextFlameLog)
+		{
+			NextFlameLog = WorldInfo.TimeSeconds + 2.0;
+			LogFlameState(inActor);
+		}
+	}
 	if (inActor != AimLastTarget)
 	{
 		AimLastTarget = inActor;
@@ -1107,6 +1122,46 @@ function bool FireWeaponAt(Actor inActor)
 		}
 	}
 	return Pawn.BotFire(false);
+}
+
+// A bot's weapon mesh is not posed like a player's, so the spray actor attached to its socket sat thousands of uu
+// away and its direct damage never reached the target. Free the live spray and put it at the bot's muzzle, aimed at the target.
+final function AlignFlameSpray(Actor T)
+{
+	local KFSprayActor S;
+	local vector Start, AimPos;
+
+	Start = Pawn.Location + (vect(0.0, 0.0, 1.0) * (Pawn.BaseEyeHeight * 0.6)) + (vector(Pawn.Rotation) * 40.0);
+	AimPos = GetAimTargetPos(T, Pawn.Weapon);
+	foreach DynamicActors(class'KFSprayActor', S)
+	{
+		if (S.Instigator == Pawn && !S.bVisualOnly)
+		{
+			S.SetBase(None);
+			S.SetLocation(Start);
+			S.SetRotation(rotator(AimPos - Start));
+		}
+	}
+}
+
+// COMBAT_FLAME: what the flame spray is doing while the bot fires a flame weapon (diagnostic, every 2 s).
+final function LogFlameState(Actor T)
+{
+	local KFSprayActor S;
+	local int Live;
+	local float SprayDot, SprayOff;
+
+	foreach DynamicActors(class'KFSprayActor', S)
+	{
+		if (S.Instigator == Pawn && !S.bVisualOnly)
+		{
+			Live++;
+			SprayDot = Normal(T.Location - Pawn.Location) dot vector(S.Rotation);
+			SprayOff = VSize(S.Location - Pawn.Location);
+		}
+	}
+	EchelonLog("COMBAT_FLAME weapon=" $ string(Pawn.Weapon.Class.Name) $ " target=" $ string(T.Name) $ " dist=" $ string(int(VSize(T.Location - Pawn.Location)))
+		$ " live_sprays=" $ string(Live) $ " spray_dot=" $ string(SprayDot) $ " spray_off=" $ string(int(SprayOff)));
 }
 
 final function TryBreakFree()
@@ -2539,6 +2594,11 @@ final function PickFavorite()
 
     foreach mut.TraderList(A)
     {
+        if (mut.BotTestWeapon != "" && string(A.WeaponClass.Name) ~= mut.BotTestWeapon)
+        {
+            FavoriteWeapon = A.WeaponClass;
+            return;
+        }
         desire = A.AIRating * (FRand() + 0.3);
         if ((Perk != None) && (A.Perk != None) && Perk != A.Perk)
         {
