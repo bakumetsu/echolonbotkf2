@@ -131,6 +131,10 @@ var() config float ZoneMinDist;               // zone pick band: nearest distanc
 var() config float ZoneMaxDist;               // zone pick band: farthest distance (uu)
 var() config float ZoneWideDist;              // widened band when the first one is empty (uu)
 var() config float ZoneMergeDist;             // a pod this close to a Dosh Hold zone merges into it
+var() config float ZoneHoldSecs;              // hold length counted from the first squad's arrival (secs)
+var() config float ZoneArriveTimeout;         // secs after the pick with no squad arrived: zone ends (no_arrive)
+var() config float ZoneMinHoldSecs;           // minimum hold before the hunt order may end the zone (secs)
+var() config float ZoneIdleSecs;              // no squad member saw or shot a zed for this long: hunt early (secs)
 var transient EcholonNavGrid NavGrid;         // shared floor-is-lava tile table (N10)
 var() config bool bSurveyNav;                 // use the survey map data (KFEcholonMapData.ini) for routes and steering; opt-in until the playtest passes. ?SurveyNav=1/0 overrides for one match
 var() config bool bSurveyNavGrid;             // the grid half of the survey nav (lazy chunks, grid steering, grid-first corner check); needs bSurveyNav. ?SurveyNavGrid=1/0 overrides
@@ -191,6 +195,11 @@ var transient float ZoneRetryAt;
 var transient array<int> ZoneTriedIds;
 var transient array<int> RecentZones;         // ids of the last 2 zones used, kept across waves
 var transient float LastZoneTrackTime;
+var transient float ZonePickTime;             // time the active zone was picked
+var transient float ZoneHoldStart;            // 0 until the first squad arrives, then the arrival time (set once per zone)
+var transient float ZoneLastZedTime;          // last time a squad member had a living zed as its Enemy
+var transient bool bZoneHuntDeferred;         // the hunt order is waiting for the minimum hold
+var transient int ZoneExcludeId;              // zone id barred from the next pick only, 0 = none
 var transient array<vector> ZoneTrackLoc;
 var transient array<float> ZoneTrackBad;
 var transient array<bool> ZoneTrackTurned;
@@ -392,6 +401,15 @@ function PostBeginPlay()
         ZoneConfigVer = 2;
         SaveConfig();
     }
+    if (ZoneConfigVer < 3)
+    {
+        ZoneHoldSecs = 90.0;
+        ZoneArriveTimeout = 60.0;
+        ZoneMinHoldSecs = 45.0;
+        ZoneIdleSecs = 15.0;
+        ZoneConfigVer = 3;
+        SaveConfig();
+    }
     // A zone value cleared by hand reads 0: use the built-in default.
     if (ZoneMinDist <= 0.0)
         ZoneMinDist = 1500.0;
@@ -413,6 +431,16 @@ function PostBeginPlay()
         ZoneSpawnClear = 300.0;
     if (ZoneMergeDist <= 0.0)
         ZoneMergeDist = 800.0;
+    if (ZoneHoldSecs <= 0.0)
+        ZoneHoldSecs = 90.0;
+    if (ZoneArriveTimeout <= 0.0)
+        ZoneArriveTimeout = 60.0;
+    if (ZoneMinHoldSecs <= 0.0)
+        ZoneMinHoldSecs = 45.0;
+    if (ZoneIdleSecs <= 0.0)
+        ZoneIdleSecs = 15.0;
+    if (ZoneMinHoldSecs > ZoneHoldSecs)
+        ZoneMinHoldSecs = ZoneHoldSecs;
     if (bZonePlanner)
     {
         ZonePlanner = new class'EcholonBot.EcholonZonePlanner';
@@ -2632,6 +2660,39 @@ function CheckWave()
 // squad leader is ordered toward the nearest leftover zed, and the whole squad follows (the bots reach it
 // through the objective pipeline: P5 / DoObjective / follow). Bots used to wait until a leftover zed came
 // within 1500 units, because Hunting only works on zeds a bot already sees.
+// Hunt order vs a holding zone: keep holding until ZoneMinHoldSecs has passed since the first arrival.
+function bool ZoneHuntDeferred(int Alive)
+{
+    local float Now, Held;
+
+    if (ZoneHoldStart <= 0.0)
+    {
+        return false;
+    }
+
+    Now = WorldInfo.TimeSeconds;
+    Held = Now - ZoneHoldStart;
+
+    if (Held >= ZoneMinHoldSecs)
+    {
+        return false;
+    }
+
+    if (!bZoneHuntDeferred)
+    {
+        bZoneHuntDeferred = true;
+        EchelonLog("ZONE_HUNT_DEFER zone=" $ string(ActiveZoneId) $ " held=" $ string(int(Held)) $ " left=" $ string(int(ZoneMinHoldSecs - Held)) $ " zeds=" $ string(Alive));
+    }
+
+    if (Now - ZoneLastZedTime >= ZoneIdleSecs)
+    {
+        EndZone("hunt_idle");
+        return false;
+    }
+
+    return true;
+}
+
 function UpdateHuntOrders()
 {
     local KFGameReplicationInfo GRI;
@@ -2675,6 +2736,11 @@ function UpdateHuntOrders()
         return;
     }
 
+    // Hold until the minimum hold has passed; the no-more-zones latch is set only when the hunt really starts.
+    if (bZoneActive && ZoneHuntDeferred(Alive))
+    {
+        return;
+    }
     if (bZoneActive)
     {
         EndZone("hunt");
@@ -3270,6 +3336,12 @@ function EvaluateSquadPhase()
             if (bZoneActive)
             {
                 EchelonLog("ZONE_ARRIVE squad=" $ string(i + 1) $ " role=" $ string(O.Role) $ " secs=" $ string(int(WorldInfo.TimeSeconds - O.StartTime)));
+                if (ZoneHoldStart <= 0.0)
+                {
+                    ZoneHoldStart = WorldInfo.TimeSeconds;
+                    ZoneLastZedTime = WorldInfo.TimeSeconds;
+                    EchelonLog("ZONE_HOLD_START zone=" $ string(ActiveZoneId) $ " squad=" $ string(i + 1) $ " after=" $ string(int(WorldInfo.TimeSeconds - ZonePickTime)));
+                }
             }
         }
         else if (O.Phase == PHASE_HOLDING && !LeaderInside)
@@ -3533,7 +3605,7 @@ function ZonePickStep()
     local int i, n, Pick, ZIdx, Pass;
     local float Now, D;
     local array<int> Excl, Cands;
-    local string BandName, RecentStr;
+    local string BandName, RecentStr, SkipWhy;
 
     if (!bZonePickPending)
     {
@@ -3544,6 +3616,27 @@ function ZonePickStep()
     if (GRI == None || bZoneActive || bObjectiveActive || bHuntOrderActive || bZoneNoMoreThisWave
         || GRI.bTraderIsOpen || GRI.IsBossWave() || !GRI.bMatchHasBegun || GRI.bMatchIsOver)
     {
+        SkipWhy = "";
+        if (bObjectiveActive)
+        {
+            SkipWhy = "objective";
+        }
+        else if (GRI != None && GRI.bTraderIsOpen)
+        {
+            SkipWhy = "trader";
+        }
+        else if (GRI != None && GRI.IsBossWave())
+        {
+            SkipWhy = "boss";
+        }
+        else if (bHuntOrderActive || bZoneNoMoreThisWave)
+        {
+            SkipWhy = "hunt";
+        }
+        if (SkipWhy != "")
+        {
+            EchelonLog("ZONE_SKIP reason=" $ SkipWhy);
+        }
         ZoneCancelPick();
         return;
     }
@@ -3590,6 +3683,10 @@ function ZonePickStep()
         for (i = 0; i < ZoneTriedIds.Length; i++)
         {
             Excl.AddItem(ZoneTriedIds[i]);
+        }
+        if (ZoneExcludeId != 0)
+        {
+            Excl.AddItem(ZoneExcludeId);
         }
 
         BandName = "30-80";
@@ -3680,6 +3777,11 @@ function ZoneCommit(int ZIdx)
     ZoneCenterLoc = ZonePlanner.Zones[ZIdx].Center;
     ZoneRadiusVal = ZonePlanner.Zones[ZIdx].Radius;
     ZoneStartTime = WorldInfo.TimeSeconds;
+    ZonePickTime = WorldInfo.TimeSeconds;
+    ZoneHoldStart = 0.0;
+    ZoneLastZedTime = WorldInfo.TimeSeconds;
+    bZoneHuntDeferred = false;
+    ZoneExcludeId = 0;
     RecentZones.AddItem(ActiveZoneId);
     while (RecentZones.Length > 2)
     {
@@ -3792,14 +3894,22 @@ function EndZone(string Reason)
 {
     local int i;
     local EcholonBot B;
+    local float Held;
 
     ZoneCancelPick();
     if (!bZoneActive)
     {
         return;
     }
-    EchelonLog("ZONE_END zone=" $ string(ActiveZoneId) $ " reason=" $ Reason $ " held=" $ string(int(WorldInfo.TimeSeconds - ZoneStartTime)));
+    Held = 0.0;
+    if (ZoneHoldStart > 0.0)
+    {
+        Held = WorldInfo.TimeSeconds - ZoneHoldStart;
+    }
+    EchelonLog("ZONE_END zone=" $ string(ActiveZoneId) $ " reason=" $ Reason $ " held=" $ string(int(Held)) $ " since_pick=" $ string(int(WorldInfo.TimeSeconds - ZonePickTime)));
     bZoneActive = false;
+    ZoneHoldStart = 0.0;
+    bZoneHuntDeferred = false;
     ActiveZoneId = 0;
     for (i = 0; i < SquadOrders.Length; i++)
     {
@@ -3823,6 +3933,79 @@ function EndZone(string Reason)
     }
 }
 
+// A zone timer ran out: end the zone, then hunt (15 or fewer zeds) or pick another zone.
+function bool ZoneCheckTimers()
+{
+    local float Now;
+
+    Now = WorldInfo.TimeSeconds;
+    if (ZoneHoldStart <= 0.0)
+    {
+        if (Now - ZonePickTime >= ZoneArriveTimeout)
+        {
+            ZoneExpire("no_arrive");
+            return true;
+        }
+    }
+    else
+    {
+        if (Now - ZoneHoldStart >= ZoneHoldSecs)
+        {
+            ZoneExpire("timer");
+            return true;
+        }
+    }
+    return false;
+}
+
+function ZoneExpire(string Reason)
+{
+    local KFGameReplicationInfo GRI;
+    local int Id;
+
+    Id = ActiveZoneId;
+    GRI = KFGameReplicationInfo(WorldInfo.GRI);
+    EndZone(Reason);
+    if (GRI != None && GRI.AIRemaining <= HUNT_ORDER_MAX_ZEDS)
+    {
+        // With 15 or fewer zeds the hunt starts instead of a re-pick
+        LastHuntOrderTime = 0.0;
+        UpdateHuntOrders();
+    }
+    else
+    {
+        if (Reason == "no_arrive")
+        {
+            // A no_arrive zone is barred from the next pick
+            ZoneExcludeId = Id;
+        }
+        ZoneQueuePick(Reason);
+    }
+}
+
+function ZoneNoteZeds()
+{
+    local int i, j;
+    local EcholonBot B;
+
+    // A bot "saw or shot a zed" when a living zed is its Enemy
+    for (i = 0; i < Fireteams.Length; i++)
+    {
+        for (j = 0; j < Fireteams[i].Members.Length; j++)
+        {
+            B = Fireteams[i].Members[j];
+            if (B != None
+                && B.Pawn != None && B.Pawn.Health > 0
+                && B.Enemy != None
+                && KFPawn_Monster(B.Enemy) != None
+                && B.Enemy.IsAliveAndWell())
+            {
+                ZoneLastZedTime = WorldInfo.TimeSeconds;
+            }
+        }
+    }
+}
+
 // Every 0.5 s while a zone is active: log a ZONE_TURN when a leader walks away from its spot for 1 s.
 function ZoneTrack()
 {
@@ -3837,6 +4020,11 @@ function ZoneTrack()
         return;
     }
     LastZoneTrackTime = Now;
+    ZoneNoteZeds();
+    if (ZoneCheckTimers())
+    {
+        return;
+    }
     if (ZoneTrackLoc.Length != SquadOrders.Length)
     {
         ZoneTrackLoc.Length = SquadOrders.Length;
