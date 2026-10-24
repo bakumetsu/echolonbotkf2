@@ -90,6 +90,7 @@ const HUMAN_MIN_SPEED_SQ = 10000.0;
 const HUMAN_LT_RANGE_SQ = 250000.0;
 const WEDGE_REAR_OFFSET = 150.0;
 const WEDGE_LEASE = 2.5;
+const TRADER_ARRIVE_DIST = 150.0;             // a bot this close (flat) to the trader trigger, on its floor, counts as arrived: the trigger sits among shop props
 const EMOTE_RADIUS_SQ = 22500.0;
 const EMOTE_CHANCE = 0.30;
 const EMOTE_ROLL_COOLDOWN = 6.0;
@@ -375,6 +376,7 @@ var transient float NextWeaponLog;         // next COMBAT_WEAPON line (one per 5
 var transient vector NavSnapIn;              // last Grunt spot asked for and its snapped answer (kept 2 s)
 var transient vector NavSnapOut;
 var transient float NavSnapUntil;
+var transient float TraderStraightBanUntil;  // no straight walk at the trader before this time (a stall in GoShopping sets it): route instead
 var transient int NavReswitchTries;        // switches to a gun tried while holding the knife; after 3 the bot fights with it
 var transient float NextRangedSwitch;      // next time a bot holding the knife in a fight may switch to a gun
 var transient KFWeapon FallbackPrimary;
@@ -2020,6 +2022,11 @@ final function NavProgressCheck()
             bAdjusting = true;
             AdjustPosition.Position = Pawn.Location + (Normal(IterDir) * 64.0);
             EchelonLog("NAV_STUCK level=1 state=" $ string(GetStateName()) $ " stalled=" $ string(NavStall) $ " rank=" $ string(int(BotRank)) $ NavStuckInfo(false));
+            if (IsInState('GoShopping'))
+            {
+                TraderStraightBanUntil = IterNow + 20.0;
+                EchelonLog("TRADER_ROUTE_ONLY secs=20");
+            }
             if (IterNow - NavLoopLast > 8.0)
             {
                 NavLoopSince = IterNow;

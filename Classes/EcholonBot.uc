@@ -1627,7 +1627,7 @@ state GoShopping
             PickCombatStyle();
             return;
         }
-        if (WalkReachable(KFGRI.OpenedTrader))
+        if (WorldInfo.TimeSeconds >= TraderStraightBanUntil && WalkReachable(KFGRI.OpenedTrader))
         {
             TraderRetryCount = 0;
             MoveToX(KFGRI.OpenedTrader.Location);
@@ -1637,6 +1637,11 @@ state GoShopping
         {
             TraderRetryCount = 0;
             MoveTowardX(MoveTarget);
+        }
+        else if (WorldInfo.TimeSeconds < TraderStraightBanUntil && WalkReachable(KFGRI.OpenedTrader))
+        {
+            // The route search failed while the straight walk is banned: walk straight rather than count a retry towards TRADER_GIVEUP.
+            MoveToX(KFGRI.OpenedTrader.Location);
         }
         else
         {
@@ -1665,7 +1670,8 @@ state GoShopping
         }
         else
         {
-            if (Pawn.IsOverlapping(KFGRI.OpenedTrader))
+            if (Pawn.IsOverlapping(KFGRI.OpenedTrader)
+                || (VSize2D(Pawn.Location - KFGRI.OpenedTrader.Location) < TRADER_ARRIVE_DIST && Abs(Pawn.Location.Z - KFGRI.OpenedTrader.Location.Z) < 150.0))
             {
                 AbortMove();
                 SetTimer(0.0, false);
