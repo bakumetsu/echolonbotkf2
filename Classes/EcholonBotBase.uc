@@ -175,6 +175,8 @@ var transient float EndMoveTime;
 var transient float SerpentineTime;
 var transient float NextGrenadeTimer;
 var transient float EnemyEncounterTime;
+var transient float LastHitTime;           // when NotifyTakeHit last fired (remote shop waits 2 s after a hit)
+var transient float NextRemoteDeferLog;    // throttle for SHOP_REMOTE_DEFER
 var transient float NextShoppingTime;
 var transient int ShoppedWave;          // KFGRI.WaveNum when this bot last finished shopping (or gave up); -1 = not yet
 var transient int LastShopBought;       // purchase actions in the last ProcessPurchase (weapons, ammo top-ups, armor, grenades)
@@ -784,6 +786,7 @@ function Restart(bool bVehicleTransition)
 
 function NotifyTakeHit(Controller InstigatedBy, Vector HitLocation, int Damage, Class<DamageType> DamageType, Vector Momentum)
 {
+    LastHitTime = WorldInfo.TimeSeconds;
     if ((InstigatedBy != None) && (InstigatedBy.Pawn != None))
     {
         SetEnemy(InstigatedBy.Pawn);
@@ -2805,13 +2808,44 @@ final function FinishShopping()
 }
 
 // Remote shop (EcholonMut.bRemoteShopActive): buy from where the bot stands, no walk to the trader.
-// Runs only while the trader is open, the bot may shop again, and nothing is being fought.
+// Runs only while the trader is open, the bot may shop again, and no live enemy was engaged in the last
+// REMOTE_SHOP_ENEMY_STALE s and no hit landed in the last 2 s.
 // Returns true when a shopping trip was made, even one that bought nothing (a broke bot is done too).
+const REMOTE_SHOP_ENEMY_STALE = 4.0;
+
+// An enemy that is dead, or was last engaged more than REMOTE_SHOP_ENEMY_STALE s ago, is not a fight (EnemyEncounterTime
+// is refreshed on every sighting, hit and combat tick), so it must not hold the remote shop back.
+final function bool IsRemoteShopFight()
+{
+    if (Enemy == None || !Enemy.IsAliveAndWell())
+    {
+        return false;
+    }
+    return WorldInfo.TimeSeconds - EnemyEncounterTime <= REMOTE_SHOP_ENEMY_STALE;
+}
+
 final function bool RemoteShop()
 {
     if (Pawn == None || KFGRI == None || !KFGRI.bTraderIsOpen || KFGRI.OpenedTrader == None || KFGRI.TraderItems == None
-        || NextShoppingTime >= WorldInfo.TimeSeconds || Enemy != None)
+        || NextShoppingTime >= WorldInfo.TimeSeconds)
     {
+        return false;
+    }
+    if (IsRemoteShopFight() || WorldInfo.TimeSeconds - LastHitTime < 2.0)
+    {
+        if (WorldInfo.TimeSeconds >= NextRemoteDeferLog)
+        {
+            NextRemoteDeferLog = WorldInfo.TimeSeconds + 5.0;
+            if (Enemy != None)
+            {
+                EchelonLog("SHOP_REMOTE_DEFER enemy_age=" $ string(int(WorldInfo.TimeSeconds - EnemyEncounterTime)) $ " alive=" $ string(Enemy.IsAliveAndWell())
+                    $ " hit_age=" $ string(int(WorldInfo.TimeSeconds - LastHitTime)));
+            }
+            else
+            {
+                EchelonLog("SHOP_REMOTE_DEFER enemy_age=-1 alive=False hit_age=" $ string(int(WorldInfo.TimeSeconds - LastHitTime)));
+            }
+        }
         return false;
     }
     ProcessPurchase(KFGRI.TraderItems);
