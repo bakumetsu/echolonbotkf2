@@ -174,6 +174,8 @@ event PlayerTick(float DeltaTime)
 
     bFreeFly = IsInState('Spectating') && GetPlaytestMut() != None && PlaytestMut.bPlaytestFreeFly;
     UpdateFlySpeed(bFreeFly);
+    if (!bFreeFly)
+        LastFlyLoc = Location;   // so the first free fly step is not measured from an old spot
     if (IsInState('Spectating'))
     {
         if (bPressedJump)
