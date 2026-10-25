@@ -1465,8 +1465,8 @@ function NavNoteReach(vector Pos, bool bReach)
     }
 }
 
-// Samples the nav grid along a segment and returns the fraction of clear tiles as "0.NN".
-function string NavMoveGridClear(vector From, vector To)
+// Samples the nav grid along a segment and returns the percentage (0 to 100) of clear tiles, or -1 when there is no grid data or no budget.
+function int NavGridLinePct(vector From, vector To)
 {
     local int N, I, Good, pct;
     local vector P;
@@ -1475,7 +1475,7 @@ function string NavMoveGridClear(vector From, vector To)
 
     if (MapData == None || !MapData.bUsable || NavGrid == None || !NavGrid.bSurveyReady || Pawn == None)
     {
-        return "na";
+        return -1;
     }
     N = Clamp(int(VSize2D(To - From) / 19.0), 1, 60);
     if (NavBudget != None && NavMeter != None)
@@ -1483,7 +1483,7 @@ function string NavMoveGridClear(vector From, vector To)
         NavBudget.CurRank = FollowRank();
         if (!NavBudget.TakeUs(class'EcholonNavBudget'.const.NAV_PRIO_GRID, float(N + 1) * NavMeter.UnitGridUs, WorldInfo.TimeSeconds))
         {
-            return "na";
+            return -1;
         }
     }
     Good = 0;
@@ -1501,6 +1501,19 @@ function string NavMoveGridClear(vector From, vector To)
         NavMeter.CountGrid(N + 1);
     }
     pct = int(100.0 * float(Good) / float(N + 1));
+    return pct;
+}
+
+// Same as NavGridLinePct as the text NAV2_MOVE_BEGIN logs: "na", "1.00" or "0.NN".
+function string NavMoveGridClear(vector From, vector To)
+{
+    local int pct;
+
+    pct = NavGridLinePct(From, To);
+    if (pct < 0)
+    {
+        return "na";
+    }
     if (pct >= 100)
     {
         return "1.00";
@@ -1688,13 +1701,17 @@ function NavBlockRestore(out array<ReachSpec> Blocked)
     NavBlockLast = Blocked;
 }
 
-// Once-per-second guard: any spec still marked BlockedBy is a leak.
+// Once-per-second guard: any spec this bot blocked that is still marked with this bot's pawn is a leak; blocks set by zeds or map actors are not touched.
 function NavBlockLeakCheck(string Where)
 {
     local int i;
+    if (Pawn == None)
+    {
+        return;
+    }
     for (i = 0; i < NavBlockLast.Length; i++)
     {
-        if ((NavBlockLast[i] != None) && (NavBlockLast[i].BlockedBy != None))
+        if ((NavBlockLast[i] != None) && (NavBlockLast[i].BlockedBy == Pawn))
         {
             EchelonLog("NAV2_BLOCK_LEAK spec=" $ string(NavBlockLast[i].Start) $ ">" $ string(NavBlockLast[i].GetEnd()) $ " by=" $ string(NavBlockLast[i].BlockedBy) $ " where=" $ Where);
             NavBlockLeaks++;
