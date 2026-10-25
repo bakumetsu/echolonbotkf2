@@ -105,6 +105,15 @@ var bool bLastTileSurvey;           // the last NavGridTile answer came from the
 var Actor FollowLastGoal;            // goal actor of the last route search (FollowFindWalkablePath), for NAV_STUCK and NAV_NO_ROUTE
 var vector FollowLastGoalPos;         // goal point of that search when it had no actor
 var float FollowLastGoalTime;         // when that search ran
+var transient bool bNavMvOpen;            // a NAV2_MOVE_BEGIN is waiting for its NAV2_MOVE_END
+var transient string NavMvKind;           // point, node or follow
+var transient vector NavMvDest;
+var transient Actor NavMvDestActor;
+var transient float NavMvStartTime;
+var transient bool bNavMvStalled;         // a level-1 stall happened during this move
+var transient int NavReachRes;            // last WalkReachable / WalkPointReachable answer (0 or 1)
+var transient float NavReachTime;         // when it was asked (0 = never)
+var transient vector NavReachPos;         // the position it asked about
 var float FollowNarrowSince;      // when this bot began waiting for a squadmate to clear a narrow link (0 = not waiting)
 var float FollowNarrowQuietUntil; // no narrow wait before this time (after a wait that timed out)
 var EcholonNavScan NavScan;        // start-of-match link scan result (bad links), set by EcholonMut.RegisterBot
@@ -1418,6 +1427,10 @@ function bool WalkReachable(Actor Other)
     FollowPlanBegin();
     NavCountReach();
     bReach = ActorReachable(Other);
+    if (Other != None)
+    {
+        NavNoteReach(Other.Location, bReach);
+    }
     FollowPlanEnd();
     return bReach;
 }
@@ -1429,8 +1442,157 @@ function bool WalkPointReachable(vector Dest)
     FollowPlanBegin();
     NavCountReach();
     bReach = PointReachable(Dest);
+    NavNoteReach(Dest, bReach);
     FollowPlanEnd();
     return bReach;
+}
+
+// Records the result of a reachability probe for NAV2_MOVE_BEGIN logging.
+function NavNoteReach(vector Pos, bool bReach)
+{
+    NavReachPos = Pos;
+    NavReachTime = WorldInfo.TimeSeconds;
+    if (bReach)
+    {
+        NavReachRes = 1;
+    }
+    else
+    {
+        NavReachRes = 0;
+    }
+}
+
+// Samples the nav grid along a segment and returns the fraction of clear tiles as "0.NN".
+function string NavMoveGridClear(vector From, vector To)
+{
+    local int N, I, Good, pct;
+    local vector P;
+    local int D;
+    local int S;
+
+    if (MapData == None || !MapData.bUsable || NavGrid == None || !NavGrid.bSurveyReady || Pawn == None)
+    {
+        return "na";
+    }
+    N = Clamp(int(VSize2D(To - From) / 19.0), 1, 60);
+    if (NavBudget != None && NavMeter != None)
+    {
+        NavBudget.CurRank = FollowRank();
+        if (!NavBudget.TakeUs(class'EcholonNavBudget'.const.NAV_PRIO_GRID, float(N + 1) * NavMeter.UnitGridUs, WorldInfo.TimeSeconds))
+        {
+            return "na";
+        }
+    }
+    Good = 0;
+    for (I = 0; I <= N; I++)
+    {
+        P = From + (To - From) * (float(I) / float(N));
+        S = NavGrid.SurveyTile(NavGrid.TileOf(P.X), NavGrid.TileOf(P.Y), P.Z - Pawn.GetCollisionHeight(), D);
+        if (S == class'EcholonNavGrid'.const.SV_CLEAR && D >= 1)
+        {
+            Good++;
+        }
+    }
+    if (NavMeter != None)
+    {
+        NavMeter.CountGrid(N + 1);
+    }
+    pct = int(100.0 * float(Good) / float(N + 1));
+    if (pct >= 100)
+    {
+        return "1.00";
+    }
+    if (pct < 10)
+    {
+        return "0.0" $ string(pct);
+    }
+    return "0." $ string(pct);
+}
+
+// Formats a float number of seconds to one decimal place.
+function string NavMoveSecs(float Secs)
+{
+    local int T;
+
+    T = int(Secs * 10.0);
+    return string(T / 10) $ "." $ string(T - (T / 10) * 10);
+}
+
+// Opens a NAV2_MOVE_BEGIN record; deduplicates re-issued same moves, closes superseded ones.
+function NavMoveBegin(string Kind, vector Dest, Actor DestActor)
+{
+    local string Reach, Grid;
+    local vector Cur;
+
+    if (Pawn == None)
+    {
+        return;
+    }
+    if (bNavMvOpen)
+    {
+        if (NavMvKind == Kind && ((DestActor != None && DestActor == NavMvDestActor) || (DestActor == None && NavMvDestActor == None && VSizeSq(Dest - NavMvDest) < 22500.0)))
+        {
+            return;
+        }
+        Cur = NavMvDest;
+        if (NavMvDestActor != None)
+        {
+            Cur = NavMvDestActor.Location;
+        }
+        if (VSize2D(Cur - Pawn.Location) < 80.0)
+        {
+            NavMoveEnd("arrived");
+        }
+        else
+        {
+            NavMoveEnd("replaced");
+        }
+    }
+    Reach = "na";
+    if (NavReachTime > 0.0 && WorldInfo.TimeSeconds - NavReachTime <= 1.5 && VSizeSq(NavReachPos - Dest) < 62500.0)
+    {
+        Reach = string(NavReachRes);
+    }
+    Grid = "na";
+    if (Kind == "point")
+    {
+        Grid = NavMoveGridClear(Pawn.Location, Dest);
+    }
+    bNavMvOpen = true;
+    NavMvKind = Kind;
+    NavMvDest = Dest;
+    NavMvDestActor = DestActor;
+    NavMvStartTime = WorldInfo.TimeSeconds;
+    bNavMvStalled = false;
+    EchelonLog("NAV2_MOVE_BEGIN mover=" $ Kind $ " start=" $ FollowVecText(Pawn.Location) $ " dest=" $ FollowVecText(Dest) $ " dist=" $ string(int(VSize(Dest - Pawn.Location))) $ " reach=" $ Reach $ " gridclear=" $ Grid $ " state=" $ string(GetStateName()) $ " goal=" $ FollowGoalText());
+}
+
+// Closes the open NAV2 move and logs NAV2_MOVE_END.
+function NavMoveEnd(string Result)
+{
+    local vector Cur;
+    local int Left;
+
+    if (!bNavMvOpen)
+    {
+        return;
+    }
+    bNavMvOpen = false;
+    if (Result != "arrived" && bNavMvStalled)
+    {
+        Result = "stalled";
+    }
+    Cur = NavMvDest;
+    if (NavMvDestActor != None)
+    {
+        Cur = NavMvDestActor.Location;
+    }
+    Left = -1;
+    if (Pawn != None)
+    {
+        Left = int(VSize(Cur - Pawn.Location));
+    }
+    EchelonLog("NAV2_MOVE_END mover=" $ NavMvKind $ " result=" $ Result $ " secs=" $ NavMoveSecs(WorldInfo.TimeSeconds - NavMvStartTime) $ " dist_left=" $ string(Left));
 }
 
 // True for edges a walking bot can follow by steering at the end node.
@@ -2287,6 +2449,26 @@ function FollowOnMoveBegin(bool bDirect)
     if (!bDirect && FollowNode != None)
     {
         FollowLegTimeout = FMax(0.5, 2.0 * (VSize(FollowNode.Location - Pawn.Location) / FMax(Pawn.GroundSpeed, 0.0001)));
+    }
+
+    if (Pawn == None)
+    {
+        return;
+    }
+    if (bDirect)
+    {
+        if (bFollowOrderAnchorActive)
+        {
+            NavMoveBegin("follow", FollowOrderAnchorLoc, None);
+        }
+        else if (FollowLeaderPawn != None)
+        {
+            NavMoveBegin("follow", FollowLeaderPawn.Location, FollowLeaderPawn);
+        }
+    }
+    else if (FollowNode != None)
+    {
+        NavMoveBegin("follow", FollowNode.Location, FollowNode);
     }
 }
 
