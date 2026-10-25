@@ -33,6 +33,13 @@ const VIP_TRIAGE_GATE_PCT = 50.0;
 const VIP_TRIAGE_BONUS_PCT = 15.0;
 const HEAL_MAX_NEED_PCT = 80.0;
 const HEAL_MIN_NEED_PCT = 60.0;
+const MEDIC_TRIAGE_INTERVAL = 1.0;
+const MEDIC_SELF_FIRST_PCT = 40.0;
+const MEDIC_MELEE_GUARD_DIST = 250.0;
+const MEDIC_DART_COOLDOWN = 15.0;
+const MEDIC_RESERVE_SECS = 10.0;
+const MEDIC_SKIP_LOG_GAP = 5.0;
+const MEDIC_SCAN_RADIUS = 1800.0;
 const ENEMY_SCAN_INTERVAL = 0.5;
 const ENEMY_SCAN_RADIUS = 1500.0;
 const SPOT_RADIUS_SQ = 4000000.0;
@@ -256,6 +263,18 @@ var float SyringeRechargeEnd;
 var float HealPacingEnd;
 var float HealRetryAfter;
 var int FailStreak;
+var float LastMedicCheckTime;
+var bool bMedicPickReady;
+var float MedicPickTime;
+var float MedicPickWaited;
+var string MedicEndResult;
+var string MedicTargetName;
+var float MedicSkipLogTime;
+var bool bMedicCarryLogged;
+var array<KFPawn_Human> MedicSeenT;
+var array<float> MedicSeenFirst;
+var array<float> MedicSeenLast;
+var int TestMedicState;
 var float landingDeadline;
 var float equipDeadline;
 var bool bJustSpawned;
@@ -2717,12 +2736,36 @@ final function PickFavorite()
     local float desire, BestDesire;
     local EcholonWeaponInfo A;
 
+    if (mut.BotTestMedicCount > 0 && TestMedicState == 0)
+    {
+        if (mut.BotTestMedicIssued < mut.BotTestMedicCount)
+        {
+            TestMedicState = 1;
+            mut.BotTestMedicIssued++;
+            EchelonLog("MEDIC_TEST role=medic issued=" $ string(mut.BotTestMedicIssued));
+        }
+        else
+        {
+            TestMedicState = 2;
+            EchelonLog("MEDIC_TEST role=plain");
+        }
+    }
+
     foreach mut.TraderList(A)
     {
         if (mut.BotTestWeapon != "" && string(A.WeaponClass.Name) ~= mut.BotTestWeapon)
         {
             FavoriteWeapon = A.WeaponClass;
             return;
+        }
+        if (mut.BotTestMedicCount > 0 && TestMedicState == 1 && string(A.WeaponClass.Name) ~= "KFWeap_SMG_Medic")
+        {
+            FavoriteWeapon = A.WeaponClass;
+            return;
+        }
+        if (mut.BotTestMedicCount > 0 && TestMedicState == 2 && ClassIsChildOf(A.WeaponClass, class'KFWeap_MedicBase'))
+        {
+            continue;
         }
         desire = A.AIRating * (FRand() + 0.3);
         if ((Perk != None) && (A.Perk != None) && Perk != A.Perk)
@@ -3483,7 +3526,8 @@ function bool AuditRateLimit(string Msg)
 		return true;
 	}
 	if (Left(Msg, 4) ~= "NAV_" || Left(Msg, 5) ~= "NAV2_" || Left(Msg, 11) ~= "SPAWN_NUDGE" || Left(Msg, 8) ~= "RETREAT_" || Left(Msg, 7) ~= "COMBAT_"
-		|| Left(Msg, 9) ~= "HEADLESS_" || Left(Msg, 5) ~= "LOOK_" || Left(Msg, 5) ~= "SHOP_")
+		|| Left(Msg, 9) ~= "HEADLESS_" || Left(Msg, 5) ~= "LOOK_" || Left(Msg, 5) ~= "SHOP_"
+		|| Left(Msg, 6) ~= "MEDIC_" || Left(Msg, 5) ~= "HEAL_" || Left(Msg, 4) ~= "BOT_")
 	{
 		return true;  // were plain `log lines before; kept unthrottled
 	}
