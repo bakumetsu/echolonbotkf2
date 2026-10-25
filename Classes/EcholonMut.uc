@@ -1,7 +1,7 @@
 class EcholonMut extends KFMutator config(EcholonBot) hidecategories(Navigation, Movement, Collision);
 
 // Constants: generated from contracts/constants.json (D2). Edit there, not here.
-const CUR_CONFIGVER = 4;
+const CUR_CONFIGVER = 5;
 const MIN_GROUPS = 2;
 const MAX_GROUPS = 4;
 const BOTS_PER_GROUP_TARGET = 3;
@@ -157,6 +157,8 @@ var() config int NavBudgetStalls;             // stall series on one spot before
 var() config float NavBudgetMinGap;           // minimum seconds between the first and the last counted series
 var() config int NavRescueMax;                // teleport rescues per bot per wave
 var() config bool bNavSpecExempt;             // playtest only: a spectator-only camera does not block a rescue teleport
+var() config bool bNavV2;                     // nav redesign Stage A: route point walks longer than NAV2_REROUTE_DIST instead of walking them straight; off by default (a config bool is false when absent). ?NavV2=1/0 overrides for one match
+var transient bool bNavV2Now;                 // bNavV2 after the ?NavV2= option
 var config string _Separator1;
 var() config byte NumBots;
 var() config byte MinimumBots;
@@ -396,6 +398,13 @@ function PostBeginPlay()
         NavRescueMax = 3;
         bNavSpecExempt = true;
         ConfigVer = 4;
+        SaveConfig();
+    }
+
+    if(ConfigVer < 5)
+    {
+        bNavV2 = false;
+        ConfigVer = 5;
         SaveConfig();
     }
 
@@ -1102,6 +1111,13 @@ function InitMutator(string Options, out string ErrorMessage)
     {
         bSurveyNavNow = class'GameInfo'.static.GetIntOption(Options, "SurveyNav", 0) != 0;
     }
+
+    bNavV2Now = bNavV2;
+    if (class'GameInfo'.static.HasOption(Options, "NavV2"))
+    {
+        bNavV2Now = class'GameInfo'.static.GetIntOption(Options, "NavV2", 0) != 0;
+    }
+    EchelonLog("NAV2_CONFIG navv2=" $ string(bNavV2Now));
     bSurveyNavGridNow = bSurveyNavGrid;
     if (class'GameInfo'.static.HasOption(Options, "SurveyNavGrid"))
     {
