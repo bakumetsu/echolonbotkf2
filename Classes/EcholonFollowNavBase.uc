@@ -1701,13 +1701,17 @@ function NavBlockRestore(out array<ReachSpec> Blocked)
     NavBlockLast = Blocked;
 }
 
-// Once-per-second guard: any spec still marked BlockedBy is a leak.
+// Once-per-second guard: any spec this bot blocked that is still marked with this bot's pawn is a leak; blocks set by zeds or map actors are not touched.
 function NavBlockLeakCheck(string Where)
 {
     local int i;
+    if (Pawn == None)
+    {
+        return;
+    }
     for (i = 0; i < NavBlockLast.Length; i++)
     {
-        if ((NavBlockLast[i] != None) && (NavBlockLast[i].BlockedBy != None))
+        if ((NavBlockLast[i] != None) && (NavBlockLast[i].BlockedBy == Pawn))
         {
             EchelonLog("NAV2_BLOCK_LEAK spec=" $ string(NavBlockLast[i].Start) $ ">" $ string(NavBlockLast[i].GetEnd()) $ " by=" $ string(NavBlockLast[i].BlockedBy) $ " where=" $ Where);
             NavBlockLeaks++;
