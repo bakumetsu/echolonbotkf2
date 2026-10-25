@@ -164,6 +164,10 @@ var() config float BotsDamageScale;
 var() config float ZedCountScaling;
 var EcholonChat ActiveChat;
 var array<EcholonBot> ActiveBots;
+// Spectator camera order: bots in registration order. Unlike ActiveBots it is never shuffled and a dead bot keeps its slot,
+// so next/previous bot walks every living bot in the same order.
+var array<EcholonBot> PlaytestCamBots;
+var transient EcholonBot PlaytestCamBot;   // the bot the camera was last pointed at (keeps the place in the order when it dies)
 var array<FireteamData> Fireteams;
 var array<SquadOrder> SquadOrders;
 var int NumGroups;
@@ -1158,23 +1162,33 @@ final function PlaytestStepCamera(PlayerController PC, int Dir, optional bool bM
     local int I, Start, Count;
     local EcholonBot B;
 
-    Count = ActiveBots.Length;
+    Count = PlaytestCamBots.Length;
     if (Count == 0 || PC == None)
         return;
 
-    Start = (Dir < 0) ? Count - 1 : 0;
+    // Place in the order: the bot whose pawn is watched, else the bot watched last (it may have died), else the start.
+    if (Dir < 0)
+        Start = Count - 1;
+    else
+        Start = 0;
     for (I = 0; I < Count; I++)
     {
-        if (ActiveBots[I] != None && ActiveBots[I].Pawn != None && ActiveBots[I].Pawn == PC.ViewTarget)
+        if (PlaytestCamBots[I] != None && PlaytestCamBots[I].Pawn != None && PlaytestCamBots[I].Pawn == PC.ViewTarget)
         {
             Start = I + Dir;
             break;
         }
     }
+    if (I == Count && PlaytestCamBot != None)
+    {
+        I = PlaytestCamBots.Find(PlaytestCamBot);
+        if (I != INDEX_NONE)
+            Start = I + Dir;
+    }
 
     for (I = 0; I < Count; I++)
     {
-        B = ActiveBots[(((Start + I * Dir) % Count) + Count) % Count];
+        B = PlaytestCamBots[(((Start + I * Dir) % Count) + Count) % Count];
         if (B != None && B.Pawn != None && B.Pawn.IsAliveAndWell())
         {
             if (bPlaytestFreeFly)
@@ -1183,6 +1197,7 @@ final function PlaytestStepCamera(PlayerController PC, int Dir, optional bool bM
                 EchelonLog("PLAYTEST_CAMERA_FREE on=0");
             }
             PlaytestLastWatched = B.Pawn;
+            PlaytestCamBot = B;
             PC.SetViewTarget(B.Pawn);
             PC.SetCameraMode(PlaytestBotCamStyle());
             PlaytestApplyZoom(PC);
@@ -1204,13 +1219,13 @@ final function PlaytestCamCycleStep(PlayerController PC)
         bPlaytestCamCycleInit = true;
         if (bPlaytestCamCycleFirstPerson)
             PlaytestCamMode = 'FirstPerson';
-        for (I = 0; I < ActiveBots.Length; I++)
+        for (I = 0; I < PlaytestCamBots.Length; I++)
         {
-            if (ActiveBots[I] != None)
+            if (PlaytestCamBots[I] != None)
             {
                 if (Order != "")
                     Order $= ",";
-                Order $= ActiveBots[I].LogTag() $ ":" $ string(ActiveBots[I].Pawn != None && ActiveBots[I].Pawn.IsAliveAndWell());
+                Order $= PlaytestCamBots[I].LogTag() $ ":" $ string(PlaytestCamBots[I].Pawn != None && PlaytestCamBots[I].Pawn.IsAliveAndWell());
             }
         }
         EchelonLog("PLAYTEST_CAMERA_ORDER cycle_secs=" $ string(PlaytestCamCycleSecs) $ " list=" $ Order);
@@ -1637,6 +1652,8 @@ function RegisterBot(EcholonBot NewBot)
         return;
     if (ActiveBots.Find(NewBot) == INDEX_NONE)
         ActiveBots.AddItem(NewBot);
+    if (PlaytestCamBots.Find(NewBot) == INDEX_NONE)
+        PlaytestCamBots.AddItem(NewBot);
     NewBot.mut = self;
     NewBot.NavMeter = NavMeter;
     NewBot.NavBudget = NavBudget;
@@ -1656,6 +1673,10 @@ function UnregisterBot(EcholonBot LeavingBot)
     Idx = ActiveBots.Find(LeavingBot);
     if (Idx != INDEX_NONE)
         ActiveBots.Remove(Idx, 1);
+
+    Idx = PlaytestCamBots.Find(LeavingBot);
+    if (Idx != INDEX_NONE)
+        PlaytestCamBots.Remove(Idx, 1);
 
     HandleFireteamCasualty(LeavingBot);
 }
