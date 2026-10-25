@@ -114,6 +114,9 @@ var transient bool bNavMvStalled;         // a level-1 stall happened during thi
 var transient int NavReachRes;            // last WalkReachable / WalkPointReachable answer (0 or 1)
 var transient float NavReachTime;         // when it was asked (0 = never)
 var transient vector NavReachPos;         // the position it asked about
+var transient array<ReachSpec> NavBlockLast;   // specs the last search blocked (BlockedBy), kept for the leak check
+var transient float NavBlockNextCheck;         // next once-per-second leak check
+var transient int NavBlockLeaks;               // NAV2_BLOCK_LEAK lines this bot wrote
 var float FollowNarrowSince;      // when this bot began waiting for a squadmate to clear a narrow link (0 = not waiting)
 var float FollowNarrowQuietUntil; // no narrow wait before this time (after a wait that timed out)
 var EcholonNavScan NavScan;        // start-of-match link scan result (bad links), set by EcholonMut.RegisterBot
@@ -1658,6 +1661,48 @@ function ReachSpec FollowFindSpecialEdge()
     return None;
 }
 
+// Marks one spec as blocked-by-Pawn; the sole writer of BlockedBy.
+function bool NavBlockSpec(ReachSpec Spec, out array<ReachSpec> OutBlocked)
+{
+    if ((Pawn != None) && (Spec != None) && (Spec.BlockedBy == None))
+    {
+        Spec.BlockedBy = Pawn;
+        OutBlocked.AddItem(Spec);
+        return true;
+    }
+    return false;
+}
+
+// Clears BlockedBy on every spec in Blocked; the sole place that clears the writes.
+// Synchronous: no latent call or state change may sit between NavBlockSpec and NavBlockRestore.
+function NavBlockRestore(out array<ReachSpec> Blocked)
+{
+    local int i;
+    for (i = 0; i < Blocked.Length; i++)
+    {
+        if (Blocked[i] != None)
+        {
+            Blocked[i].BlockedBy = None;
+        }
+    }
+    NavBlockLast = Blocked;
+}
+
+// Once-per-second guard: any spec still marked BlockedBy is a leak.
+function NavBlockLeakCheck(string Where)
+{
+    local int i;
+    for (i = 0; i < NavBlockLast.Length; i++)
+    {
+        if ((NavBlockLast[i] != None) && (NavBlockLast[i].BlockedBy != None))
+        {
+            EchelonLog("NAV2_BLOCK_LEAK spec=" $ string(NavBlockLast[i].Start) $ ">" $ string(NavBlockLast[i].GetEnd()) $ " by=" $ string(NavBlockLast[i].BlockedBy) $ " where=" $ Where);
+            NavBlockLeaks++;
+            NavBlockLast[i].BlockedBy = None;
+        }
+    }
+}
+
 // Blocks, for one search, every link the start-of-match scan found bad (blocked, no floor, zed-only).
 function FollowScanEdgesBlock(out array<ReachSpec> OutBlocked)
 {
@@ -1672,8 +1717,7 @@ function FollowScanEdgesBlock(out array<ReachSpec> OutBlocked)
         if (NavScan.BadSpecs[I] != None && NavScan.BadSpecs[I].BlockedBy == None
             && !FollowIsProvenWalkable(NavScan.BadSpecs[I]))
         {
-            NavScan.BadSpecs[I].BlockedBy = Pawn;
-            OutBlocked.AddItem(NavScan.BadSpecs[I]);
+            NavBlockSpec(NavScan.BadSpecs[I], OutBlocked);
         }
     }
 }
@@ -1710,9 +1754,10 @@ function FollowSurveyEdgesBlock(int Level, out array<ReachSpec> OutBlocked)
         }
         if (MapData.VSpec[I] != None && MapData.VSpec[I].BlockedBy == None)
         {
-            MapData.VSpec[I].BlockedBy = Pawn;
-            OutBlocked.AddItem(MapData.VSpec[I]);
-            Used++;
+            if (NavBlockSpec(MapData.VSpec[I], OutBlocked))
+            {
+                Used++;
+            }
         }
     }
     if (NavMeter != None)
@@ -1959,6 +2004,7 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest, optional bool bLa
         IterSurveyLevel = 2;   // the last search lets trouble and bad_hidden links in; bad_wall and hurt_drop stay blocked
     }
     IterStrict = true;
+    NavBlockLeakCheck("search");
     for (IterPass = 0; IterPass < 4; IterPass++)
     {
         IterBlocked.Length = 0;
@@ -1969,8 +2015,7 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest, optional bool bLa
             if (FollowSpecialSpecs[IterIdx] != None && FollowSpecialSpecs[IterIdx].BlockedBy == None
                 && !FollowIsProvenWalkable(FollowSpecialSpecs[IterIdx]))
             {
-                FollowSpecialSpecs[IterIdx].BlockedBy = Pawn;
-                IterBlocked.AddItem(FollowSpecialSpecs[IterIdx]);
+                NavBlockSpec(FollowSpecialSpecs[IterIdx], IterBlocked);
             }
         }
         IterCSpecial = IterBlocked.Length;
@@ -2015,8 +2060,8 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest, optional bool bLa
                 IterNames = IterNames $ string(IterBlocked[IterIdx].Start) $ ">" $ string(IterBlocked[IterIdx].GetEnd()) $ " ";
                 IterNameCount++;
             }
-            IterBlocked[IterIdx].BlockedBy = None;
         }
+        NavBlockRestore(IterBlocked);
         if (IterFirst == None)
         {
             if (IterStrict && !bLast && MapData != None && MapData.bUsable && MapData.bDone && IterSurveyLevel < 3)
@@ -2689,8 +2734,7 @@ function FollowBadEdgesBlock(int MinStrikes, out array<ReachSpec> OutBlocked)
     {
         if (FollowBadStrikes[i] >= MinStrikes && FollowBadSpecs[i].BlockedBy == None)
         {
-            FollowBadSpecs[i].BlockedBy = Pawn;
-            OutBlocked.AddItem(FollowBadSpecs[i]);
+            NavBlockSpec(FollowBadSpecs[i], OutBlocked);
         }
     }
 }
@@ -2945,8 +2989,7 @@ function FollowSquadEdgesBlock(int MinStrikes, out array<ReachSpec> OutBlocked)
         if (IterLeader.FollowBadSpecs[IterIdx] != None && IterLeader.FollowBadStrikes[IterIdx] >= MinStrikes
             && IterLeader.FollowBadUntil[IterIdx] > WorldInfo.TimeSeconds && IterLeader.FollowBadSpecs[IterIdx].BlockedBy == None)
         {
-            IterLeader.FollowBadSpecs[IterIdx].BlockedBy = Pawn;
-            OutBlocked.AddItem(IterLeader.FollowBadSpecs[IterIdx]);
+            NavBlockSpec(IterLeader.FollowBadSpecs[IterIdx], OutBlocked);
         }
     }
 }
