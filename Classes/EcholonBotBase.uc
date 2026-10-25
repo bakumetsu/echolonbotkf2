@@ -1646,6 +1646,11 @@ function Tick(float Delta)
     }
 
     FollowSampleCrumb();
+    if (WorldInfo.TimeSeconds >= NavBlockNextCheck)
+    {
+        NavBlockNextCheck = WorldInfo.TimeSeconds + 1.0;
+        NavBlockLeakCheck("tick");
+    }
     UpdateLook(Delta);
 
     // Follow-combat escape: route to combat when a Zed has LOS while tethered
@@ -2631,6 +2636,7 @@ final function NavigationPoint PickTraderRoamGoal()
             continue;
         Straight = VSize(N.Location - Pawn.Location);
         RouteDist = 0.0;
+        NavBlockLeakCheck("roam");
         NavCountSearch();
         NextHop = FindPathToward(N);
         if (NextHop == None)
