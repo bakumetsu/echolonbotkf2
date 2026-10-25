@@ -10,6 +10,7 @@ const ZOOM_MIN = 100.0;            // wheel zoom: camera distance range and step
 const ZOOM_MAX = 600.0;
 const ZOOM_STEP = 25.0;
 const ZOOM_THIRD_PERSON_DEFAULT = 120.0;   // stock third person back offset (KFThirdPersonCameraMode OffsetMid.X)
+const FAST_FLY_SCALE = 1.5;        // free fly with the sprint key (bRun) held: speed field x1.5, times the stock (1 + bRun) = 3x
 
 var transient EcholonMut PlaytestMut;
 var transient float LastFreeFlyToggle;   // RealTimeSeconds of the last Space toggle (debounce)
@@ -17,6 +18,8 @@ var transient float ZoomDist;            // wheel-zoomed camera distance, 0 = ne
 var transient float NextWatchCheck;      // normal play: next time the watched bot is checked
 var transient array<int> SavedWheelIdx;      // PlayerInput.Bindings slots whose command SetWheelBinds replaced
 var transient array<string> SavedWheelCmd;   // ...and what they were
+var transient float NextSpeedLog;        // free fly: next SPECTATE_SPEED line
+var transient vector LastFlyLoc;         // free fly: location at the end of the previous tick (for the step length)
 
 final function EcholonMut GetPlaytestMut()
 {
@@ -151,10 +154,26 @@ final function RequestFreeFlyToggle()
         PlaytestMut.PlaytestToggleFreeFly(self);
 }
 
+// Free fly speed. The stock move caps the velocity at SpectatorCameraSpeed and multiplies by (1 + bRun), so the
+// field is assigned from the class default every tick (never multiplied) and cannot grow or stay raised.
+final function UpdateFlySpeed(bool bFreeFly)
+{
+    local float BaseSpeed;
+
+    BaseSpeed = class'EcholonSpectatorPC'.default.SpectatorCameraSpeed;
+    if (bFreeFly && bRun != 0)
+        SpectatorCameraSpeed = BaseSpeed * FAST_FLY_SCALE;
+    else
+        SpectatorCameraSpeed = BaseSpeed;
+}
+
 event PlayerTick(float DeltaTime)
 {
     local Pawn Watched;
+    local bool bFreeFly;
 
+    bFreeFly = IsInState('Spectating') && GetPlaytestMut() != None && PlaytestMut.bPlaytestFreeFly;
+    UpdateFlySpeed(bFreeFly);
     if (IsInState('Spectating'))
     {
         if (bPressedJump)
@@ -174,6 +193,16 @@ event PlayerTick(float DeltaTime)
         }
     }
     super.PlayerTick(DeltaTime);
+    if (bFreeFly && PlaytestMut.bPlaytestFreeFly)
+    {
+        if (WorldInfo.RealTimeSeconds >= NextSpeedLog)
+        {
+            NextSpeedLog = WorldInfo.RealTimeSeconds + 1.0;
+            PlaytestMut.EchelonLog("SPECTATE_SPEED brun=" $ string(bRun) $ " cam=" $ string(int(SpectatorCameraSpeed))
+                $ " step=" $ string(int(VSize(Location - LastFlyLoc))));
+        }
+        LastFlyLoc = Location;
+    }
 }
 
 // Stock RecieveChatMessage puts "Spectator" in front of a spectator's message, but GetChatChannel has
@@ -206,6 +235,7 @@ state Spectating
 
     event EndState(Name NextStateName)
     {
+        UpdateFlySpeed(false);
         RestoreWheelBinds();
         ResetZoomCameras();
         if (GetPlaytestMut() != None)
