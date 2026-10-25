@@ -1,7 +1,7 @@
 class EcholonMut extends KFMutator config(EcholonBot) hidecategories(Navigation, Movement, Collision);
 
 // Constants: generated from contracts/constants.json (D2). Edit there, not here.
-const CUR_CONFIGVER = 3;
+const CUR_CONFIGVER = 4;
 const MIN_GROUPS = 2;
 const MAX_GROUPS = 4;
 const BOTS_PER_GROUP_TARGET = 3;
@@ -152,6 +152,11 @@ var transient float NavScanR;                 // body radius used by the scan
 var transient float NavScanH;                 // body half height used by the scan
 var transient float NavScanKnee;              // trace height above the floor (knee), set in NavScanBegin
 var config int ConfigVer;
+var() config float NavBudgetLimit;            // stalled seconds on one spot before a rescue
+var() config int NavBudgetStalls;             // stall series on one spot before a rescue
+var() config float NavBudgetMinGap;           // minimum seconds between the first and the last counted series
+var() config int NavRescueMax;                // teleport rescues per bot per wave
+var() config bool bNavSpecExempt;             // playtest only: a spectator-only camera does not block a rescue teleport
 var config string _Separator1;
 var() config byte NumBots;
 var() config byte MinimumBots;
@@ -336,7 +341,7 @@ function PostBeginPlay()
 
     KF = KFGameInfo_Survival(WorldInfo.Game);
 
-    if(ConfigVer != CUR_CONFIGVER)
+    if(ConfigVer < 3)
     {
         NumBots = 7;
         BotMaxPerkLv = 25;
@@ -379,7 +384,18 @@ function PostBeginPlay()
         NavGridSquads = 0;
         bNavGridDebug = false;
         _Separator7 = "--- HEALING SETTINGS ---";
-        ConfigVer = CUR_CONFIGVER;
+        ConfigVer = 3;
+        SaveConfig();
+    }
+
+    if(ConfigVer < 4)
+    {
+        NavBudgetLimit = 5.0;
+        NavBudgetStalls = 2;
+        NavBudgetMinGap = 3.0;
+        NavRescueMax = 3;
+        bNavSpecExempt = true;
+        ConfigVer = 4;
         SaveConfig();
     }
 
@@ -458,6 +474,14 @@ function PostBeginPlay()
         ZoneIdleSecs = 15.0;
     if (ZoneMinHoldSecs > ZoneHoldSecs)
         ZoneMinHoldSecs = ZoneHoldSecs;
+    if (NavBudgetLimit <= 0.0)
+        NavBudgetLimit = 5.0;
+    if (NavBudgetStalls <= 0)
+        NavBudgetStalls = 2;
+    if (NavBudgetMinGap < 0.0)
+        NavBudgetMinGap = 3.0;
+    if (NavRescueMax <= 0)
+        NavRescueMax = 3;
     if (bZonePlanner)
     {
         ZonePlanner = new class'EcholonBot.EcholonZonePlanner';
