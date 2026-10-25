@@ -1437,6 +1437,7 @@ final function MoveToX(Vector Dest, optional Actor ViewFocus, optional bool bSer
     {
         bSerpentLeft = Rand(2) == 0;
     }
+    NavMoveBegin("point", Dest, None);
 }
 
 final function MoveTowardX(Actor Dest, optional Actor ViewFocus, optional bool bSerpent = false, optional name Src)
@@ -1466,6 +1467,10 @@ final function MoveTowardX(Actor Dest, optional Actor ViewFocus, optional bool b
     if (bSerpent)
     {
         bSerpentLeft = (Rand(2) == 0);
+    }
+    if (Dest != None)
+    {
+        NavMoveBegin("node", Dest.Location, Dest);
     }
 }
 
@@ -1528,6 +1533,7 @@ final function ProcessMoveTo()
         Pawn.Acceleration = vect(0.0, 0.0, 0.0);
         MoveFlags = 0;
         CurrentPath = None;
+        NavMoveEnd("arrived");
         FinishedMove();
     }
     else
@@ -1559,6 +1565,7 @@ final function ProcessMoveToward()
         Pawn.Acceleration = vect(0.0, 0.0, 0.0);
         MoveFlags = 0;
         CurrentPath = None;
+        NavMoveEnd("arrived");
         FinishedMove();
     }
     else
@@ -1576,6 +1583,7 @@ final function ProcessMoveToward()
 
 final function AbortMove()
 {
+    NavMoveEnd("aborted");
     Pawn.Acceleration = vect(0.0, 0.0, 0.0);
     MoveFlags = 0;
     bAdjusting = false;
@@ -2092,6 +2100,30 @@ final function NavBreakLoop(float IterNow)
     EndMoveTime = IterNow - 1.0;
 }
 
+// Ends a NAV2 move whose mover stopped without ProcessMoveTo / AbortMove (MoveFlags cleared elsewhere, follow state left, pawn gone).
+final function NavMoveSync()
+{
+    if (!bNavMvOpen)
+    {
+        return;
+    }
+    if (Pawn == None)
+    {
+        NavMoveEnd("aborted");
+    }
+    else if (NavMvKind == "follow")
+    {
+        if (!IsInState('FollowingLeader'))
+        {
+            NavMoveEnd("aborted");
+        }
+    }
+    else if (MoveFlags == 0)
+    {
+        NavMoveEnd("aborted");
+    }
+}
+
 // Progress check for MoveTo/MoveToward and the follow mover. 0.75 s without progress backs off (not in follow, which
 // has its own ladder), 1.5 s strikes the edge and ends the move so the hub replans, 3 s walks back to the last good
 // node, 6 s reports Blocked (the hub skips tethering for 10 s), 5 s of stall teleports to the last good node when neither the bot
@@ -2105,6 +2137,7 @@ final function NavProgressCheck()
     local NavigationPoint IterEnd;
     local Actor IterGoal;
 
+    NavMoveSync();
     if (Pawn == None)
     {
         return;
@@ -2148,6 +2181,7 @@ final function NavProgressCheck()
     if (NavLevel < 1 && NavStall >= 0.75)
     {
         NavLevel = 1;
+        bNavMvStalled = true;
         NavGridArmedUntil = IterNow + 4.0;
         if (!bFollow)
         {
@@ -3448,7 +3482,7 @@ function bool AuditRateLimit(string Msg)
 		AuditLastLog_NAVACCEL = IterNow;
 		return true;
 	}
-	if (Left(Msg, 4) ~= "NAV_" || Left(Msg, 11) ~= "SPAWN_NUDGE" || Left(Msg, 8) ~= "RETREAT_" || Left(Msg, 7) ~= "COMBAT_"
+	if (Left(Msg, 4) ~= "NAV_" || Left(Msg, 5) ~= "NAV2_" || Left(Msg, 11) ~= "SPAWN_NUDGE" || Left(Msg, 8) ~= "RETREAT_" || Left(Msg, 7) ~= "COMBAT_"
 		|| Left(Msg, 9) ~= "HEADLESS_" || Left(Msg, 5) ~= "LOOK_" || Left(Msg, 5) ~= "SHOP_")
 	{
 		return true;  // were plain `log lines before; kept unthrottled
