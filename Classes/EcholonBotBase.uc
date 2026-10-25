@@ -1128,43 +1128,131 @@ function bool FireWeaponAt(Actor inActor)
 }
 
 // A bot's weapon mesh is not posed like a player's, so the spray actor attached to its socket sat thousands of uu
-// away and its direct damage never reached the target. Free the live spray and put it at the bot's muzzle, aimed at the target.
+// away and its direct damage never reached the target. Free the live (damage) spray and put it at the bot's muzzle, aimed
+// at the target, but hide it and its particles; the attachment's visual-only spray stays on the third-person gun socket (it follows
+// the gun while the bot moves) and is the one stream seen.
 final function AlignFlameSpray(Actor T)
 {
 	local KFSprayActor S;
 	local vector Start, AimPos;
+	local int Idx;
 
 	Start = Pawn.Location + (vect(0.0, 0.0, 1.0) * (Pawn.BaseEyeHeight * 0.6)) + (vector(Pawn.Rotation) * 40.0);
 	AimPos = GetAimTargetPos(T, Pawn.Weapon);
 	foreach DynamicActors(class'KFSprayActor', S)
 	{
-		if (S.Instigator == Pawn && !S.bVisualOnly)
+		if (S.Instigator == Pawn)
 		{
-			S.SetBase(None);
-			S.SetLocation(Start);
-			S.SetRotation(rotator(AimPos - Start));
+			if (S.bDoFirstPersonFX)
+			{
+				if (!S.bVisualOnly)
+				{
+					S.SetBase(None);
+					S.SetLocation(Start);
+					S.SetRotation(rotator(AimPos - Start));
+				}
+				for (Idx = 0; Idx < S.BoneChain.Length; Idx++)
+				{
+					if (S.BoneChain[Idx].BonePSC0 != None)
+					{
+						S.BoneChain[Idx].BonePSC0.SetHidden(true);
+					}
+					if (S.BoneChain[Idx].BonePSC1 != None)
+					{
+						S.BoneChain[Idx].BonePSC1.SetHidden(true);
+					}
+				}
+				if (S.SprayStartPSC != None)
+				{
+					S.SprayStartPSC.SetHidden(true);
+				}
+				if (S.CurrentSplashEffect != None)
+				{
+					S.CurrentSplashEffect.SetHidden(true);
+				}
+				if (S.SplashGlancingPSC != None)
+				{
+					S.SplashGlancingPSC.SetHidden(true);
+				}
+				if (S.SplashDirectPSC != None)
+				{
+					S.SplashDirectPSC.SetHidden(true);
+				}
+				if (S.SplashPawnPSC != None)
+				{
+					S.SplashPawnPSC.SetHidden(true);
+				}
+				if (S.SplashMaterialBasedPSC != None)
+				{
+					S.SplashMaterialBasedPSC.SetHidden(true);
+				}
+				S.SetHidden(true);
+			}
 		}
 	}
 }
 
-// COMBAT_FLAME: what the flame spray is doing while the bot fires a flame weapon (diagnostic, every 2 s).
+// COMBAT_FLAME: what the flame sprays are doing while the bot fires a flame weapon (diagnostic, every 2 s).
 final function LogFlameState(Actor T)
 {
 	local KFSprayActor S;
-	local int Live;
-	local float SprayDot, SprayOff;
+	local int Live, LivePsc, Shown, AttOff, Idx;
+	local float SprayDot;
 
 	foreach DynamicActors(class'KFSprayActor', S)
 	{
-		if (S.Instigator == Pawn && !S.bVisualOnly)
+		if (S.Instigator == Pawn)
 		{
-			Live++;
-			SprayDot = Normal(T.Location - Pawn.Location) dot vector(S.Rotation);
-			SprayOff = VSize(S.Location - Pawn.Location);
+			if (S.bDoFirstPersonFX && !S.bVisualOnly)
+			{
+				Live++;
+				for (Idx = 0; Idx < S.BoneChain.Length; Idx++)
+				{
+					if (S.BoneChain[Idx].BonePSC0 != None && !S.BoneChain[Idx].BonePSC0.HiddenGame)
+					{
+						LivePsc++;
+					}
+					if (S.BoneChain[Idx].BonePSC1 != None && !S.BoneChain[Idx].BonePSC1.HiddenGame)
+					{
+						LivePsc++;
+					}
+				}
+				if (S.SprayStartPSC != None && !S.SprayStartPSC.HiddenGame)
+				{
+					LivePsc++;
+				}
+				if (S.CurrentSplashEffect != None && !S.CurrentSplashEffect.HiddenGame)
+				{
+					LivePsc++;
+				}
+				if (S.SplashGlancingPSC != None && !S.SplashGlancingPSC.HiddenGame)
+				{
+					LivePsc++;
+				}
+				if (S.SplashDirectPSC != None && !S.SplashDirectPSC.HiddenGame)
+				{
+					LivePsc++;
+				}
+				if (S.SplashPawnPSC != None && !S.SplashPawnPSC.HiddenGame)
+				{
+					LivePsc++;
+				}
+				if (S.SplashMaterialBasedPSC != None && !S.SplashMaterialBasedPSC.HiddenGame)
+				{
+					LivePsc++;
+				}
+			}
+			if (!S.bDoFirstPersonFX && !S.bHidden && !S.bDetached)
+			{
+				Shown++;
+				AttOff = int(VSize(S.Location - Pawn.Location));
+				SprayDot = Normal(T.Location - Pawn.Location) dot vector(S.Rotation);
+			}
 		}
 	}
 	EchelonLog("COMBAT_FLAME weapon=" $ string(Pawn.Weapon.Class.Name) $ " target=" $ string(T.Name) $ " dist=" $ string(int(VSize(T.Location - Pawn.Location)))
-		$ " live_sprays=" $ string(Live) $ " spray_dot=" $ string(SprayDot) $ " spray_off=" $ string(int(SprayOff)));
+		$ " live_sprays=" $ string(Live) $ " live_psc=" $ string(LivePsc) $ " shown_sprays=" $ string(Shown)
+		$ " shown_off=" $ string(AttOff) $ " spray_dot=" $ string(SprayDot));
 }
 
 final function TryBreakFree()
