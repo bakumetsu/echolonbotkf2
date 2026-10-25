@@ -1162,6 +1162,12 @@ final function PlaytestStepCamera(PlayerController PC, int Dir, optional bool bM
     local int I, Start, Count;
     local EcholonBot B;
 
+    // Drop destroyed controllers only; a dead bot keeps its slot (it is skipped below until it is alive again).
+    for (I = PlaytestCamBots.Length - 1; I >= 0; I--)
+    {
+        if (PlaytestCamBots[I] == None || PlaytestCamBots[I].bDeleteMe)
+            PlaytestCamBots.Remove(I, 1);
+    }
     Count = PlaytestCamBots.Length;
     if (Count == 0 || PC == None)
         return;
@@ -1673,10 +1679,6 @@ function UnregisterBot(EcholonBot LeavingBot)
     Idx = ActiveBots.Find(LeavingBot);
     if (Idx != INDEX_NONE)
         ActiveBots.Remove(Idx, 1);
-
-    Idx = PlaytestCamBots.Find(LeavingBot);
-    if (Idx != INDEX_NONE)
-        PlaytestCamBots.Remove(Idx, 1);
 
     HandleFireteamCasualty(LeavingBot);
 }
