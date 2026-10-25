@@ -21,6 +21,8 @@ state PickNextMove
         local int RegroupMyIdx, RegroupTargetIdx, RegroupMySize, RegroupTargetSize, ZedNearLeader;
         local Controller RegroupAttach;
         local EcholonBot RegroupAttachBot, RegroupHoldLeader;
+        local bool bMedicFound;
+        local int MedicHuman;
 
         // Priority 1: Match Ended
         if (bInTerminalState)
@@ -36,8 +38,9 @@ state PickNextMove
             return;
         }
 
+        bMedicPickReady = false;
         // Priority 3: Critical Survival
-        if (KPawn != None && CheckShouldSelfHeal())
+        if (KPawn != None && CheckShouldSelfHeal() && !MedicDeferSelfHeal())
         {
             HubPick("P3_CriticalSurvival", 'HealingSelf');
             GotoState('HealingSelf');
@@ -51,6 +54,36 @@ state PickNextMove
             HubPick("P4_TacticalRetreat", 'TacticalRetreat');
             GotoState('TacticalRetreat');
             return;
+        }
+
+        // Priority 3.5: Medic weapon heal (a bot carrying a medic gun darts hurt teammates first; flag bEnableMedicWeaponPriority)
+        if (KPawn != None && mut != None && mut.bEnableMedicWeaponPriority)
+        {
+            bMedicFound = bMedicPickReady;
+            if (!bMedicFound && WorldInfo.TimeSeconds - LastMedicCheckTime >= MEDIC_TRIAGE_INTERVAL)
+            {
+                LastMedicCheckTime = WorldInfo.TimeSeconds;
+                bMedicFound = CheckMedicWeaponHeal();
+            }
+            bMedicPickReady = false;
+            if (bMedicFound && PendingHeal != None && RangeMedicGun != None)
+            {
+                MedicHuman = 1;
+                if (EcholonBot(PendingHeal.Controller) != None)
+                {
+                    MedicHuman = 0;
+                }
+                MedicTargetName = string(PendingHeal.Name);
+                mut.ReserveHealTarget(self, PendingHeal, MEDIC_RESERVE_SECS);
+                MedicPickTime = WorldInfo.TimeSeconds;
+                MedicEndResult = "timeout";
+                EchelonLog("MEDIC_PICK target=" $ MedicTargetName $ " pct=" $ string(int((float(PendingHeal.Health) / float(PendingHeal.HealthMax)) * 100.0))
+                    $ " dist=" $ string(int(VSize(PendingHeal.Location - Pawn.Location))) $ " selfPct=" $ string(int((float(KPawn.Health) / float(KPawn.HealthMax)) * 100.0)) $ " human=" $ string(MedicHuman)
+                    $ " weapon=" $ string(RangeMedicGun.Class.Name) $ " waited=" $ string(MedicPickWaited));
+                HubPick("P3.5_MedicWeaponHeal", 'HealRanged');
+                GotoState('HealRanged');
+                return;
+            }
         }
 
         // Priority 4.5: Regroup (not during free trader time: squads regroup in the last seconds)
@@ -175,7 +208,7 @@ state PickNextMove
         }
 
         // Priority 6: Squad Medic (Triage)
-        if (KPawn != None && WorldInfo.TimeSeconds - LastTriageTime >= TRIAGE_INTERVAL)
+        if (KPawn != None && (mut == None || !mut.bEnableMedicWeaponPriority) && WorldInfo.TimeSeconds - LastTriageTime >= TRIAGE_INTERVAL)
         {
             LastTriageTime = WorldInfo.TimeSeconds;
             if (CheckMedicGunHeal())
@@ -1439,6 +1472,19 @@ state HealRanged
         AuditStateExit(NextStateName);
         ClearTimer('HealFailsafe');
         ClearTimer('VerifyWeapon');
+        if (MedicPickTime > 0.0)
+        {
+            if (Pawn == None)
+            {
+                MedicEndResult = "botDead";
+            }
+            EchelonLog("MEDIC_END target=" $ MedicTargetName $ " result=" $ MedicEndResult $ " secs=" $ string(WorldInfo.TimeSeconds - MedicPickTime));
+            MedicPickTime = 0.0;
+        }
+        if (mut != None)
+        {
+            mut.ReleaseHealReservation(self);
+        }
         PendingHeal = None;
         if(Pawn != None)
         {
@@ -1483,9 +1529,24 @@ Begin:
 
     while(true)
     {
-        if((PendingHeal == None) || !PendingHeal.IsAliveAndWell() || PendingHeal.Health >= (HEAL_MIN_NEED_PCT / 100.0) * PendingHeal.HealthMax)
+        if((PendingHeal == None) || !PendingHeal.IsAliveAndWell())
         {
+            MedicEndResult = "dead";
             HealFail();
+            PickCombatStyle();
+            Stop;
+        }
+        if(PendingHeal.Health > (HEAL_MAX_NEED_PCT / 100.0) * PendingHeal.HealthMax)
+        {
+            MedicEndResult = "healed";
+            MedicEndQuiet();
+            PickCombatStyle();
+            Stop;
+        }
+        if(MedicPickTime > 0.0 && MedicMeleeThreat())
+        {
+            MedicEndResult = "melee";
+            MedicEndQuiet();
             PickCombatStyle();
             Stop;
         }
@@ -1499,6 +1560,7 @@ Begin:
 
     if(!CanAffordHeal(1))
     {
+        MedicEndResult = "noAmmo";
         HealFail();
         PickCombatStyle();
         Stop;
@@ -1511,6 +1573,7 @@ Begin:
     }
     if(Pawn.Weapon != RangeMedicGun)
     {
+        MedicEndResult = "equip";
         HealFail();
         PickCombatStyle();
         Stop;
@@ -1530,12 +1593,24 @@ Begin:
         Stop;
     }
 
+    if (MedicPickTime > 0.0 && MedicMeleeThreat())
+    {
+        MedicEndResult = "melee";
+        MedicEndQuiet();
+        PickCombatStyle();
+        Stop;
+    }
     RangeMedicGun.AmmoCount[1] -= 50;
+    if (MedicPickTime > 0.0)
+    {
+        EchelonLog("MEDIC_DART target=" $ MedicTargetName $ " pctBefore=" $ string(int((float(PendingHeal.Health) / float(PendingHeal.HealthMax)) * 100.0)) $ " ammoLeft=" $ string(RangeMedicGun.AmmoCount[1]));
+        MedicEndResult = "ok";
+    }
     RangeMedicGun.StartHealRecharge();
     RangeMedicGun.PlayAnimation('Shoot_Dart');
     if(mut != None)
     {
-        mut.RegisterRangedHealTarget(PendingHeal);
+        mut.RegisterRangedHealTarget(PendingHeal, MEDIC_DART_COOLDOWN);
     }
     PendingHeal.HealthToRegen += RangeMedicGun.default.HealAmount;
     Sleep(FMin(RangeMedicGun.GetFireInterval(1), 3.0));

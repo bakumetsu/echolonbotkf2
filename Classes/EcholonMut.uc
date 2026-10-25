@@ -1,7 +1,7 @@
 class EcholonMut extends KFMutator config(EcholonBot) hidecategories(Navigation, Movement, Collision);
 
 // Constants: generated from contracts/constants.json (D2). Edit there, not here.
-const CUR_CONFIGVER = 4;
+const CUR_CONFIGVER = 5;
 const MIN_GROUPS = 2;
 const MAX_GROUPS = 4;
 const BOTS_PER_GROUP_TARGET = 3;
@@ -257,6 +257,11 @@ var transient bool bPlaytestCamCycleInit;
 var() config bool bAllowBotCrouch;
 // Test only: class name of a weapon (e.g. KFWeap_Flame_CaulkBurn) every bot picks as its favorite. Empty = normal behaviour.
 var() config string BotTestWeapon;
+// Medic-weapon heal priority: a bot carrying a medic gun with dart ammo heals teammates with it first. The ConfigVer < 5 migration sets it to true.
+var() config bool bEnableMedicWeaponPriority;
+// Test only: this many bots (the first to pick a favorite weapon) get KFWeap_SMG_Medic as favorite and no other bot picks a medic gun. 0 = off.
+var() config int BotTestMedicCount;
+var transient int BotTestMedicIssued;
 var transient int FlameHits;                  // flame damage events by bots since the last COMBAT_FLAME_DMG line
 var transient int FlameDmg;                   // flame damage by bots since the last COMBAT_FLAME_DMG line
 var transient float NextFlameLog;             // next COMBAT_FLAME_DMG line
@@ -278,6 +283,9 @@ var transient array<PlayerReplicationInfo> AvatarPRI;
 var transient array<bool> AvatarApplied;
 var array<KFPawn_Human> RangedHealTargets;
 var array<float> RangedHealCooldownEnds;
+var transient array<KFPawn_Human> HealReserveTargets;
+var transient array<EcholonBot> HealReserveBots;
+var transient array<float> HealReserveEnds;
 var transient array<string> AvailableBotNames;
 var transient array<Class<KFPerk> > PerkPool;
 var transient array<int> PerkPoolCounts;
@@ -396,6 +404,12 @@ function PostBeginPlay()
         NavRescueMax = 3;
         bNavSpecExempt = true;
         ConfigVer = 4;
+        SaveConfig();
+    }
+    if(ConfigVer < 5)
+    {
+        bEnableMedicWeaponPriority = true;
+        ConfigVer = 5;
         SaveConfig();
     }
 
@@ -2306,7 +2320,7 @@ function PromoteBot(EcholonBot Bot, EBotRank NewRank)
     Bot.BotRank = NewRank;
 }
 
-function RegisterRangedHealTarget(KFPawn_Human Target)
+function RegisterRangedHealTarget(KFPawn_Human Target, float Secs)
 {
     local int I;
 
@@ -2317,13 +2331,13 @@ function RegisterRangedHealTarget(KFPawn_Human Target)
     {
         if (RangedHealTargets[I] == Target)
         {
-            RangedHealCooldownEnds[I] = WorldInfo.TimeSeconds + 25.0;
+            RangedHealCooldownEnds[I] = WorldInfo.TimeSeconds + Secs;
             return;
         }
     }
 
     RangedHealTargets.AddItem(Target);
-    RangedHealCooldownEnds.AddItem(WorldInfo.TimeSeconds + 25.0);
+    RangedHealCooldownEnds.AddItem(WorldInfo.TimeSeconds + Secs);
 }
 
 function bool IsRangedHealTargetOnCooldown(KFPawn_Human Target)
@@ -2358,6 +2372,75 @@ function CleanupRangedHealCooldowns()
         {
             RangedHealTargets.Remove(I, 1);
             RangedHealCooldownEnds.Remove(I, 1);
+        }
+        I--;
+    }
+
+    I = HealReserveTargets.Length - 1;
+    while (I >= 0)
+    {
+        if (WorldInfo.TimeSeconds >= HealReserveEnds[I] || HealReserveTargets[I] == None || HealReserveBots[I] == None)
+        {
+            HealReserveTargets.Remove(I, 1);
+            HealReserveBots.Remove(I, 1);
+            HealReserveEnds.Remove(I, 1);
+        }
+        I--;
+    }
+}
+
+function ReserveHealTarget(EcholonBot Bot, KFPawn_Human Target, float Secs)
+{
+    local int I;
+
+    if (Bot == None || Target == None)
+        return;
+
+    for (I = 0; I < HealReserveTargets.Length; I++)
+    {
+        if (HealReserveTargets[I] == Target)
+        {
+            HealReserveBots[I] = Bot;
+            HealReserveEnds[I] = WorldInfo.TimeSeconds + Secs;
+            return;
+        }
+    }
+
+    HealReserveTargets.AddItem(Target);
+    HealReserveBots.AddItem(Bot);
+    HealReserveEnds.AddItem(WorldInfo.TimeSeconds + Secs);
+}
+
+// True when another bot holds a live reservation on Target: not expired, and the reserving bot is alive.
+function bool IsHealTargetReservedByOther(EcholonBot Bot, KFPawn_Human Target)
+{
+    local int I;
+
+    for (I = 0; I < HealReserveTargets.Length; I++)
+    {
+        if (HealReserveTargets[I] != Target)
+            continue;
+        if (HealReserveBots[I] == Bot || HealReserveBots[I] == None)
+            return false;
+        if (HealReserveBots[I].Pawn == None || !HealReserveBots[I].Pawn.IsAliveAndWell())
+            return false;
+        return WorldInfo.TimeSeconds < HealReserveEnds[I];
+    }
+    return false;
+}
+
+function ReleaseHealReservation(EcholonBot Bot)
+{
+    local int I;
+
+    I = HealReserveTargets.Length - 1;
+    while (I >= 0)
+    {
+        if (HealReserveBots[I] == Bot)
+        {
+            HealReserveTargets.Remove(I, 1);
+            HealReserveBots.Remove(I, 1);
+            HealReserveEnds.Remove(I, 1);
         }
         I--;
     }
