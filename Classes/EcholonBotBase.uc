@@ -335,6 +335,19 @@ var int LookBaseYaw;         // centre yaw of the idle sweep
 var int LookCurYaw;          // yaw the bot currently looks at (smoothed)
 var name LookMode;           // last logged mode: 'ahead', 'sweep', 'combat' or 'off'
 var float LookModeLogTime;   // throttle for LOOK_MODE logs (1 s)
+var float LookTurnAccel;     // V2: look turn acceleration limit, rot units/s^2 (default 65536.0 = 360 degrees/s^2)
+var float LookYawVel;        // V2: current look turn speed, rot units/s (signed)
+var int LookTgtYaw;          // V2: filtered route yaw the view is turning to
+var float LookDeadSince;     // V2: game time a small route yaw change started holding (0 = none)
+var float LookCombatExitT;   // V2: game time combat last ended (0.5 s hold-off before travel writes again)
+var bool bLookWasCombat;     // V2: last tick was combat
+var bool bLookV2Seeded;      // V2: LookCurYaw/LookTgtYaw have been seeded from the controller
+var float LookScanStartT;    // V2: game time the current scan began (0 = not scanning)
+var int LookScanBaseYaw;     // V2: base yaw of the current scan, captured once at scan start
+var float LookReqYaw;        // V2: yaw requested by UpdateSectorWatch (rot units)
+var float LookReqUntil;      // V2: that request is live until this game time
+var float LookTickT;         // V2: game time of the last UpdateLook V2 tick
+var float LookStandSince;    // V2: game time the bot stopped moving (0 = moving)
 var transient Pawn LookDiagPawn;      // pawn the look stats belong to (reset when the pawn changes)
 var transient float LookDiagSpawn;    // game time the pawn was first seen by LookDiagTick
 var transient float LookDiagLast;     // last 0.1 s sample time
@@ -4941,6 +4954,11 @@ function LookModeSweep()
         return;
     }
     Now = WorldInfo.TimeSeconds;
+    if (mut != None && mut.bLookV2Now)
+    {
+        LookSweepUntil = Now + 3.0;
+        return;
+    }
     if (Now >= (LookSweepUntil - 2.0))
     {
         if (SquadLeader != None && SquadLeader.Pawn != None)
@@ -5032,6 +5050,254 @@ function int LookMoveYaw()
     return -1;
 }
 
+// Route point the view should face while walking; never edits the movers. Stub for the nav redesign: current route heading.
+function bool NavLookPoint(out vector P)
+{
+    local float Now;
+
+    Now = WorldInfo.TimeSeconds;
+
+    if (IsInState('FollowingLeader') && bFollowMoveActive)
+    {
+        if (FollowSteerCacheNode != None && Now - FollowSteerCacheTime <= 1.0)
+        {
+            P = FollowSteerCachePoint;
+            return true;
+        }
+        if (FollowNode != None)
+        {
+            P = FollowNode.Location;
+            return true;
+        }
+    }
+
+    if (MoveFlags == 1)
+    {
+        P = GetDestinationPosition();
+        return true;
+    }
+
+    if (MoveFlags == 2 && MoveTarget != None)
+    {
+        P = MoveTarget.Location;
+        return true;
+    }
+
+    return false;
+}
+
+// Eased, route-following view owner; runs only when mut.bLookV2Now is set.
+function UpdateLookV2(float DeltaTime)
+{
+    local float Now, Dt, Speed, Rate, Wanted, StopV, ErrF, Amp, Fade, MaxDv, Dv;
+    local int Err, RawYaw, TgtErr, ViewYaw, TurnTgt;
+    local bool bMoving, bFollowMv;
+    local vector HV, P;
+    local rotator R;
+
+    Now = WorldInfo.TimeSeconds;
+    Dt = FMin(DeltaTime, 0.1);
+    ViewYaw = Rotation.Yaw;
+
+    if (!bLookV2Seeded)
+    {
+        LookCurYaw = ViewYaw;
+        LookTgtYaw = ViewYaw;
+        LookYawVel = 0.0;
+        bLookV2Seeded = true;
+    }
+
+    if (LookInCombat())
+    {
+        LookSetMode('combat');
+        Pawn.RotationRate = LookDefaultRate;
+        bLookWasCombat = true;
+        LookCurYaw = ViewYaw;
+        LookTgtYaw = ViewYaw;
+        LookYawVel = 0.0;
+        LookScanStartT = 0.0;
+        LookStandSince = 0.0;
+        return;
+    }
+
+    if (bLookWasCombat)
+    {
+        bLookWasCombat = false;
+        LookCombatExitT = Now;
+        LookCurYaw = ViewYaw;
+        LookTgtYaw = ViewYaw;
+        LookYawVel = 0.0;
+    }
+
+    Pawn.RotationRate = LookDefaultRate;
+    Pawn.RotationRate.Yaw = 16384;
+
+    if (LookCombatExitT > 0.0 && Now - LookCombatExitT < 0.5)
+    {
+        LookSetMode('hold');
+        return;
+    }
+
+    if (Focus != None)
+    {
+        if (Focus == MoveTarget || NavigationPoint(Focus) != None)
+        {
+            Focus = None;
+        }
+        else
+        {
+            LookSetMode('point');
+            LookCurYaw = ViewYaw;
+            LookYawVel = 0.0;
+            return;
+        }
+    }
+
+    HV = Pawn.Velocity;
+    HV.Z = 0.0;
+    Speed = VSize(HV);
+    bFollowMv = (IsInState('FollowingLeader') && bFollowMoveActive);
+    bMoving = (Speed > 60.0 || ((MoveFlags != 0 || bFollowMv) && LookMoveYaw() >= 0));
+
+    if (bMoving)
+    {
+        LookScanStartT = 0.0;
+        LookStandSince = 0.0;
+
+        if (NavLookPoint(P))
+        {
+            P.Z = Pawn.Location.Z;
+            if (VSize2D(P - Pawn.Location) > 20.0)
+            {
+                R = Rotator(P - Pawn.Location);
+                RawYaw = R.Yaw & 65535;
+            }
+            else
+            {
+                RawYaw = LookMoveYaw();
+            }
+        }
+        else
+        {
+            RawYaw = LookMoveYaw();
+        }
+
+        if (RawYaw < 0)
+        {
+            LookSetMode('hold');
+            return;
+        }
+
+        TgtErr = ((RawYaw - LookTgtYaw + 98304) & 65535) - 32768;
+        if (Abs(TgtErr) > 16384)
+        {
+            LookTgtYaw = RawYaw;
+            LookDeadSince = 0.0;
+        }
+        else if (Abs(TgtErr) < 1820)
+        {
+            if (LookDeadSince == 0.0)
+            {
+                LookDeadSince = Now;
+            }
+            else if (Now - LookDeadSince >= 0.3)
+            {
+                LookTgtYaw = (LookTgtYaw + int(float(TgtErr) * FMin(1.0, Dt / 0.4))) & 65535;
+            }
+        }
+        else
+        {
+            LookDeadSince = 0.0;
+            LookTgtYaw = (LookTgtYaw + int(float(TgtErr) * FMin(1.0, Dt / 0.4))) & 65535;
+        }
+
+        TurnTgt = LookTgtYaw;
+        Rate = 16384.0;
+        LookSetMode('travel');
+    }
+    else
+    {
+        if (LookStandSince == 0.0)
+        {
+            LookStandSince = Now;
+        }
+
+        if (Now < LookReqUntil)
+        {
+            TurnTgt = int(LookReqYaw) & 65535;
+            Rate = 16384.0;
+            LookScanStartT = 0.0;
+            LookSetMode('scan');
+        }
+        else if (Now < LookSweepUntil && Now - LookStandSince >= 1.0)
+        {
+            if (LookScanStartT == 0.0)
+            {
+                LookScanStartT = Now;
+                LookScanBaseYaw = ViewYaw;
+            }
+            if (SquadLeader == None)
+            {
+                Amp = LookSweepAmp;
+            }
+            else
+            {
+                Amp = 12.0;
+            }
+            Fade = FMin(1.0, Now - LookScanStartT);
+            TurnTgt = (LookScanBaseYaw + int(Amp * Fade * Sin((Now - LookScanStartT) * 6.2831853 / LookSweepPeriod) * 182.0444)) & 65535;
+            Rate = 16384.0;
+            LookSetMode('scan');
+        }
+        else
+        {
+            LookScanStartT = 0.0;
+            LookSetMode('hold');
+            LookCurYaw = ViewYaw;
+            LookYawVel = 0.0;
+            return;
+        }
+    }
+
+    Err = ((TurnTgt - LookCurYaw + 98304) & 65535) - 32768;
+    ErrF = float(Err);
+    Wanted = ErrF * 4.0;
+    if (Wanted > Rate)
+    {
+        Wanted = Rate;
+    }
+    if (Wanted < -Rate)
+    {
+        Wanted = -Rate;
+    }
+    StopV = Sqrt(2.0 * LookTurnAccel * Abs(ErrF));
+    if (Wanted > StopV)
+    {
+        Wanted = StopV;
+    }
+    if (Wanted < -StopV)
+    {
+        Wanted = -StopV;
+    }
+    Dv = Wanted - LookYawVel;
+    MaxDv = LookTurnAccel * Dt;
+    if (Dv > MaxDv)
+    {
+        Dv = MaxDv;
+    }
+    if (Dv < -MaxDv)
+    {
+        Dv = -MaxDv;
+    }
+    LookYawVel = LookYawVel + Dv;
+    LookCurYaw = (LookCurYaw + int(LookYawVel * Dt)) & 65535;
+
+    R.Pitch = 0;
+    R.Roll = 0;
+    R.Yaw = LookCurYaw;
+    SetFocalPoint(Pawn.Location + vector(R) * 1000.0);
+}
+
 // Per-tick owner of the bot view direction outside combat; smooths yaw and sets focal point.
 function UpdateLook(float DeltaTime)
 {
@@ -5049,6 +5315,11 @@ function UpdateLook(float DeltaTime)
     {
         LookDefaultRate = Pawn.RotationRate;
         LookCurYaw = Pawn.Rotation.Yaw;
+    }
+    if (mut != None && mut.bLookV2Now)
+    {
+        UpdateLookV2(DeltaTime);
+        return;
     }
     if (LookInCombat())
     {
@@ -5720,6 +5991,12 @@ function UpdateSectorWatch()
     R.Roll = 0;
     R.Yaw = (baseYaw + scanOffset) & 65535;
 
+    if (mut != None && mut.bLookV2Now)
+    {
+        LookReqYaw = float(R.Yaw);
+        LookReqUntil = Now + 0.5;
+        return;
+    }
     SetFocalPoint(Pawn.Location + (vector(R) * 512.0));
 }
 
@@ -6480,6 +6757,7 @@ defaultproperties
 {
     ShoppedWave=-1
     LookTurnRate=32768.0
+    LookTurnAccel=65536.0
     LookSweepAmp=20.0
     LookSweepPeriod=5.0
     LookAheadDist=150.0

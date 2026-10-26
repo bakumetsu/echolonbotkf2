@@ -159,6 +159,8 @@ var() config int NavRescueMax;                // teleport rescues per bot per wa
 var() config bool bNavSpecExempt;             // playtest only: a spectator-only camera does not block a rescue teleport
 var() config bool bNavV2;                     // nav redesign Stage A: route point walks longer than NAV2_REROUTE_DIST instead of walking them straight; on by default (ConfigVer 7 sets it; a config bool is false when absent). ?NavV2=1/0 overrides for one match
 var transient bool bNavV2Now;                 // bNavV2 after the ?NavV2= option
+var() config bool bLookV2;                     // look direction rework (bot-look-direction): eased route-following view; off by default (a config bool is false when absent). ?LookV2=1/0 overrides for one match
+var transient bool bLookV2Now;                 // bLookV2 after the ?LookV2= option
 var config string _Separator1;
 var() config byte NumBots;
 var() config byte MinimumBots;
@@ -1139,6 +1141,12 @@ function InitMutator(string Options, out string ErrorMessage)
     {
         bNavV2Now = class'GameInfo'.static.GetIntOption(Options, "NavV2", 0) != 0;
     }
+    bLookV2Now = bLookV2;
+    if (class'GameInfo'.static.HasOption(Options, "LookV2"))
+    {
+        bLookV2Now = class'GameInfo'.static.GetIntOption(Options, "LookV2", 0) != 0;
+    }
+    EchelonLog("LOOK_CONFIG lookv2=" $ string(bLookV2Now));
     EchelonLog("NAV2_CONFIG navv2=" $ string(bNavV2Now));
     bSurveyNavGridNow = bSurveyNavGrid;
     if (class'GameInfo'.static.HasOption(Options, "SurveyNavGrid"))
