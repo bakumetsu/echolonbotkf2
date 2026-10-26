@@ -1,7 +1,7 @@
 class EcholonMut extends KFMutator config(EcholonBot) hidecategories(Navigation, Movement, Collision);
 
 // Constants: generated from contracts/constants.json (D2). Edit there, not here.
-const CUR_CONFIGVER = 5;
+const CUR_CONFIGVER = 6;
 const MIN_GROUPS = 2;
 const MAX_GROUPS = 4;
 const BOTS_PER_GROUP_TARGET = 3;
@@ -259,7 +259,7 @@ var transient bool bPlaytestCamCycleInit;
 var() config bool bAllowBotCrouch;
 // Test only: class name of a weapon (e.g. KFWeap_Flame_CaulkBurn) every bot picks as its favorite. Empty = normal behaviour.
 var() config string BotTestWeapon;
-// Medic-weapon heal priority: a bot carrying a medic gun with dart ammo heals teammates with it first. The ConfigVer < 5 migration sets it to true.
+// Medic-weapon heal priority: a bot carrying a medic gun with dart ammo heals teammates with it first. The ConfigVer < 6 migration sets it to true.
 var() config bool bEnableMedicWeaponPriority;
 // Test only: this many bots (the first to pick a favorite weapon) get KFWeap_SMG_Medic as favorite and no other bot picks a medic gun. 0 = off.
 var() config int BotTestMedicCount;
@@ -410,15 +410,15 @@ function PostBeginPlay()
     }
     if(ConfigVer < 5)
     {
-        bEnableMedicWeaponPriority = true;
+        bNavV2 = false;
         ConfigVer = 5;
         SaveConfig();
     }
 
-    if(ConfigVer < 5)
+    if(ConfigVer < 6)
     {
-        bNavV2 = false;
-        ConfigVer = 5;
+        bEnableMedicWeaponPriority = true;
+        ConfigVer = 6;
         SaveConfig();
     }
 
