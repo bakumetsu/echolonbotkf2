@@ -5,6 +5,7 @@ const CUR_CONFIGVER = 7;
 const MIN_GROUPS = 2;
 const MAX_GROUPS = 4;
 const BOTS_PER_GROUP_TARGET = 3;
+const CAPTAIN_MIN_BOTS = 12;
 const VIP_ESCORT_MIN_SIZE = 2;
 const GROUP_DISSOLVE_SIZE = 1;
 const VANGUARD_OFFSET = 2000.0;
@@ -1852,8 +1853,12 @@ function InitializePlatoon()
             continue;
         if (Bot.bIsAlphaCommander)
             Bot.BotRank = LIEUTENANT;
-        else if (Bot == VIPController && !Bot.bIsGroupLeader)
-            Bot.BotRank = CAPTAIN;  // a stand-in VIP is always a squad leader, so this no longer fires
+    }
+
+    if (HasCaptainQuorum() && Fireteams.Length > 0 && Fireteams[0].Leader != None)
+    {
+        Fireteams[0].Leader.BotRank = CAPTAIN;
+        EchelonLog("RANK_CAPTAIN bot=" $ Fireteams[0].Leader.LogTag() $ " bots=" $ string(ActiveBots.Length));
     }
 
     SyncSquadLeaders();
@@ -1949,6 +1954,11 @@ function PruneInvalidBots()
             ActiveBots.Remove(i, 1);
         }
     }
+}
+
+final function bool HasCaptainQuorum()
+{
+    return (ActiveBots.Length >= CAPTAIN_MIN_BOTS);
 }
 
 function int DetermineGroupCount(int BotCount)
@@ -2340,6 +2350,8 @@ function ProcessPromotionQueue()
 function PromoteBot(EcholonBot Bot, EBotRank NewRank)
 {
     if (Bot == None)
+        return;
+    if (NewRank == CAPTAIN && !HasCaptainQuorum())
         return;
     Bot.BotRank = NewRank;
 }
