@@ -5106,7 +5106,7 @@ function bool NavLookCorner(out vector C, out vector N)
     }
     if (MoveFlags == 2 && MoveTarget != None)
     {
-        for (I = 0; I < 31; I++)
+        for (I = 0; I < RouteCache.Length - 1; I++)
         {
             if (RouteCache[I] == None)
             {
