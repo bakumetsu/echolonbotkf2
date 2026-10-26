@@ -4449,6 +4449,7 @@ final function EcholonWeaponInfo FindWeaponByClass(Class<KFWeapon> W)
 final function RespawnBots()
 {
     local EcholonBot B;
+    local int NumRespawned;
 
     foreach WorldInfo.AllControllers(class'EcholonBot', B)
     {
@@ -4456,9 +4457,19 @@ final function RespawnBots()
         if (B.Pawn == None || !B.Pawn.IsAliveAndWell())
         {
             RestartBot(B);
+            if (B.Pawn != None)
+            {
+                B.bJustSpawned = true;
+                NumRespawned++;
+            }
             continue;
         }
         B.PlayerReplicationInfo.Score += 500.0;
+    }
+    if (NumRespawned > 0)
+    {
+        RelocateBotsToAmmoCrates();
+        EchelonLog("SPAWN_RESPAWN_RELOCATE count=" $ string(NumRespawned) $ " wave=" $ string(KF.WaveNum));
     }
 }
 
