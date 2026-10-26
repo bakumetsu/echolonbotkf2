@@ -182,6 +182,269 @@ final function bool CheckMedicGunHeal()
     return Best != None;
 }
 
+final function MedicSkip(string Reason)
+{
+    if (WorldInfo.TimeSeconds - MedicSkipLogTime < MEDIC_SKIP_LOG_GAP)
+    {
+        return;
+    }
+    MedicSkipLogTime = WorldInfo.TimeSeconds;
+    EchelonLog("MEDIC_SKIP reason=" $ Reason);
+}
+
+final function MedicNoteSeen(KFPawn_Human P)
+{
+    local int i;
+    for (i = 0; i < MedicSeenT.Length; i++)
+    {
+        if (MedicSeenT[i] == P)
+        {
+            if (WorldInfo.TimeSeconds - MedicSeenLast[i] > 3.0)
+            {
+                MedicSeenFirst[i] = WorldInfo.TimeSeconds;
+            }
+            MedicSeenLast[i] = WorldInfo.TimeSeconds;
+            return;
+        }
+    }
+    MedicSeenT.AddItem(P);
+    MedicSeenFirst.AddItem(WorldInfo.TimeSeconds);
+    MedicSeenLast.AddItem(WorldInfo.TimeSeconds);
+}
+
+final function float MedicWaitedFor(KFPawn_Human P)
+{
+    local int i;
+    for (i = 0; i < MedicSeenT.Length; i++)
+    {
+        if (MedicSeenT[i] == P)
+        {
+            return WorldInfo.TimeSeconds - MedicSeenFirst[i];
+        }
+    }
+    return 0.0;
+}
+
+final function MedicPruneSeen(float ScanTime)
+{
+    local int i;
+    for (i = MedicSeenT.Length - 1; i >= 0; i--)
+    {
+        if (MedicSeenLast[i] < ScanTime || MedicSeenT[i] == None)
+        {
+            MedicSeenT.Remove(i, 1);
+            MedicSeenFirst.Remove(i, 1);
+            MedicSeenLast.Remove(i, 1);
+        }
+    }
+}
+
+final function bool MedicMeleeThreat()
+{
+    local KFPawn_Monster M;
+    if (Pawn == None)
+    {
+        return false;
+    }
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', M, Pawn.Location, MEDIC_MELEE_GUARD_DIST)
+    {
+        if (M.IsAliveAndWell())
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+final function bool CheckMedicWeaponHeal()
+{
+    local KFPawn_Human P, Best;
+    local float Pct, EffectivePct, BestEffectivePct, ScanTime, OwnPct;
+    local KFWeap_MedicBase W;
+    local bool bCarry, bNoLine, bCooldown, bReserved;
+
+    if (mut == None)
+    {
+        return false;
+    }
+    if (!mut.bEnableMedicWeaponPriority)
+    {
+        return false;
+    }
+    if (KPawn == None || !KPawn.IsAliveAndWell())
+    {
+        return false;
+    }
+    if (WorldInfo.TimeSeconds < HealRetryAfter)
+    {
+        return false;
+    }
+
+    RangeMedicGun = None;
+    bCarry = false;
+    if (KFInvManager != None)
+    {
+        foreach KFInvManager.InventoryActors(class'KFWeap_MedicBase', W)
+        {
+            if (!bMedicCarryLogged)
+            {
+                bMedicCarryLogged = true;
+                EchelonLog("MEDIC_CARRY weapon=" $ string(W.Class.Name));
+            }
+            bCarry = true;
+            if (W.HasAmmo(1))
+            {
+                RangeMedicGun = W;
+                break;
+            }
+        }
+    }
+
+    if (RangeMedicGun == None)
+    {
+        if (bCarry)
+        {
+            MedicSkip("noAmmo");
+        }
+        return false;
+    }
+
+    OwnPct = (float(KPawn.Health) / float(KPawn.HealthMax)) * 100.0;
+    if (OwnPct < MEDIC_SELF_FIRST_PCT)
+    {
+        MedicSkip("selfFirst");
+        return false;
+    }
+
+    if (MedicMeleeThreat())
+    {
+        MedicSkip("melee");
+        return false;
+    }
+
+    ScanTime = WorldInfo.TimeSeconds;
+    Best = None;
+    BestEffectivePct = 0.0;
+    bNoLine = false;
+    bCooldown = false;
+    bReserved = false;
+
+    foreach WorldInfo.AllPawns(class'KFPawn_Human', P, Pawn.Location, MEDIC_SCAN_RADIUS)
+    {
+        if (P == Pawn)
+        {
+            continue;
+        }
+        if (!P.IsAliveAndWell())
+        {
+            continue;
+        }
+        if (P.GetTeamNum() != GetTeamNum())
+        {
+            continue;
+        }
+
+        Pct = (float(P.Health) / float(P.HealthMax)) * 100.0;
+        if (Pct > HEAL_MAX_NEED_PCT)
+        {
+            continue;
+        }
+        if (!TargetLowHealth(P))
+        {
+            continue;
+        }
+        if (mut.bEnableFastTraceHealing && !FastTrace(Pawn.Location, P.Location))
+        {
+            bNoLine = true;
+            continue;
+        }
+        MedicNoteSeen(P);
+        if (mut.IsRangedHealTargetOnCooldown(P))
+        {
+            bCooldown = true;
+            continue;
+        }
+        if (mut.IsHealTargetReservedByOther(EcholonBot(self), P))
+        {
+            bReserved = true;
+            continue;
+        }
+
+        EffectivePct = Pct;
+        if (mut.VIPController != None && P == mut.VIPController.Pawn && Pct < VIP_TRIAGE_GATE_PCT)
+        {
+            EffectivePct = FMax(Pct - VIP_TRIAGE_BONUS_PCT, 0.0);
+        }
+
+        if (Best == None || EffectivePct < BestEffectivePct)
+        {
+            Best = P;
+            BestEffectivePct = EffectivePct;
+        }
+    }
+
+    MedicPruneSeen(ScanTime);
+
+    if (Best == None)
+    {
+        if (bReserved)
+        {
+            MedicSkip("reserved");
+        }
+        else if (bCooldown)
+        {
+            MedicSkip("cooldown");
+        }
+        else if (bNoLine)
+        {
+            MedicSkip("noLine");
+        }
+        PendingHeal = None;
+        return false;
+    }
+
+    PendingHeal = Best;
+    MedicPickWaited = MedicWaitedFor(Best);
+    return true;
+}
+
+final function bool MedicDeferSelfHeal()
+{
+    local float OwnPct;
+    if (mut == None)
+    {
+        return false;
+    }
+    if (!mut.bEnableMedicWeaponPriority)
+    {
+        return false;
+    }
+    if (KPawn == None)
+    {
+        return false;
+    }
+    OwnPct = (float(KPawn.Health) / float(KPawn.HealthMax)) * 100.0;
+    if (OwnPct < MEDIC_SELF_FIRST_PCT)
+    {
+        return false;
+    }
+    if (!CheckMedicWeaponHeal())
+    {
+        return false;
+    }
+    bMedicPickReady = true;
+    return true;
+}
+
+final function MedicEndQuiet()
+{
+    PendingHeal = None;
+    if (mut != None)
+    {
+        mut.ReleaseHealReservation(EcholonBot(self));
+    }
+}
+
 final function bool CheckShouldSelfHeal()
 {
     local KFWeap_HealerBase W;
@@ -466,14 +729,21 @@ function HealFail()
     HealRetryAfter = WorldInfo.TimeSeconds + FMin(4.0 * FailStreak, 20.0);
     HubFail("heal");
     EchelonLog("HEAL_FAIL target=" $ PendingHeal $ " streak=" $ string(FailStreak) $ " retryIn=" $ string(HealRetryAfter - WorldInfo.TimeSeconds));
+    if (mut != None)
+    {
+        mut.ReleaseHealReservation(EcholonBot(self));
+    }
     PendingHeal = None;
 }
 
 function HealSuccess()
 {
     FailStreak = 0;
-    SyringeRechargeEnd = WorldInfo.TimeSeconds + 15.0;
-    HealPacingEnd = WorldInfo.TimeSeconds + (20.0 + FRand() * 10.0);
+    if (MedicPickTime <= 0.0)
+    {
+        SyringeRechargeEnd = WorldInfo.TimeSeconds + 15.0;
+        HealPacingEnd = WorldInfo.TimeSeconds + (20.0 + FRand() * 10.0);
+    }
 }
 
 function VerifyWeapon()
@@ -799,6 +1069,8 @@ function PawnDied(Pawn inPawn)
     {
         return;
     }
+
+    EchelonLog("BOT_DEATH state=" $ string(GetStateName()) $ " medicPick=" $ string(MedicPickTime > 0.0));
 
     if (mut != None && mut.bNavTrace && Pawn != None)
     {
