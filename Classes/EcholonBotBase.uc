@@ -348,6 +348,7 @@ var float LookReqYaw;        // V2: yaw requested by UpdateSectorWatch (rot unit
 var float LookReqUntil;      // V2: that request is live until this game time
 var float LookTickT;         // V2: game time of the last UpdateLook V2 tick
 var float LookStandSince;    // V2: game time the bot stopped moving (0 = moving)
+var float LookDevSince;      // V2: game time the velocity first deviated 30+ degrees from the route yaw (0 = not deviating)
 var transient Pawn LookDiagPawn;      // pawn the look stats belong to (reset when the pawn changes)
 var transient float LookDiagSpawn;    // game time the pawn was first seen by LookDiagTick
 var transient float LookDiagLast;     // last 0.1 s sample time
@@ -5091,8 +5092,8 @@ function bool NavLookPoint(out vector P)
 function UpdateLookV2(float DeltaTime)
 {
     local float Now, Dt, Speed, Rate, Wanted, StopV, ErrF, Amp, Fade, MaxDv, Dv;
-    local int Err, RawYaw, TgtErr, ViewYaw, TurnTgt;
-    local bool bMoving, bFollowMv;
+    local int Err, RawYaw, TgtErr, ViewYaw, TurnTgt, VelYaw, DevErr;
+    local bool bMoving, bFollowMv, bVel;
     local vector HV, P;
     local rotator R;
 
@@ -5160,6 +5161,10 @@ function UpdateLookV2(float DeltaTime)
     bFollowMv = (IsInState('FollowingLeader') && bFollowMoveActive);
     bMoving = (Speed > 60.0 || ((MoveFlags != 0 || bFollowMv) && LookMoveYaw() >= 0));
 
+    if (!bMoving)
+    {
+        LookDevSince = 0.0;
+    }
     if (bMoving)
     {
         LookScanStartT = 0.0;
@@ -5183,6 +5188,37 @@ function UpdateLookV2(float DeltaTime)
             RawYaw = LookMoveYaw();
         }
 
+        bVel = false;
+        VelYaw = 0;
+        if (Speed > 60.0)
+        {
+            R = Rotator(HV);
+            VelYaw = R.Yaw & 65535;
+            bVel = true;
+        }
+        if (bVel && RawYaw >= 0)
+        {
+            DevErr = ((VelYaw - RawYaw + 98304) & 65535) - 32768;
+            if (Abs(DevErr) > 5461)
+            {
+                if (LookDevSince == 0.0)
+                {
+                    LookDevSince = Now;
+                }
+                else if (Now - LookDevSince >= 0.5)
+                {
+                    RawYaw = VelYaw;
+                }
+            }
+            else
+            {
+                LookDevSince = 0.0;
+            }
+        }
+        else if (bVel)
+        {
+            RawYaw = VelYaw;
+        }
         if (RawYaw < 0)
         {
             LookSetMode('hold');
