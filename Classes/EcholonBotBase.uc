@@ -5088,13 +5088,52 @@ function bool NavLookPoint(out vector P)
     return false;
 }
 
+// The route node the bot is heading for (C) and the node after it (N), for corner look-ahead. False when unknown.
+function bool NavLookCorner(out vector C, out vector N)
+{
+    local int I;
+
+    if (IsInState('FollowingLeader') && bFollowMoveActive)
+    {
+        if (FollowNode != None && FollowRouteIdx >= 0 && FollowRouteIdx + 1 < FollowRoute.Length
+            && FollowRoute[FollowRouteIdx] == FollowNode && FollowRoute[FollowRouteIdx + 1] != None)
+        {
+            C = FollowNode.Location;
+            N = FollowRoute[FollowRouteIdx + 1].Location;
+            return true;
+        }
+        return false;
+    }
+    if (MoveFlags == 2 && MoveTarget != None)
+    {
+        for (I = 0; I < 31; I++)
+        {
+            if (RouteCache[I] == None)
+            {
+                return false;
+            }
+            if (RouteCache[I] == MoveTarget)
+            {
+                if (RouteCache[I + 1] == None)
+                {
+                    return false;
+                }
+                C = MoveTarget.Location;
+                N = RouteCache[I + 1].Location;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 // Eased, route-following view owner; runs only when mut.bLookV2Now is set.
 function UpdateLookV2(float DeltaTime)
 {
-    local float Now, Dt, Speed, Rate, Wanted, StopV, ErrF, Amp, Fade, MaxDv, Dv;
-    local int Err, RawYaw, TgtErr, ViewYaw, TurnTgt, VelYaw, DevErr;
+    local float Now, Dt, Speed, Rate, Wanted, StopV, ErrF, Amp, Fade, MaxDv, Dv, CornerD, CornerW;
+    local int Err, RawYaw, TgtErr, ViewYaw, TurnTgt, VelYaw, DevErr, NextYaw, CornErr;
     local bool bMoving, bFollowMv, bVel;
-    local vector HV, P;
+    local vector HV, P, CornerP, NextP;
     local rotator R;
 
     Now = WorldInfo.TimeSeconds;
@@ -5188,6 +5227,18 @@ function UpdateLookV2(float DeltaTime)
             RawYaw = LookMoveYaw();
         }
 
+        if (RawYaw >= 0 && NavLookCorner(CornerP, NextP))
+        {
+            CornerD = VSize2D(CornerP - Pawn.Location);
+            if (CornerD < 250.0 && VSize2D(NextP - CornerP) > 20.0)
+            {
+                R = Rotator(NextP - CornerP);
+                NextYaw = R.Yaw & 65535;
+                CornerW = 1.0 - (CornerD / 250.0);
+                CornErr = ((NextYaw - RawYaw + 98304) & 65535) - 32768;
+                RawYaw = (RawYaw + int(float(CornErr) * CornerW)) & 65535;
+            }
+        }
         bVel = false;
         VelYaw = 0;
         if (Speed > 60.0)
@@ -5298,6 +5349,10 @@ function UpdateLookV2(float DeltaTime)
 
     Err = ((TurnTgt - LookCurYaw + 98304) & 65535) - 32768;
     ErrF = float(Err);
+    if (Abs(Err) > 8192 && LookMode == 'travel')
+    {
+        Rate = 24576.0;
+    }
     Wanted = ErrF * 4.0;
     if (Wanted > Rate)
     {
