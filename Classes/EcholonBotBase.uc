@@ -7,6 +7,10 @@ const CQB_PROBE_DIST = 150.0;
 const STUCK_SAMPLE_INTERVAL = 3.0;
 const STUCK_DIST_SQ = 10000.0;
 const DOOR_CHECK_RADIUS = 200.0;
+const NAV2_REROUTE_DIST = 600.0;       // a point walk longer than this goes along the route when bNavV2Now is on
+const NAV2_GRID_CLEAR_PCT = 90;        // a point walk whose survey-grid line is clear for less than this percent also goes along the route
+const NAV2_REROUTE_KEEP = 0.5;         // seconds a routed hop is kept when the same walk is asked again
+const NAV2_REROUTE_LOG_GAP = 10.0;     // NAV2_REROUTE is logged once per walk: a new destination or this many seconds
 const SINGLE_FILE_SPACING = 130.0;
 const PERIMETER_RADIUS = 220.0;
 const DEG_TO_RAD = 0.0174532925;
@@ -179,6 +183,10 @@ var transient bool bHealFired;
 var transient float LastHealFireTime;
 var transient float LastCallTimer;
 var transient float EndMoveTime;
+var transient vector NavRrDest;        // destination of the last routed point walk
+var transient float NavRrTime;         // when it was routed
+var transient vector NavRrLogDest;     // destination of the last NAV2_REROUTE line
+var transient float NavRrLogTime;      // when it was logged
 var transient float SerpentineTime;
 var transient float NextGrenadeTimer;
 var transient float EnemyEncounterTime;
@@ -1436,11 +1444,98 @@ simulated function GetPlayerViewPoint(out Vector out_Location, out Rotator out_R
     }
 }
 
+// Stage A of the nav redesign: with bNavV2Now on, a point walk longer than NAV2_REROUTE_DIST, or whose straight line the survey grid marks blocked, goes along the route (BuildPathTo, then MoveTowardX to the first hop) instead of straight. Returns true when it started or kept a routed hop, false when the caller must walk the straight line.
+final function bool NavRerouteWalk(Vector Dest, Actor ViewFocus, bool bSerpent, name Src)
+{
+    local float Dist;
+    local int GridPct;
+    local bool bLong, bGrid, bReach;
+    local string Res, Why, ReachText, GridText;
+    local Actor PrevTarget;
+
+    if (mut == None || !mut.bNavV2Now || Pawn == None || bSerpent || Src != '')
+    {
+        return false;
+    }
+
+    if (MoveFlags == 2 && NavRrTime > 0.0 && WorldInfo.TimeSeconds - NavRrTime < NAV2_REROUTE_KEEP && VSizeSq(Dest - NavRrDest) < 22500.0)
+    {
+        return true;
+    }
+
+    Dist = VSize(Dest - Pawn.Location);
+    bLong = Dist > NAV2_REROUTE_DIST;
+    GridPct = -1;
+    if (Dist > 150.0)
+    {
+        GridPct = NavGridLinePct(Pawn.Location, Dest);
+    }
+    bGrid = (GridPct >= 0 && GridPct < NAV2_GRID_CLEAR_PCT);
+    if (!bLong && !bGrid)
+    {
+        return false;
+    }
+
+    NavRrTime = WorldInfo.TimeSeconds;
+    NavRrDest = Dest;
+    bReach = WalkPointReachable(Dest);
+    PrevTarget = MoveTarget;
+    Res = "route";
+    if (!BuildPathTo(Dest))
+    {
+        Res = "noroute";
+    }
+    else if (Pawn.ReachedDestination(MoveTarget))
+    {
+        Res = "at_hop";
+    }
+    Why = "grid";
+    if (bLong)
+    {
+        Why = "long";
+    }
+    ReachText = "0";
+    if (bReach)
+    {
+        ReachText = "1";
+    }
+    GridText = "na";
+    if (GridPct >= 0)
+    {
+        GridText = string(GridPct);
+    }
+
+    if (WorldInfo.TimeSeconds - NavRrLogTime > NAV2_REROUTE_LOG_GAP || VSizeSq(Dest - NavRrLogDest) > 22500.0)
+    {
+        NavRrLogTime = WorldInfo.TimeSeconds;
+        NavRrLogDest = Dest;
+        EchelonLog("NAV2_REROUTE dist=" $ string(int(Dist)) $ " reach=" $ ReachText $ " grid=" $ GridText $ " why=" $ Why $ " result=" $ Res $ " state=" $ string(GetStateName()) $ " dest=" $ FollowVecText(Dest));
+    }
+
+    if (Res != "route")
+    {
+        MoveTarget = PrevTarget;
+        return false;
+    }
+
+    if (MoveFlags == 2 && MoveTarget == PrevTarget)
+    {
+        return true;
+    }
+
+    MoveTowardX(MoveTarget, ViewFocus);
+    return true;
+}
+
 final function MoveToX(Vector Dest, optional Actor ViewFocus, optional bool bSerpent = false, optional name Src)
 {
     if (IsInState('FightEnemy') && VSize2D(Dest - Pawn.Location) < ZeroMoveMinDist)
     {
         ZeroMoveHold(Src, "to");
+        return;
+    }
+    if (NavRerouteWalk(Dest, ViewFocus, bSerpent, Src))
+    {
         return;
     }
     bAdjusting = false;
@@ -1665,6 +1760,11 @@ function Tick(float Delta)
     }
 
     FollowSampleCrumb();
+    if (WorldInfo.TimeSeconds >= NavBlockNextCheck)
+    {
+        NavBlockNextCheck = WorldInfo.TimeSeconds + 1.0;
+        NavBlockLeakCheck("tick");
+    }
     UpdateLook(Delta);
 
     // Follow-combat escape: route to combat when a Zed has LOS while tethered
@@ -2650,6 +2750,7 @@ final function NavigationPoint PickTraderRoamGoal()
             continue;
         Straight = VSize(N.Location - Pawn.Location);
         RouteDist = 0.0;
+        NavBlockLeakCheck("roam");
         NavCountSearch();
         NextHop = FindPathToward(N);
         if (NextHop == None)
