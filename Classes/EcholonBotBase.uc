@@ -5566,6 +5566,7 @@ function HandleCQBProximity()
     local KFPawn_Human KFPH;
     local vector awayDir;
     local bool bWantLight;
+    local bool bSkipBash;
 
     if (Pawn == None || Enemy == None || Enemy.Health <= 0 || CurrentFormation != 'SingleFile')
     {
@@ -5583,7 +5584,8 @@ function HandleCQBProximity()
             NextBashTime = now + CQB_BASH_INTERVAL;
 
             W = KFWeapon(Pawn.Weapon);
-            if (W != None)
+            bSkipBash = (IsNoBashZed(Enemy) && HasGunWithAmmo() && (KPawn == None || KPawn.InteractionPawn == None));
+            if (W != None && !bSkipBash)
             {
                 if (W.bMeleeWeapon)
                 {
@@ -5592,6 +5594,14 @@ function HandleCQBProximity()
                 else
                 {
                     W.StartFire(3);
+                }
+            }
+            if (bSkipBash)
+            {
+                EchelonLog("COMBAT_BASH_SKIP zed=" $ string(Enemy.Class.Name) $ " melee=" $ string(W != None && W.bMeleeWeapon));
+                if (W != None && W.bMeleeWeapon)
+                {
+                    SwitchToBestWeapon(true);
                 }
             }
 
@@ -5802,6 +5812,30 @@ event HearNoise(float Loudness, Actor NoiseMaker, optional Name NoiseType)
     {
         GruntOnSight(NoisePawn);
     }
+}
+
+final function bool IsNoBashZed(Pawn P)
+{
+    local KFPawn_Monster M;
+    M = KFPawn_Monster(P);
+    if (M == None)
+        return false;
+    if (M.bLargeZed || M.IsA('KFPawn_ZedHusk') || M.IsA('KFPawn_ZedSiren') || M.IsA('KFPawn_ZedBloat') || M.IsA('KFPawn_ZedScrake') || M.IsA('KFPawn_ZedFleshpound') || M.IsA('KFPawn_ZedFleshpoundMini') || M.IsA('KFPawn_ZedHans') || M.IsA('KFPawn_ZedPatriarch') || M.IsA('KFPawn_ZedMatriarch') || M.IsA('KFPawn_ZedFleshpoundKing') || M.IsA('KFPawn_ZedBloatKing'))
+        return true;
+    return false;
+}
+
+final function bool HasGunWithAmmo()
+{
+    local KFWeapon T;
+    if (Pawn == None || Pawn.InvManager == None)
+        return false;
+    foreach Pawn.InvManager.InventoryActors(class'KFWeapon', T)
+    {
+        if (T != None && !T.bMeleeWeapon && T != MedicGun && !T.IsA('KFWeap_Healer_Syringe') && !T.IsA('KFWeap_Welder') && T.HasAnyAmmo())
+            return true;
+    }
+    return false;
 }
 
 final function bool IsHeavyZedPawn(Pawn P)
