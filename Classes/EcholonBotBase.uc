@@ -360,6 +360,7 @@ var transient int LookHist[32];       // yaw change per 0.1 s while travelling, 
 var transient int LookHistN;          // samples in LookHist
 var transient float LookMaxDelta;     // largest yaw change per 0.1 s in the window, degrees
 var transient float LookJumpLogTime;  // throttle: one LOOK_JUMP per second
+var transient float LookMisLogTime;   // throttle: one LOOK_MIS per 2 s
 var transient KFPawn_Monster LookReactZed;   // zed whose reaction time is being measured
 var transient float LookReactT;       // when LookReactZed first came within 1500 uu with line of sight
 var transient bool bLookReactBehind;  // LookReactZed was behind the bot at that time
@@ -5379,7 +5380,7 @@ function UpdateLook(float DeltaTime)
 
 function LookDiagTick(float Delta)
 {
-    local float Now, Speed, Dt, DYaw, P95, Sum;
+    local float Now, Speed, Dt, DYaw, P95, Sum, Mis;
     local int Bucket, i;
     local vector HV;
     local rotator R;
@@ -5445,13 +5446,18 @@ function LookDiagTick(float Delta)
             {
                 LookTravelS += Dt;
                 R = Rotator(HV);
-                DYaw = (Rotation.Yaw - R.Yaw + 98304) & 65535;
-                DYaw = DYaw - 32768.0;
-                DYaw = Abs(DYaw) * 360.0 / 65536.0;
-                if (DYaw <= 15.0)
+                Mis = (Rotation.Yaw - R.Yaw + 98304) & 65535;
+                Mis = Mis - 32768.0;
+                Mis = Abs(Mis) * 360.0 / 65536.0;
+                if (Mis <= 15.0)
                     LookAligned15S += Dt;
-                if (DYaw <= 30.0)
+                if (Mis <= 30.0)
                     LookAligned30S += Dt;
+                if (Mis > 45.0 && Now - LookMisLogTime >= 2.0)
+                {
+                    LookMisLogTime = Now;
+                    EchelonLog("LOOK_MIS mis=" $ string(int(Mis)) $ " mode=" $ string(LookMode) $ " state=" $ string(GetStateName()) $ " moveflags=" $ string(MoveFlags) $ " follow=" $ string(int(bFollowMoveActive)) $ " view=" $ string(Rotation.Yaw & 65535) $ " pawn=" $ string(Pawn.Rotation.Yaw & 65535) $ " vel=" $ string(R.Yaw & 65535) $ " tgt=" $ string(LookTgtYaw & 65535) $ " speed=" $ string(int(Speed)));
+                }
                 Bucket = Min(int(DYaw * 2.0), 31);
                 LookHist[Bucket]++;
                 LookHistN++;
