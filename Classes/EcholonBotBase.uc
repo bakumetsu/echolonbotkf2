@@ -362,6 +362,8 @@ var transient int LookHistN;          // samples in LookHist
 var transient float LookMaxDelta;     // largest yaw change per 0.1 s in the window, degrees
 var transient float LookJumpLogTime;  // throttle: one LOOK_JUMP per second
 var transient float LookMisLogTime;   // throttle: one LOOK_MIS per 2 s
+var transient vector LookAvgVel;      // horizontal velocity, 1 s exponential average (diagnostic)
+var transient float LookAlignedR30S;  // seconds the view was within 30 degrees of the route direction or the 1 s average velocity
 var transient KFPawn_Monster LookReactZed;   // zed whose reaction time is being measured
 var transient float LookReactT;       // when LookReactZed first came within 1500 uu with line of sight
 var transient bool bLookReactBehind;  // LookReactZed was behind the bot at that time
@@ -5471,9 +5473,11 @@ function UpdateLook(float DeltaTime)
 
 function LookDiagTick(float Delta)
 {
-    local float Now, Speed, Dt, DYaw, P95, Sum, Mis;
+    local float Now, Speed, Dt, DYaw, P95, Sum, Mis, Mis2;
     local int Bucket, i;
-    local vector HV;
+    local bool bAlignR;
+    local vector HV, RP;
+    local rotator RR;
     local rotator R;
     local KFPawn_Monster Z;
     local bool bCombat;
@@ -5498,6 +5502,7 @@ function LookDiagTick(float Delta)
         LookAligned15S = 0.0;
         LookAligned30S = 0.0;
         LookScanMovingS = 0.0;
+        LookAlignedR30S = 0.0;
         LookDiagMoveT = 0.0;
         LookReactZed = None;
         return;
@@ -5533,6 +5538,14 @@ function LookDiagTick(float Delta)
                 EchelonLog("LOOK_JUMP dyaw=" $ string(int(DYaw)) $ " dt=" $ string(Dt) $ " mode=" $ string(LookMode) $ " pawnyaw=" $ string(Pawn.Rotation.Yaw) $ " viewyaw=" $ string(Rotation.Yaw) $ " speed=" $ string(int(Speed)));
             }
 
+            if (LookDiagMoveT == 0.0)
+            {
+                LookAvgVel = HV;
+            }
+            else
+            {
+                LookAvgVel = LookAvgVel + ((HV - LookAvgVel) * FMin(1.0, Dt / 1.0));
+            }
             if (LookDiagMoveT > 0.0 && Now - LookDiagMoveT >= 0.5)
             {
                 LookTravelS += Dt;
@@ -5544,6 +5557,37 @@ function LookDiagTick(float Delta)
                     LookAligned15S += Dt;
                 if (Mis <= 30.0)
                     LookAligned30S += Dt;
+                bAlignR = false;
+                if (VSize(LookAvgVel) > 30.0)
+                {
+                    RR = Rotator(LookAvgVel);
+                    Mis2 = (Rotation.Yaw - RR.Yaw + 98304) & 65535;
+                    Mis2 = Mis2 - 32768.0;
+                    Mis2 = Abs(Mis2) * 360.0 / 65536.0;
+                    if (Mis2 <= 30.0)
+                    {
+                        bAlignR = true;
+                    }
+                }
+                if (!bAlignR && NavLookPoint(RP))
+                {
+                    RP.Z = Pawn.Location.Z;
+                    if (VSize2D(RP - Pawn.Location) > 20.0)
+                    {
+                        RR = Rotator(RP - Pawn.Location);
+                        Mis2 = (Rotation.Yaw - RR.Yaw + 98304) & 65535;
+                        Mis2 = Mis2 - 32768.0;
+                        Mis2 = Abs(Mis2) * 360.0 / 65536.0;
+                        if (Mis2 <= 30.0)
+                        {
+                            bAlignR = true;
+                        }
+                    }
+                }
+                if (bAlignR)
+                {
+                    LookAlignedR30S += Dt;
+                }
                 if (Mis > 45.0 && Now - LookMisLogTime >= 2.0)
                 {
                     LookMisLogTime = Now;
@@ -5577,7 +5621,7 @@ function LookDiagTick(float Delta)
                 }
             }
         }
-        EchelonLog("LOOK_STATS dur=" $ string(Now - LookDiagStatT) $ " travel_s=" $ string(LookTravelS) $ " aligned15_s=" $ string(LookAligned15S) $ " aligned30_s=" $ string(LookAligned30S) $ " p95_10=" $ string(P95) $ " max_10=" $ string(LookMaxDelta) $ " scan_moving_s=" $ string(LookScanMovingS) $ " samples=" $ string(LookHistN));
+        EchelonLog("LOOK_STATS dur=" $ string(Now - LookDiagStatT) $ " travel_s=" $ string(LookTravelS) $ " aligned15_s=" $ string(LookAligned15S) $ " aligned30_s=" $ string(LookAligned30S) $ " alignedr30_s=" $ string(LookAlignedR30S) $ " p95_10=" $ string(P95) $ " max_10=" $ string(LookMaxDelta) $ " scan_moving_s=" $ string(LookScanMovingS) $ " samples=" $ string(LookHistN));
         for (i = 0; i < 32; i++)
             LookHist[i] = 0;
         LookHistN = 0;
@@ -5586,6 +5630,7 @@ function LookDiagTick(float Delta)
         LookAligned15S = 0.0;
         LookAligned30S = 0.0;
         LookScanMovingS = 0.0;
+        LookAlignedR30S = 0.0;
         LookDiagStatT = Now;
     }
 
