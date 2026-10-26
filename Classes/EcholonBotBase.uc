@@ -335,6 +335,22 @@ var int LookBaseYaw;         // centre yaw of the idle sweep
 var int LookCurYaw;          // yaw the bot currently looks at (smoothed)
 var name LookMode;           // last logged mode: 'ahead', 'sweep', 'combat' or 'off'
 var float LookModeLogTime;   // throttle for LOOK_MODE logs (1 s)
+var transient Pawn LookDiagPawn;      // pawn the look stats belong to (reset when the pawn changes)
+var transient float LookDiagSpawn;    // game time the pawn was first seen by LookDiagTick
+var transient float LookDiagLast;     // last 0.1 s sample time
+var transient int LookDiagYaw;        // controller Rotation.Yaw at the last sample
+var transient float LookDiagStatT;    // start of the current 10 s stats window
+var transient float LookDiagMoveT;    // game time the bot started moving above 60 uu/s outside combat (0 = not moving)
+var transient float LookTravelS, LookAligned15S, LookAligned30S;   // seconds in the window
+var transient float LookScanMovingS;  // seconds in mode 'sweep' while speed > 60
+var transient int LookHist[32];       // yaw change per 0.1 s while travelling, 0.5 degree buckets (last bucket = 15.5+ deg)
+var transient int LookHistN;          // samples in LookHist
+var transient float LookMaxDelta;     // largest yaw change per 0.1 s in the window, degrees
+var transient float LookJumpLogTime;  // throttle: one LOOK_JUMP per second
+var transient KFPawn_Monster LookReactZed;   // zed whose reaction time is being measured
+var transient float LookReactT;       // when LookReactZed first came within 1500 uu with line of sight
+var transient bool bLookReactBehind;  // LookReactZed was behind the bot at that time
+var transient float LookReactScanT;   // next zed scan time (every 0.25 s)
 var float LookTurnRate;      // max look turn rate outside combat, rot units/s (default 32768.0)
 var float LookSweepAmp;      // sweep amplitude in degrees (default 20.0)
 var float LookSweepPeriod;   // seconds per full sweep cycle (default 5.0)
@@ -1766,6 +1782,7 @@ function Tick(float Delta)
         NavBlockLeakCheck("tick");
     }
     UpdateLook(Delta);
+    LookDiagTick(Delta);
 
     // Follow-combat escape: route to combat when a Zed has LOS while tethered
     if (IsInState('FollowingLeader') || IsInState('FollowingLeaderBasic'))
@@ -5086,6 +5103,153 @@ function UpdateLook(float DeltaTime)
     else
     {
         SetFocalPoint(Pawn.Location + vector(R) * 1000.0);
+    }
+}
+
+function LookDiagTick(float Delta)
+{
+    local float Now, Speed, Dt, DYaw, P95, Sum;
+    local int Bucket, i;
+    local vector HV;
+    local rotator R;
+    local KFPawn_Monster Z;
+    local bool bCombat;
+
+    if (Pawn == None || Pawn.Health <= 0)
+        return;
+
+    Now = WorldInfo.TimeSeconds;
+
+    if (Pawn != LookDiagPawn)
+    {
+        LookDiagPawn = Pawn;
+        LookDiagSpawn = Now;
+        LookDiagLast = Now;
+        LookDiagYaw = Rotation.Yaw;
+        LookDiagStatT = Now;
+        for (i = 0; i < 32; i++)
+            LookHist[i] = 0;
+        LookHistN = 0;
+        LookMaxDelta = 0.0;
+        LookTravelS = 0.0;
+        LookAligned15S = 0.0;
+        LookAligned30S = 0.0;
+        LookScanMovingS = 0.0;
+        LookDiagMoveT = 0.0;
+        LookReactZed = None;
+        return;
+    }
+
+    HV = Pawn.Velocity;
+    HV.Z = 0.0;
+    Speed = VSize(HV);
+    bCombat = LookInCombat();
+
+    if (Speed > 60.0 && !bCombat)
+    {
+        if (LookDiagMoveT == 0.0)
+            LookDiagMoveT = Now;
+    }
+    else
+        LookDiagMoveT = 0.0;
+
+    if (Now - LookDiagLast >= 0.1)
+    {
+        Dt = Now - LookDiagLast;
+        LookDiagLast = Now;
+        DYaw = (Rotation.Yaw - LookDiagYaw + 98304) & 65535;
+        DYaw = DYaw - 32768.0;
+        DYaw = Abs(DYaw) * 360.0 / 65536.0;
+        LookDiagYaw = Rotation.Yaw;
+
+        if (Now - LookDiagSpawn >= 5.0 && DYaw < 90.0)
+        {
+            if (!bCombat && DYaw > 20.0 && Now - LookJumpLogTime >= 1.0)
+            {
+                LookJumpLogTime = Now;
+                EchelonLog("LOOK_JUMP dyaw=" $ string(int(DYaw)) $ " dt=" $ string(Dt) $ " mode=" $ string(LookMode) $ " pawnyaw=" $ string(Pawn.Rotation.Yaw) $ " viewyaw=" $ string(Rotation.Yaw) $ " speed=" $ string(int(Speed)));
+            }
+
+            if (LookDiagMoveT > 0.0 && Now - LookDiagMoveT >= 0.5)
+            {
+                LookTravelS += Dt;
+                R = Rotator(HV);
+                DYaw = (Rotation.Yaw - R.Yaw + 98304) & 65535;
+                DYaw = DYaw - 32768.0;
+                DYaw = Abs(DYaw) * 360.0 / 65536.0;
+                if (DYaw <= 15.0)
+                    LookAligned15S += Dt;
+                if (DYaw <= 30.0)
+                    LookAligned30S += Dt;
+                Bucket = Min(int(DYaw * 2.0), 31);
+                LookHist[Bucket]++;
+                LookHistN++;
+                if (DYaw > LookMaxDelta)
+                    LookMaxDelta = DYaw;
+            }
+
+            if (LookMode == 'sweep' && Speed > 60.0)
+                LookScanMovingS += Dt;
+        }
+    }
+
+    if (Now - LookDiagStatT >= 10.0)
+    {
+        P95 = 0.0;
+        if (LookHistN > 0)
+        {
+            Sum = 0.0;
+            for (i = 0; i < 32; i++)
+            {
+                Sum += float(LookHist[i]);
+                if (Sum >= 0.95 * float(LookHistN))
+                {
+                    P95 = (i + 1) * 0.5;
+                    break;
+                }
+            }
+        }
+        EchelonLog("LOOK_STATS dur=" $ string(Now - LookDiagStatT) $ " travel_s=" $ string(LookTravelS) $ " aligned15_s=" $ string(LookAligned15S) $ " aligned30_s=" $ string(LookAligned30S) $ " p95_10=" $ string(P95) $ " max_10=" $ string(LookMaxDelta) $ " scan_moving_s=" $ string(LookScanMovingS) $ " samples=" $ string(LookHistN));
+        for (i = 0; i < 32; i++)
+            LookHist[i] = 0;
+        LookHistN = 0;
+        LookMaxDelta = 0.0;
+        LookTravelS = 0.0;
+        LookAligned15S = 0.0;
+        LookAligned30S = 0.0;
+        LookScanMovingS = 0.0;
+        LookDiagStatT = Now;
+    }
+
+    if (Now >= LookReactScanT)
+    {
+        LookReactScanT = Now + 0.25;
+
+        if (LookReactZed != None)
+        {
+            if (!LookReactZed.IsAliveAndWell() || VSize(LookReactZed.Location - Pawn.Location) > 1700.0)
+                LookReactZed = None;
+        }
+
+        if (LookReactZed == None && !Pawn.IsFiring())
+        {
+            foreach WorldInfo.AllPawns(class'KFPawn_Monster', Z, Pawn.Location, 1500.0)
+            {
+                if (Z.IsAliveAndWell() && LineOfSightTo(Z))
+                {
+                    LookReactZed = Z;
+                    LookReactT = Now;
+                    bLookReactBehind = ((Normal(Z.Location - Pawn.Location) dot vector(Rotation)) < 0.0);
+                    break;
+                }
+            }
+        }
+    }
+
+    if (LookReactZed != None && Pawn.IsFiring())
+    {
+        EchelonLog("LOOK_REACT secs=" $ string(Now - LookReactT) $ " dist=" $ string(int(VSize(LookReactZed.Location - Pawn.Location))) $ " behind=" $ string(int(bLookReactBehind)));
+        LookReactZed = None;
     }
 }
 
