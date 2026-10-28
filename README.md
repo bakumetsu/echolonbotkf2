@@ -40,6 +40,8 @@ Add `?Survey=1` to the map URL and the match becomes a map survey: no zeds, a fe
 
 ## Survey-based nav
 
+`?LookV2=1` (or the ini key `bLookV2`, default off; `?LookV2=0` forces it off) turns on the eased, route-following bot view; look measurements (`LOOK_STATS`) are logged either way. Captains only appear with 12 or more bots.
+
 `?SurveyNav=1` (or the ini key `bSurveyNav`, default off; `?SurveyNav=0` forces it off) makes the bots use a finished survey: bad links stay out of their routes and the survey grid saves traces. The data comes from `KFEcholonMapData.ini` (class `EcholonMapData`, one section per map), which the local kit writes from survey logs. Windows and shortcuts a survey bot walked are no longer refused as too narrow or forced, and a failed route search first lets trouble-spot links back in. Without data for the map nothing changes. Details are in `docs/ARCHITECTURE.md` ("Survey-based nav").
 
 ## Docs before every push
