@@ -284,6 +284,9 @@ var() config bool bEnableMedicWeaponPriority;
 // Test only: this many bots (the first to pick a favorite weapon) get KFWeap_SMG_Medic as favorite and no other bot picks a medic gun. 0 = off.
 var() config int BotTestMedicCount;
 var transient int BotTestMedicIssued;
+// Waves: bots may sprint to a hold zone (also leaders), with a sprinting leader, and when retreating; never while shooting or reloading (T-42). False = old wave sprint rules.
+var() config bool bWaveSprint;
+var() config int WaveSprintConfigVer;   // 0 = bWaveSprint default never written; 1 = written once (separate from ConfigVer)
 var transient int FlameHits;                  // flame damage events by bots since the last COMBAT_FLAME_DMG line
 var transient int FlameNearHits;              // flame hits from under 150 uu since the last COMBAT_FLAME_DMG line
 var transient int FlameDmg;                   // flame damage by bots since the last COMBAT_FLAME_DMG line
@@ -509,6 +512,12 @@ function PostBeginPlay()
         ZoneHuntMin = 10;
         ZoneHuntMaxCap = 15;
         ZoneConfigVer = 4;
+        SaveConfig();
+    }
+    if (WaveSprintConfigVer < 1)
+    {
+        bWaveSprint = true;
+        WaveSprintConfigVer = 1;
         SaveConfig();
     }
     // A zone value cleared by hand reads 0: use the built-in default.

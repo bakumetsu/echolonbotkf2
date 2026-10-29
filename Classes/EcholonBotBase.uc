@@ -388,6 +388,9 @@ var Pawn RetreatTarget; // the zed the retreat is shooting at now
 var Pawn RetreatNoFire; // a calm Fleshpound we must not shoot during its calm window
 var float RetreatCalmUntil; // end of the calm-Fleshpound sprint window
 var bool bRetreatSprint; // sprint is allowed during this retreat (calm Fleshpound window or raging Scrake close)
+var transient name SprintWhy;   // why WantsSprint last said yes: base, zoneTravel, leaderSprint, retreat
+var transient float SprintLogTime;   // throttle for SPRINT_WAVE
+var transient float SprintOnTime;   // when the logged sprint started; 0 = no SPRINT_WAVE on line is open
 var bool bRetreatSurrounded; // every direction was blocked at the last check
 var float RetreatLogTime; // throttle for RETREAT_SHOT logs
 var array<Pawn> RetreatFPs; // Fleshpounds seen within 25 m
@@ -5891,7 +5894,20 @@ function SprintTick()
         return;
     bWant = WantsSprint();
     if (bWant != KPawn.bIsSprinting)
+    {
+        if (bWant && KFGRI != None && !KFGRI.bTraderIsOpen && WorldInfo.TimeSeconds - SprintLogTime >= 2.0)
+        {
+            SprintLogTime = WorldInfo.TimeSeconds;
+            SprintOnTime = WorldInfo.TimeSeconds;
+            EchelonLog("SPRINT_WAVE on why=" $ string(SprintWhy) $ " state=" $ string(GetStateName()));
+        }
+        else if (!bWant && SprintOnTime > 0.0)
+        {
+            EchelonLog("SPRINT_WAVE off dur=" $ string(WorldInfo.TimeSeconds - SprintOnTime));
+            SprintOnTime = 0.0;
+        }
         KPawn.SetSprinting(bWant);
+    }
     if (CurrentOrder == 'CMD_TacticalRetreat' && !IsInState('TacticalRetreat'))
         RetreatFireTick();
 }
@@ -5911,11 +5927,19 @@ final function bool WantsSprint()
     if (VSizeSq(V) < SPRINT_MIN_SPEED_SQ)
         return false;
 
+    SprintWhy = 'base';
     S = GetStateName();
     if (S == 'GoShopping')
         return true;
     if (S == 'TacticalRetreat' || CurrentOrder == 'CMD_TacticalRetreat')
+    {
+        if (!bRetreatSprint && mut != None && mut.bWaveSprint)
+        {
+            SprintWhy = 'retreat';
+            return true;
+        }
         return bRetreatSprint;
+    }
     if (IsTraderFreeTime() && (S == 'Roaming' || S == 'DoObjective' || S == 'FollowingLeader'
         || S == 'FollowingLeaderBasic' || S == 'PickNextMove'))
     {
@@ -5928,12 +5952,22 @@ final function bool WantsSprint()
     }
     if (S == 'Hunting' || S == 'GetItem')
         return true;
+    if (S == 'DoObjective' && bIsGroupLeader && mut != None && mut.bWaveSprint)
+    {
+        SprintWhy = 'zoneTravel';
+        return true;
+    }
     if (S == 'Roaming' || S == 'DoObjective')
         return !bIsGroupLeader;
     if (S == 'FollowingLeader' || S == 'FollowingLeaderBasic')
     {
         if (FollowLeaderPawn == None)
             return false;
+        if (mut != None && mut.bWaveSprint && KFPawn_Human(FollowLeaderPawn) != None && KFPawn_Human(FollowLeaderPawn).bIsSprinting)
+        {
+            SprintWhy = 'leaderSprint';
+            return true;
+        }
         LeaderDistSq = VSizeSq(FollowLeaderPawn.Location - Pawn.Location);
         if (KPawn.bIsSprinting)
             return LeaderDistSq > SPRINT_CATCHUP_STOP_SQ;
