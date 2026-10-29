@@ -437,6 +437,8 @@ var transient float NextReloadAttempt;
 var transient float NextWeaponSwitchTime;
 var transient float NextFallbackPoll;
 var transient float NextWeaponLog;         // next COMBAT_WEAPON line (one per 5 s per bot while it fires)
+var transient KFPawn_Monster HlTarget;     // decapitated zed this bot was shooting (T-15 evidence, COMBAT_HEADLESS)
+var transient float HlStartTime;           // when HlTarget was first seen headless while targeted
 var transient float NextFlameLog;          // next COMBAT_FLAME line (one per 2 s per bot while a flame weapon fires)
 var transient float NextFlameAlign;        // next flame spray re-aim (10 per second while a flame weapon fires)
 var transient vector NavSnapIn;              // last Grunt spot asked for and its snapped answer (kept 2 s)
@@ -967,6 +969,10 @@ final function bool TargetLowHealth(Pawn Other)
 
 function EyeSightCheck()
 {
+    if (HlTarget != None)
+    {
+        CheckHeadlessWatch();
+    }
     if ((Pawn != None) && Pawn.IsAliveAndWell())
     {
         if (Enemy != None && Enemy.IsAliveAndWell())
@@ -1099,6 +1105,7 @@ function float GetEnemyThreat(Pawn Other)
 function bool FireWeaponAt(Actor inActor)
 {
 	local KFWeapon W;
+	local bool bProbeOk;
 
 	bOutOfEffectiveRange = false;
 
@@ -1107,7 +1114,9 @@ function bool FireWeaponAt(Actor inActor)
 		return false;
 	}
 	// Shot-point probe before the IsFiring early return, so a burst stops when the target goes behind cover.
-	if (!ProbeShotPoint(inActor))
+	bProbeOk = ProbeShotPoint(inActor);
+	LogHeadlessTarget(inActor);
+	if (!bProbeOk)
 	{
 		Pawn.StopFiring();
 		return false;
@@ -1259,6 +1268,68 @@ final function AlignFlameSpray(Actor T)
 			}
 		}
 	}
+}
+
+// T-15 evidence: COMBAT_HEADLESS once when a bot's target is decapitated (still alive) while it shoots at it: where the aim
+// point is (a headless zed's head bone may be somewhere odd), whether the bot sees the zed, which way it faces.
+final function LogHeadlessTarget(Actor T)
+{
+    local KFPawn_Monster M;
+    local vector AimPos;
+
+    M = KFPawn_Monster(T);
+    if (M == None || !M.bIsHeadless || M == HlTarget || !M.IsAliveAndWell())
+    {
+        return;
+    }
+    HlTarget = M;
+    HlStartTime = WorldInfo.TimeSeconds;
+    AimPos = GetAimTargetPos(M, Pawn.Weapon);
+    EchelonLog("COMBAT_HEADLESS zed=" $ string(M.Class.Name) $ " dist=" $ string(int(VSize(M.Location - Pawn.Location)))
+        $ " aim_off=" $ string(int(VSize(AimPos - M.Location))) $ " aim_dist=" $ string(int(VSize(AimPos - Pawn.Location)))
+        $ " aim_dot=" $ string(Normal(AimPos - Pawn.Location) dot vector(Pawn.Rotation))
+        $ " can_see=" $ string(LineOfSightTo(M)) $ " probe_clear=" $ string(bShotProbeClear)
+        $ " firing=" $ string(Pawn.IsFiring()) $ " state=" $ string(GetStateName()));
+}
+
+// Ends the T-15 watch with one COMBAT_HEADLESS_NEXT line: what happened to the bot's target after the decapitation.
+final function CheckHeadlessWatch()
+{
+    local string Kind, NextName;
+    local float Dt;
+
+    Dt = WorldInfo.TimeSeconds - HlStartTime;
+    if (HlTarget == None || HlTarget.bDeleteMe)
+    {
+        Kind = "gone";
+    }
+    else if (Enemy != HlTarget)
+    {
+        Kind = "enemy_changed";
+        if (Enemy == None)
+        {
+            Kind = "enemy_cleared";
+        }
+    }
+    else if (!HlTarget.IsAliveAndWell())
+    {
+        Kind = "died";
+    }
+    else if (Dt > 8.0)
+    {
+        Kind = "still_targeted";
+    }
+    else
+    {
+        return;
+    }
+    NextName = "none";
+    if (Enemy != None)
+    {
+        NextName = string(Enemy.Class.Name);
+    }
+    EchelonLog("COMBAT_HEADLESS_NEXT kind=" $ Kind $ " dt=" $ string(Dt) $ " next=" $ NextName $ " state=" $ string(GetStateName()));
+    HlTarget = None;
 }
 
 // COMBAT_FLAME: what the flame sprays are doing while the bot fires a flame weapon (diagnostic, every 2 s).
