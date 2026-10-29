@@ -1568,15 +1568,15 @@ final function bool FollowOwnsMove()
     return mut != None && mut.bFollowOwnsMoveNow && IsInState('FollowingLeader');
 }
 
-// MoveToX for the squad-slot movers (grunt offset, reload drift, wedge): skipped while the follow mover owns the move. Tag names the caller in NAV2_MOVE_BEGIN (src=).
-final function GruntMoveToX(string Tag, vector Dest)
+// MoveToX for the squad-slot movers (grunt offset, reload drift, wedge): skipped while the follow mover owns the move. SrcText names the caller in NAV2_MOVE_BEGIN (src=).
+final function GruntMoveToX(string SrcText, vector Dest)
 {
     if (FollowOwnsMove())
     {
         NavFollowOwnSkips++;
         return;
     }
-    NavSrcTag = Tag;
+    NavSrcTag = SrcText;
     MoveToX(Dest);
     NavSrcTag = "";
 }
