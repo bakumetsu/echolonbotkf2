@@ -42,6 +42,8 @@ Add `?Survey=1` to the map URL and the match becomes a map survey: no zeds, a fe
 
 `?LookV2=1` (or the ini key `bLookV2`, default off; `?LookV2=0` forces it off) turns on the eased, route-following bot view; look measurements (`LOOK_STATS`) are logged either way. Captains only appear with 12 or more bots.
 
+`?FollowOwn=1` (or the ini key `bFollowOwnsMove`, default off; `?FollowOwn=0` forces it off) makes the follow mover the only mover while a bot follows its leader: the squad-slot moves of grunts (slot, reload drift, wedge, overwatch, lost leader, VIP) are skipped. `NAV2_MOVE_BEGIN` names the caller of a point move (`src=`) and `NAV_FOLLOW_SLOT` logs a following grunt's distance to its squad slot and to its leader, both with the switch on or off.
+
 `?SurveyNav=1` (or the ini key `bSurveyNav`, default off; `?SurveyNav=0` forces it off) makes the bots use a finished survey: bad links stay out of their routes and the survey grid saves traces. The data comes from `KFEcholonMapData.ini` (class `EcholonMapData`, one section per map), which the local kit writes from survey logs. Windows and shortcuts a survey bot walked are no longer refused as too narrow or forced, and a failed route search first lets trouble-spot links back in. Without data for the map nothing changes. Details are in `docs/ARCHITECTURE.md` ("Survey-based nav").
 
 ## Docs before every push
