@@ -564,6 +564,14 @@ function InitPlayerReplicationInfo()
             PlayerReplicationInfo.PlayerName = "Bot_" $ Rand(9999);
         }
 
+        // Name the bot before it joins the team and the GRI: the "is in the squad" join line reads the PRI name at that moment
+        // and showed the default "Player" for every bot when the name was set after.
+        if (mut != None)
+        {
+            mut.InitBotCharacter(EcholonBot(self));
+            EchelonLog("SPAWN_JOIN_NAME name=" $ PlayerReplicationInfo.PlayerName);
+        }
+
         KFPRI = KFPlayerReplicationInfo(PlayerReplicationInfo);
         if (KFPRI != None)
         {
@@ -580,11 +588,6 @@ function InitPlayerReplicationInfo()
         {
             WorldInfo.GRI.AddPRI(PlayerReplicationInfo);
         }
-    }
-
-    if (mut != None)
-    {
-        mut.InitBotCharacter(EcholonBot(self));
     }
 }
 
