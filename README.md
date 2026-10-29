@@ -6,7 +6,7 @@ A ground-up rewrite of the KF2Bots single-player bot mod for Killing Floor 2 (UE
 
 ```
 Classes/              the mod's UnrealScript source (20 classes)
-avatars/              bot avatar server and the KF2-Avatars launcher source (see avatars/README.md)
+avatars/              bot avatar server and the KF2-Avatars launcher source, plus the player setup steps (see avatars/README.md)
 docs/ARCHITECTURE.md  class chain, milestone plan, every class's symbols, single-writer rules
 ```
 
