@@ -17,8 +17,11 @@ game shows them.
    One picture per bot. If you have more bots than pictures,
    the pictures repeat.
 
-2. Put KF2-Avatars.exe in that same BotAvatars folder.
-   It ignores any non-picture files in the folder.
+2. Download KF2-Avatars.exe from the Releases page:
+   https://github.com/bakumetsu/echolonbotkf2/releases
+   and put it in that same BotAvatars folder. It ignores any non-picture
+   files in the folder. (To build it yourself instead, install Python and run
+   Build-AvatarsExe.bat from the avatars folder of the source; it puts the exe in BotAvatars.)
 
 3. Tell Steam to start the exe before the game.
    Right-click Killing Floor 2 in your Steam library, choose

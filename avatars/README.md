@@ -15,7 +15,7 @@ Bot scoreboard pictures for Killing Floor 2.
 1. Put your pictures (png / jpg / jpeg / gif / bmp, any size) in
    `C:\Users\<you>\Documents\My Games\KillingFloor2\KFGame\BotAvatars`.
    Create the folder if it's missing.
-2. Put `KF2-Avatars.exe` in that same folder.
+2. Download `KF2-Avatars.exe` from the [Releases page](https://github.com/bakumetsu/echolonbotkf2/releases) and put it in that same folder. Or build it yourself (needs Python): run `avatars\Build-AvatarsExe.bat`, which puts the exe in that folder.
 3. Steam: Killing Floor 2, Properties, General, Launch Options:
    `"C:\Users\<you>\Documents\My Games\KillingFloor2\KFGame\BotAvatars\KF2-Avatars.exe" %command% -nostartupmovies`
    (replace `<you>`). Press Play.
@@ -25,4 +25,4 @@ Full step-by-step instructions: see `README-Avatars.txt`.
 
 ## For developers
 
-Source: `avatar_server.py` (HTTP server on `127.0.0.1:8765`), `kf2_avatars_launcher.py` (runs the server, starts the game, exits when `KFGame.exe` is gone; log `KFGame\Logs\KF2-Avatars.log`). The exe is not committed. `kit\avatars\Build-AvatarsExe.bat` builds it with PyInstaller straight into `KFGame\BotAvatars`; the Steam launch option points there.
+Source: `avatar_server.py` (HTTP server on `127.0.0.1:8765`), `kf2_avatars_launcher.py` (runs the server, starts the game, exits when `KFGame.exe` is gone; log `KFGame\Logs\KF2-Avatars.log`). The exe is not committed. `avatars\Build-AvatarsExe.bat` builds it with PyInstaller straight into `KFGame\BotAvatars`; the Steam launch option points there.
