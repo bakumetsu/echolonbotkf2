@@ -1610,6 +1610,7 @@ final function MoveToX(Vector Dest, optional Actor ViewFocus, optional bool bSer
         NavSrcTag = string(Src);
     }
     NavMoveBegin("point", Dest, None);
+    NavSrcTag = "";
 }
 
 final function MoveTowardX(Actor Dest, optional Actor ViewFocus, optional bool bSerpent = false, optional name Src)
