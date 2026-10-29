@@ -136,7 +136,22 @@ var() config float ZoneHoldSecs;              // hold length counted from the fi
 var() config float ZoneArriveTimeout;         // secs after the pick with no squad arrived: zone ends (no_arrive)
 var() config float ZoneMinHoldSecs;           // minimum hold before the hunt order may end the zone (secs)
 var() config float ZoneIdleSecs;              // no squad member saw or shot a zed for this long: hunt early (secs)
-var transient EcholonNavGrid NavGrid;         // shared floor-is-lava tile table (N10)
+var() config bool bZoneHoldScale;             // hold timers follow the wave total W (D-14); false = fixed ZoneHoldSecs / ZoneMinHoldSecs / 15. ZoneHoldSecs is ignored while true
+var() config float ZoneHoldBase;              // Hold = ZoneHoldBase + ZoneHoldPerZed * W (secs), then clamped
+var() config float ZoneHoldPerZed;            // secs of hold per zed in the wave
+var() config int ZoneHoldMin;                 // hold clamp, lower end (secs)
+var() config int ZoneHoldMax;                 // hold clamp, upper end (secs)
+var() config float ZoneMinHoldFrac;           // minimum hold = this fraction of Hold, then clamped
+var() config int ZoneMinHoldFloor;            // minimum hold clamp, lower end (secs)
+var() config int ZoneMinHoldCap;              // minimum hold clamp, upper end (secs)
+var() config float ZoneHuntFrac;              // hunt starts at this fraction of W zeds left, then clamped
+var() config int ZoneHuntMin;                 // hunt threshold clamp, lower end (zeds)
+var() config int ZoneHuntMaxCap;              // hunt threshold clamp, upper end (zeds)
+var transient int ZoneWaveTotal;              // wave total after bot scaling, read at the wave change (0 = unknown)
+var transient float ZoneHoldNow;              // hold for this wave (secs)
+var transient float ZoneMinHoldNow;           // minimum hold for this wave (secs)
+var transient int ZoneHuntMaxNow;             // hunt threshold for this wave (zeds left)
+var transient EcholonNavGrid NavGrid;        // shared floor-is-lava tile table (N10)
 var() config bool bSurveyNav;                 // use the survey map data (KFEcholonMapData.ini) for routes and steering; opt-in until the playtest passes. ?SurveyNav=1/0 overrides for one match
 var() config bool bSurveyNavGrid;             // the grid half of the survey nav (lazy chunks, grid steering, grid-first corner check); needs bSurveyNav. ?SurveyNavGrid=1/0 overrides
 var transient bool bSurveyNavGridNow;
@@ -480,7 +495,49 @@ function PostBeginPlay()
         ZoneConfigVer = 3;
         SaveConfig();
     }
+    if (ZoneConfigVer < 4)
+    {
+        bZoneHoldScale = true;
+        ZoneHoldBase = 40.0;
+        ZoneHoldPerZed = 1.0;
+        ZoneHoldMin = 45;
+        ZoneHoldMax = 150;
+        ZoneMinHoldFrac = 0.5;
+        ZoneMinHoldFloor = 45;
+        ZoneMinHoldCap = 75;
+        ZoneHuntFrac = 0.25;
+        ZoneHuntMin = 10;
+        ZoneHuntMaxCap = 15;
+        ZoneConfigVer = 4;
+        SaveConfig();
+    }
     // A zone value cleared by hand reads 0: use the built-in default.
+    if (ZoneHoldBase < 0.0)
+        ZoneHoldBase = 40.0;
+    if (ZoneHoldPerZed < 0.0)
+        ZoneHoldPerZed = 1.0;
+    if (ZoneMinHoldFrac < 0.0)
+        ZoneMinHoldFrac = 0.5;
+    if (ZoneHuntFrac < 0.0)
+        ZoneHuntFrac = 0.25;
+    if (ZoneHoldMin <= 0)
+        ZoneHoldMin = 45;
+    if (ZoneHoldMax <= 0)
+        ZoneHoldMax = 150;
+    if (ZoneMinHoldFloor <= 0)
+        ZoneMinHoldFloor = 45;
+    if (ZoneMinHoldCap <= 0)
+        ZoneMinHoldCap = 75;
+    if (ZoneHuntMin <= 0)
+        ZoneHuntMin = 10;
+    if (ZoneHuntMaxCap <= 0)
+        ZoneHuntMaxCap = 15;
+    if (ZoneHoldMin > ZoneHoldMax)
+        ZoneHoldMin = ZoneHoldMax;
+    if (ZoneMinHoldFloor > ZoneMinHoldCap)
+        ZoneMinHoldFloor = ZoneMinHoldCap;
+    if (ZoneHuntMin > ZoneHuntMaxCap)
+        ZoneHuntMin = ZoneHuntMaxCap;
     if (ZoneMinDist <= 0.0)
         ZoneMinDist = 1500.0;
     if (ZoneMaxDist <= 0.0)
@@ -511,6 +568,7 @@ function PostBeginPlay()
         ZoneIdleSecs = 15.0;
     if (ZoneMinHoldSecs > ZoneHoldSecs)
         ZoneMinHoldSecs = ZoneHoldSecs;
+    ZoneScaleTimers(0);
     if (NavBudgetLimit <= 0.0)
         NavBudgetLimit = 5.0;
     if (NavBudgetStalls <= 0)
@@ -2842,6 +2900,8 @@ function CheckWave()
             KF.MyKFGRI.AIRemaining = KF.SpawnManager.WaveTotalAI;
             KF.MyKFGRI.WaveTotalAICount = KF.SpawnManager.WaveTotalAI;
         }
+        ZoneScaleTimers(KF.SpawnManager.WaveTotalAI);
+        EchelonLog("ZONE_SCALE wave=" $ string(KF.WaveNum) $ " total=" $ string(ZoneWaveTotal) $ " hold=" $ string(int(ZoneHoldNow + 0.5)) $ " minhold=" $ string(int(ZoneMinHoldNow + 0.5)) $ " huntmax=" $ string(ZoneHuntMaxNow) $ " scale=" $ string(bZoneHoldScale));
     }
 
     if (PrevObjective != KF.MyKFGRI.CurrentObjective)
@@ -2884,6 +2944,38 @@ function CheckWave()
     EvaluateSquadPhase();
 }
 
+// D-14: hold, minimum hold and hunt threshold from the wave total W (0 = unknown). Computed once per wave.
+function ZoneScaleTimers(int W)
+{
+    local float H, M;
+    local int HM;
+
+    ZoneWaveTotal = W;
+    if (!bZoneHoldScale || W <= 0)
+    {
+        ZoneHoldNow = ZoneHoldSecs;
+        ZoneMinHoldNow = ZoneMinHoldSecs;
+        ZoneHuntMaxNow = HUNT_ORDER_MAX_ZEDS;
+        return;
+    }
+
+    H = ZoneHoldBase + (ZoneHoldPerZed * float(W));
+    H = float(int(H + 0.5));
+    H = FClamp(H, float(ZoneHoldMin), float(ZoneHoldMax));
+    M = float(int((ZoneMinHoldFrac * H) + 0.5));
+    M = FClamp(M, float(ZoneMinHoldFloor), float(ZoneMinHoldCap));
+    if (M > H)
+    {
+        M = H;
+    }
+    HM = int((ZoneHuntFrac * float(W)) + 0.5);
+    HM = Clamp(HM, ZoneHuntMin, ZoneHuntMaxCap);
+
+    ZoneHoldNow = H;
+    ZoneMinHoldNow = M;
+    ZoneHuntMaxNow = HM;
+}
+
 // Hunt order: when only a few zeds are left (alive plus still to spawn) and the map has no objective, each
 // squad leader is ordered toward the nearest leftover zed, and the whole squad follows (the bots reach it
 // through the objective pipeline: P5 / DoObjective / follow). Bots used to wait until a leftover zed came
@@ -2901,7 +2993,7 @@ function bool ZoneHuntDeferred(int Alive)
     Now = WorldInfo.TimeSeconds;
     Held = Now - ZoneHoldStart;
 
-    if (Held >= ZoneMinHoldSecs)
+    if (Held >= ZoneMinHoldNow)
     {
         return false;
     }
@@ -2909,7 +3001,7 @@ function bool ZoneHuntDeferred(int Alive)
     if (!bZoneHuntDeferred)
     {
         bZoneHuntDeferred = true;
-        EchelonLog("ZONE_HUNT_DEFER zone=" $ string(ActiveZoneId) $ " held=" $ string(int(Held)) $ " left=" $ string(int(ZoneMinHoldSecs - Held)) $ " zeds=" $ string(Alive));
+        EchelonLog("ZONE_HUNT_DEFER zone=" $ string(ActiveZoneId) $ " held=" $ string(int(Held)) $ " left=" $ string(int(ZoneMinHoldNow - Held)) $ " zeds=" $ string(Alive));
     }
 
     if (Now - ZoneLastZedTime >= ZoneIdleSecs)
@@ -2938,7 +3030,7 @@ function UpdateHuntOrders()
     GRI = KFGameReplicationInfo(WorldInfo.GRI);
     bWant = false;
     if (GRI != None && !bObjectiveActive && NumGroups > 0 && GRI.bMatchHasBegun && !GRI.bMatchIsOver
-        && !GRI.bTraderIsOpen && !GRI.IsBossWave() && GRI.AIRemaining <= HUNT_ORDER_MAX_ZEDS)
+        && !GRI.bTraderIsOpen && !GRI.IsBossWave() && GRI.AIRemaining <= ZoneHuntMaxNow)
     {
         foreach WorldInfo.AllPawns(class'KFPawn_Monster', Z)
         {
@@ -3125,7 +3217,7 @@ final function EndObjective()
     {
         B.FinishObjective();
     }
-    if (KF != None && KF.MyKFGRI != None && KF.MyKFGRI.AIRemaining > HUNT_ORDER_MAX_ZEDS && !KF.MyKFGRI.bTraderIsOpen
+    if (KF != None && KF.MyKFGRI != None && KF.MyKFGRI.AIRemaining > ZoneHuntMaxNow &&!KF.MyKFGRI.bTraderIsOpen
         && !KF.MyKFGRI.IsBossWave())
     {
         ZoneQueuePick("objective_end");
@@ -3981,7 +4073,7 @@ function ZonePickStep()
         }
         RecentStr = RecentStr $ string(RecentZones[i]);
     }
-    EchelonLog("ZONE_PICK zone=" $ string(ZonePlanner.Zones[Pick].Id) $ " src=" $ ZoneSrcName(ZonePlanner.Zones[Pick].Src) $ " dist=" $ string(int(D)) $ " band=" $ BandName $ " tries=" $ string(ZoneTries) $ " recent=" $ RecentStr $ " reason=" $ ZonePickReason);
+    EchelonLog("ZONE_PICK zone=" $ string(ZonePlanner.Zones[Pick].Id) $ " src=" $ ZoneSrcName(ZonePlanner.Zones[Pick].Src) $ " dist=" $ string(int(D)) $ " band=" $ BandName $ " tries=" $ string(ZoneTries) $ " recent=" $ RecentStr $ " reason=" $ ZonePickReason $ " wave_total=" $ string(ZoneWaveTotal) $ " hold=" $ string(int(ZoneHoldNow + 0.5)) $ " minhold=" $ string(int(ZoneMinHoldNow + 0.5)) $ " huntmax=" $ string(ZoneHuntMaxNow));
     ZoneCommit(Pick);
 }
 
@@ -4177,7 +4269,7 @@ function bool ZoneCheckTimers()
     }
     else
     {
-        if (Now - ZoneHoldStart >= ZoneHoldSecs)
+        if (Now - ZoneHoldStart >= ZoneHoldNow)
         {
             ZoneExpire("timer");
             return true;
@@ -4194,9 +4286,9 @@ function ZoneExpire(string Reason)
     Id = ActiveZoneId;
     GRI = KFGameReplicationInfo(WorldInfo.GRI);
     EndZone(Reason);
-    if (GRI != None && GRI.AIRemaining <= HUNT_ORDER_MAX_ZEDS)
+    if (GRI != None && GRI.AIRemaining <= ZoneHuntMaxNow)
     {
-        // With 15 or fewer zeds the hunt starts instead of a re-pick
+        // With HuntMax or fewer zeds the hunt starts instead of a re-pick
         LastHuntOrderTime = 0.0;
         UpdateHuntOrders();
     }
