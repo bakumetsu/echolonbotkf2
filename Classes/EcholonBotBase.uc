@@ -1201,8 +1201,12 @@ final function AlignFlameSpray(Actor T)
 	local KFSprayActor S;
 	local vector Start, AimPos;
 	local int Idx;
+	local float Reach;
 
-	Start = Pawn.Location + (vect(0.0, 0.0, 1.0) * (Pawn.BaseEyeHeight * 0.6)) + (vector(Pawn.Rotation) * 40.0);
+	// At point blank a start 40 uu out sits inside or past the zed, and a spray that starts there never hits it.
+	// Pull the start back toward the bot as the zed gets closer (60 uu is about two collision radii).
+	Reach = FClamp(VSize2D(T.Location - Pawn.Location) - 60.0, 0.0, 40.0);
+	Start = Pawn.Location + (vect(0.0, 0.0, 1.0) * (Pawn.BaseEyeHeight * 0.6)) + (vector(Pawn.Rotation) * Reach);
 	AimPos = GetAimTargetPos(T, Pawn.Weapon);
 	foreach DynamicActors(class'KFSprayActor', S)
 	{

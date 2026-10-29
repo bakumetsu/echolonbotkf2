@@ -270,6 +270,7 @@ var() config bool bEnableMedicWeaponPriority;
 var() config int BotTestMedicCount;
 var transient int BotTestMedicIssued;
 var transient int FlameHits;                  // flame damage events by bots since the last COMBAT_FLAME_DMG line
+var transient int FlameNearHits;              // flame hits from under 150 uu since the last COMBAT_FLAME_DMG line
 var transient int FlameDmg;                   // flame damage by bots since the last COMBAT_FLAME_DMG line
 var transient float NextFlameLog;             // next COMBAT_FLAME_DMG line
 // Count bots as voters in the skip-trader vote (stock behaviour). Off by default: only human
@@ -5872,9 +5873,15 @@ function NetDamage(int OriginalDamage, out int Damage, Pawn injured, Controller 
 {
 	local string Causer;
 
-	if ((Damage > 0) && (EcholonBot(InstigatedBy) != None) && (Class<KFDT_Fire>(DamageType) != None) && (injured != None))
+	// Fire damage, or any damage while the bot holds a flame-base weapon (the Reducto Ray is one but does not deal fire damage).
+	if ((Damage > 0) && (EcholonBot(InstigatedBy) != None) && (injured != None) && (DamageType != None)
+		&& (Class<KFDT_Fire>(DamageType) != None || (InstigatedBy.Pawn != None && KFWeap_FlameBase(InstigatedBy.Pawn.Weapon) != None)))
 	{
 		FlameHits++;
+		if (InstigatedBy.Pawn != None && VSize(injured.Location - InstigatedBy.Pawn.Location) < 150.0)
+		{
+			FlameNearHits++;
+		}
 		FlameDmg += Damage;
 		if (injured.Health <= Damage && InstigatedBy.Pawn != None)
 		{
@@ -5888,8 +5895,9 @@ function NetDamage(int OriginalDamage, out int Damage, Pawn injured, Controller 
 				Causer = string(DamageCauser.Class.Name);
 			}
 			NextFlameLog = WorldInfo.TimeSeconds + 2.0;
-			EchelonLog("COMBAT_FLAME_DMG hits=" $ string(FlameHits) $ " dmg=" $ string(FlameDmg) $ " type=" $ string(DamageType.Name) $ " causer=" $ Causer);
+			EchelonLog("COMBAT_FLAME_DMG hits=" $ string(FlameHits) $ " near_hits=" $ string(FlameNearHits) $ " dmg=" $ string(FlameDmg) $ " type=" $ string(DamageType.Name) $ " causer=" $ Causer);
 			FlameHits = 0;
+			FlameNearHits = 0;
 			FlameDmg = 0;
 		}
 	}
