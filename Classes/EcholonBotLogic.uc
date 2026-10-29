@@ -572,7 +572,7 @@ function FollowSlotSample()
     {
         IterLeaderDist = int(VSize2D(FollowLeaderPawn.Location - Pawn.Location));
     }
-    EchelonLog("NAV_FOLLOW_SLOT dist=" $ string(int(VSize2D(IterSlot - Pawn.Location))) $ " leader=" $ string(IterLeaderDist) $ " skips=" $ string(NavFollowOwnSkips) $ " goal=" $ FollowSlotGoalLogText());
+    EchelonLog("NAV_FOLLOW_SLOT dist=" $ string(int(VSize2D(IterSlot - Pawn.Location))) $ " leader=" $ string(IterLeaderDist) $ " skips=" $ string(NavFollowOwnSkips) $ " goal=" $ FollowSlotGoalLogText() $ " stale=" $ string(NavFollowStaleFalls));
 }
 
 function UpdateGruntOffset()

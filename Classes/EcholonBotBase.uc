@@ -269,7 +269,8 @@ var transient vector FollowSlotGoal;     // last squad-slot / role spot from Upd
 var transient string FollowSlotGoalSrc;  // which caller chose it (slot, wedge, overwatch, ...)
 var transient float FollowSlotGoalTime;  // when it was chosen
 var float FollowSlotGoalMaxAge;          // seconds before the goal counts as stale (CheckGrabbed runs every 0.2 to 0.3 s)
-var transient int NavFollowOwnSkips;    // squad-slot moves skipped because the follow mover owned the move (follow-owns-move switch)
+var transient int NavFollowStaleFalls;   // follow decisions that fell back to the leader because the slot goal was stale or missing
+var transient int NavFollowOwnSkips;   // squad-slot moves skipped because the follow mover owned the move (follow-owns-move switch)
 var bool bHasHoldPosition;
 var vector HoldPosition;
 var float LastTriageTime;
@@ -3848,6 +3849,10 @@ function bool FollowGetOrderAnchor(out vector OutLoc)
         OutLoc = FollowSlotGoal;
         bFollowAnchorIsSlot = true;
         return true;
+    }
+    if (FollowOwnsMove())
+    {
+        NavFollowStaleFalls++;
     }
     return false;
 }
