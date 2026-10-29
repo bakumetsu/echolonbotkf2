@@ -4451,11 +4451,25 @@ final function InitTraderList(KFGFxObject_TraderItems L)
         }
         if (A.InitInformation(L.SaleItems[I].WeaponDef, L.SaleItems[I].ClassName))
         {
-            TraderList.AddItem(A);
-            A = None;
+            if (IsBannedWeapon(A.WeaponClass))
+            {
+                // Left out of the list, so bots never buy it, never pick it as favorite and BotTestWeapon cannot select it.
+                EchelonLog("SHOP_BAN weapon=" $ string(A.WeaponClass.Name) $ " test_favorite=" $ string(string(A.WeaponClass.Name) ~= BotTestWeapon));
+            }
+            else
+            {
+                TraderList.AddItem(A);
+                A = None;
+            }
         }
         I--;
     }
+}
+
+// Weapons bots must not use. The Doshinegun spends dosh as ammo and drains the bot's shopping money (T-49).
+final function bool IsBannedWeapon(Class<KFWeapon> W)
+{
+    return string(W.Name) ~= "KFWeap_AssaultRifle_Doshinegun";
 }
 
 final function EcholonWeaponInfo FindWeaponByClass(Class<KFWeapon> W)
