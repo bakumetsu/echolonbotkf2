@@ -550,7 +550,29 @@ function CheckGrabbed()
     if (BotRank == GRUNT)
     {
         UpdateGruntOffset();
+        FollowSlotSample();
     }
+}
+
+// Every 2 s while a grunt follows: how far it is from its squad slot and from the leader it follows (NAV_FOLLOW_SLOT), and how many slot moves the follow mover has skipped. Logged with the switch on or off, so the two arms compare.
+function FollowSlotSample()
+{
+    local vector IterSlot;
+    local int IterLeaderDist;
+
+    if (Pawn == None || SquadLeader == None || SquadLeader.Pawn == None || !IsInState('FollowingLeader')
+        || WorldInfo.TimeSeconds - FollowSlotLogTime < 2.0)
+    {
+        return;
+    }
+    FollowSlotLogTime = WorldInfo.TimeSeconds;
+    IterSlot = SquadLeader.Pawn.Location + ComputeSlotOffset();
+    IterLeaderDist = -1;
+    if (FollowLeaderPawn != None)
+    {
+        IterLeaderDist = int(VSize2D(FollowLeaderPawn.Location - Pawn.Location));
+    }
+    EchelonLog("NAV_FOLLOW_SLOT dist=" $ string(int(VSize2D(IterSlot - Pawn.Location))) $ " leader=" $ string(IterLeaderDist) $ " skips=" $ string(NavFollowOwnSkips));
 }
 
 function UpdateGruntOffset()
@@ -581,7 +603,7 @@ function UpdateGruntOffset()
     {
         if (LastValidSquadLeaderPos != vect(0, 0, 0))
         {
-            MoveToX(LastValidSquadLeaderPos);
+            GruntMoveToX("lost_leader", LastValidSquadLeaderPos);
         }
         else
         {
@@ -592,7 +614,7 @@ function UpdateGruntOffset()
             }
             if (VIP != None && VIP.Pawn != None && VIP.Pawn.Health > 0)
             {
-                MoveToX(VIP.Pawn.Location);
+                GruntMoveToX("vip", VIP.Pawn.Location);
             }
         }
         if (!bPromotionGapTimerActive)
@@ -615,7 +637,7 @@ function UpdateGruntOffset()
     {
         if (UpdateOverwatchMovement(OverwatchMoveTarget))
         {
-            MoveToX(OverwatchMoveTarget);
+            GruntMoveToX("overwatch", OverwatchMoveTarget);
         }
         return;
     }
@@ -638,7 +660,7 @@ function UpdateGruntOffset()
 
     if (bReloadDriftMove && ReloadDriftUntil > WorldInfo.TimeSeconds)
     {
-        MoveToX(ReloadDriftLoc);
+        GruntMoveToX("reload_drift", ReloadDriftLoc);
         return;
     }
 
@@ -647,7 +669,7 @@ function UpdateGruntOffset()
         GruntTarget = SquadLeader.Pawn.Location;
         ApplyWedgeTarget(GruntTarget);
         GruntTarget = ApplyZStep(GruntTarget);
-        MoveToX(NavSnapSpot(GruntTarget, SquadLeader.Pawn.Location));
+        GruntMoveToX("wedge", NavSnapSpot(GruntTarget, SquadLeader.Pawn.Location));
         return;
     }
 
@@ -669,7 +691,7 @@ function UpdateGruntOffset()
     }
     GruntTarget = NavSnapSpot(GruntTarget, SquadLeader.Pawn.Location);
 
-    MoveToX(GruntTarget);
+    GruntMoveToX("slot", GruntTarget);
 }
 
 function vector ApplyZStep(vector T)

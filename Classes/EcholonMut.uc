@@ -162,6 +162,8 @@ var() config bool bNavV2;                     // nav redesign Stage A: route poi
 var transient bool bNavV2Now;                 // bNavV2 after the ?NavV2= option
 var() config bool bLookV2;                     // look direction rework (bot-look-direction): eased route-following view; off by default (a config bool is false when absent). ?LookV2=1/0 overrides for one match
 var transient bool bLookV2Now;                 // bLookV2 after the ?LookV2= option
+var() config bool bFollowOwnsMove;                // follow-owns-move (T-37): while a bot is in FollowingLeader the follow mover is the only mover (the squad-slot MoveToX callers are skipped); off by default (a config bool is false when absent). ?FollowOwn=1/0 overrides for one match
+var transient bool bFollowOwnsMoveNow;           // bFollowOwnsMove after the ?FollowOwn= option
 var config string _Separator1;
 var() config byte NumBots;
 var() config byte MinimumBots;
@@ -1147,6 +1149,12 @@ function InitMutator(string Options, out string ErrorMessage)
     {
         bLookV2Now = class'GameInfo'.static.GetIntOption(Options, "LookV2", 0) != 0;
     }
+    bFollowOwnsMoveNow = bFollowOwnsMove;
+    if (class'GameInfo'.static.HasOption(Options, "FollowOwn"))
+    {
+        bFollowOwnsMoveNow = class'GameInfo'.static.GetIntOption(Options, "FollowOwn", 0) != 0;
+    }
+    EchelonLog("FOLLOWOWN_CONFIG followown=" $ string(bFollowOwnsMoveNow));
     EchelonLog("LOOK_CONFIG lookv2=" $ string(bLookV2Now));
     EchelonLog("NAV2_CONFIG navv2=" $ string(bNavV2Now));
     bSurveyNavGridNow = bSurveyNavGrid;

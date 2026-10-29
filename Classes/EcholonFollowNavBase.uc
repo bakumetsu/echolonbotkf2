@@ -107,6 +107,7 @@ var vector FollowLastGoalPos;         // goal point of that search when it had n
 var float FollowLastGoalTime;         // when that search ran
 var transient bool bNavMvOpen;            // a NAV2_MOVE_BEGIN is waiting for its NAV2_MOVE_END
 var transient string NavMvKind;           // point, node or follow
+var transient string NavSrcTag;          // who asked for the next point move (set by the caller, logged as src= by NAV2_MOVE_BEGIN and cleared there)
 var transient vector NavMvDest;
 var transient Actor NavMvDestActor;
 var transient float NavMvStartTime;
@@ -1580,7 +1581,21 @@ function NavMoveBegin(string Kind, vector Dest, Actor DestActor)
     NavMvDestActor = DestActor;
     NavMvStartTime = WorldInfo.TimeSeconds;
     bNavMvStalled = false;
-    EchelonLog("NAV2_MOVE_BEGIN mover=" $ Kind $ " start=" $ FollowVecText(Pawn.Location) $ " dest=" $ FollowVecText(Dest) $ " dist=" $ string(int(VSize(Dest - Pawn.Location))) $ " reach=" $ Reach $ " gridclear=" $ Grid $ " state=" $ string(GetStateName()) $ " goal=" $ FollowGoalText());
+    EchelonLog("NAV2_MOVE_BEGIN mover=" $ Kind $ " start=" $ FollowVecText(Pawn.Location) $ " dest=" $ FollowVecText(Dest) $ " dist=" $ string(int(VSize(Dest - Pawn.Location))) $ " reach=" $ Reach $ " gridclear=" $ Grid $ " state=" $ string(GetStateName()) $ " goal=" $ FollowGoalText() $ " src=" $ NavSrcTagText());
+}
+
+// Text for src= in NAV2_MOVE_BEGIN: the tag set by the caller, or "-". Reading it clears it.
+function string NavSrcTagText()
+{
+    local string IterTag;
+
+    IterTag = NavSrcTag;
+    NavSrcTag = "";
+    if (IterTag == "")
+    {
+        return "-";
+    }
+    return IterTag;
 }
 
 // Closes the open NAV2 move and logs NAV2_MOVE_END.

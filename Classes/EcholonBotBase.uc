@@ -264,6 +264,8 @@ var float AuditLastLog_FOLLOWGATE;
 var float AuditLastLog_GEN;
 var float AuditLastLog_DWELLTOT;
 var float AuditLastLog_NAVACCEL;
+var transient float FollowSlotLogTime;   // last NAV_FOLLOW_SLOT sample (2 s apart)
+var transient int NavFollowOwnSkips;     // squad-slot moves skipped because the follow mover owned the move (follow-owns-move switch)
 var bool bHasHoldPosition;
 var vector HoldPosition;
 var float LastTriageTime;
@@ -1560,6 +1562,25 @@ final function bool NavRerouteWalk(Vector Dest, Actor ViewFocus, bool bSerpent, 
     return true;
 }
 
+// True while this bot follows a leader and the follow-owns-move switch (?FollowOwn=1) is on: the follow mover is then the only mover.
+final function bool FollowOwnsMove()
+{
+    return mut != None && mut.bFollowOwnsMoveNow && IsInState('FollowingLeader');
+}
+
+// MoveToX for the squad-slot movers (grunt offset, reload drift, wedge): skipped while the follow mover owns the move. Tag names the caller in NAV2_MOVE_BEGIN (src=).
+final function GruntMoveToX(string Tag, vector Dest)
+{
+    if (FollowOwnsMove())
+    {
+        NavFollowOwnSkips++;
+        return;
+    }
+    NavSrcTag = Tag;
+    MoveToX(Dest);
+    NavSrcTag = "";
+}
+
 final function MoveToX(Vector Dest, optional Actor ViewFocus, optional bool bSerpent = false, optional name Src)
 {
     if (IsInState('FightEnemy') && VSize2D(Dest - Pawn.Location) < ZeroMoveMinDist)
@@ -1583,6 +1604,10 @@ final function MoveToX(Vector Dest, optional Actor ViewFocus, optional bool bSer
     if (bSerpent)
     {
         bSerpentLeft = Rand(2) == 0;
+    }
+    if (NavSrcTag == "" && Src != '')
+    {
+        NavSrcTag = string(Src);
     }
     NavMoveBegin("point", Dest, None);
 }
@@ -6566,7 +6591,7 @@ function OnReloadDriftAnchor(vector Anchor)
 {
     ReloadDriftLoc = Anchor + ReloadDriftOffset;
     ApplyCrouch(true);
-    MoveToX(ReloadDriftLoc);
+    GruntMoveToX("reload_anchor", ReloadDriftLoc);
 }
 
 function OnReloadComplete()
