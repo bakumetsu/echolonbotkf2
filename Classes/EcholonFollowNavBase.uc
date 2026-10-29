@@ -26,6 +26,7 @@ var bool bFollowArrived;
 var bool bFollowOrderAnchorActive;
 var bool bFollowAnchorIsSlot;      // the anchor is the squad slot (follow-owns-move), not an objective-phase spot
 var float FollowSlotArriveRadius;  // arrival radius around a squad-slot anchor
+var float FollowSlotResumeMargin;  // extra distance past that radius before an arrived follower moves again
 var vector FollowOrderAnchorLoc;
 var float FollowWatchdogPeriod;
 var float FollowPhaseJitter;
@@ -1285,6 +1286,7 @@ function bool FollowEvalArrived()
     local float IterDist;
     local float IterDz;
     local float IterRadius;
+    local float IterMargin;
     local bool IterWasArrived;
     local vector IterAnchorRef;
 
@@ -1315,9 +1317,15 @@ function bool FollowEvalArrived()
         IterRadius = FollowSlotArriveRadius;
     }
 
+    IterMargin = FollowResumeMargin;
+    if (bFollowOrderAnchorActive && bFollowAnchorIsSlot)
+    {
+        IterMargin = FollowSlotResumeMargin;
+    }
+
     if (IterWasArrived)
     {
-        bFollowArrived = (IterDist <= (IterRadius + FollowResumeMargin)) && (IterDz <= FollowZTolerance);
+        bFollowArrived = (IterDist <= (IterRadius + IterMargin)) && (IterDz <= FollowZTolerance);
     }
     else
     {
@@ -3508,6 +3516,7 @@ defaultproperties
     FollowSlotRingStep=64.0
     FollowResumeMargin=96.0
     FollowSlotArriveRadius=64.0
+    FollowSlotResumeMargin=32.0
     FollowZTolerance=128.0
     FollowWatchdogPeriod=0.25
     FollowRampUpTime=0.6
