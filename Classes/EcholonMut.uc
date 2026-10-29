@@ -279,7 +279,7 @@ var() config bool bBotsCountInSkipTraderVote;
 // here, or for one match with ?RemoteShop=1 on the map URL (?RemoteShop=0 forces it off).
 var() config bool bRemoteShop;
 var transient bool bRemoteShopActive;
-// Bots get scoreboard pictures from the local avatar server (kit\avatars\Start-AvatarServer.bat). Off by default.
+// Bots get scoreboard pictures from the local avatar server (avatars\Start-AvatarServer.bat, or KF2-Avatars.exe in KFGame\BotAvatars). Off by default.
 var() config bool bBotAvatars;
 // Port of the local avatar server. 0 or less means 8765.
 var() config int AvatarServerPort;
