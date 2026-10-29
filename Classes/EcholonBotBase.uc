@@ -265,7 +265,11 @@ var float AuditLastLog_GEN;
 var float AuditLastLog_DWELLTOT;
 var float AuditLastLog_NAVACCEL;
 var transient float FollowSlotLogTime;   // last NAV_FOLLOW_SLOT sample (2 s apart)
-var transient int NavFollowOwnSkips;     // squad-slot moves skipped because the follow mover owned the move (follow-owns-move switch)
+var transient vector FollowSlotGoal;     // last squad-slot / role spot from UpdateGruntOffset while the follow mover owns the move
+var transient string FollowSlotGoalSrc;  // which caller chose it (slot, wedge, overwatch, ...)
+var transient float FollowSlotGoalTime;  // when it was chosen
+var float FollowSlotGoalMaxAge;          // seconds before the goal counts as stale (CheckGrabbed runs every 0.2 to 0.3 s)
+var transient int NavFollowOwnSkips;    // squad-slot moves skipped because the follow mover owned the move (follow-owns-move switch)
 var bool bHasHoldPosition;
 var vector HoldPosition;
 var float LastTriageTime;
@@ -1646,12 +1650,26 @@ final function bool FollowOwnsMove()
     return mut != None && mut.bFollowOwnsMoveNow && IsInState('FollowingLeader');
 }
 
+// Which caller's spot the follow mover is steering to (slot, wedge, overwatch, ...); "-" when it steers to the leader or the switch is off.
+final function string FollowSlotGoalLogText()
+{
+    if (bFollowOrderAnchorActive && bFollowAnchorIsSlot)
+    {
+        return FollowSlotGoalSrc;
+    }
+    return "-";
+}
+
 // MoveToX for the squad-slot movers (grunt offset, reload drift, wedge): skipped while the follow mover owns the move. SrcText names the caller in NAV2_MOVE_BEGIN (src=).
 final function GruntMoveToX(string SrcText, vector Dest)
 {
     if (FollowOwnsMove())
     {
+        // The follow mover steers to this spot (FollowGetOrderAnchor) instead of the leader.
         NavFollowOwnSkips++;
+        FollowSlotGoal = Dest;
+        FollowSlotGoalSrc = SrcText;
+        FollowSlotGoalTime = WorldInfo.TimeSeconds;
         return;
     }
     NavSrcTag = SrcText;
@@ -3810,21 +3828,28 @@ function bool FollowGetOrderAnchor(out vector OutLoc)
     local vector Loc;
 
     OutLoc = vect(0, 0, 0);
+    bFollowAnchorIsSlot = false;
     if (mut == None)
     {
         return false;
     }
-    if (!mut.IsSquadInObjectivePhase(EcholonBot(self)))
+    if (mut.IsSquadInObjectivePhase(EcholonBot(self)))
     {
-        return false;
+        Loc = mut.GetSlotLocation(EcholonBot(self));
+        if (Loc != vect(0, 0, 0))
+        {
+            OutLoc = Loc;
+            return true;
+        }
     }
-    Loc = mut.GetSlotLocation(EcholonBot(self));
-    if (Loc == vect(0, 0, 0))
+    // Follow-owns-move (T-64): aim at the squad slot / role spot UpdateGruntOffset last chose; a stale goal falls back to the leader.
+    if (FollowOwnsMove() && WorldInfo.TimeSeconds - FollowSlotGoalTime < FollowSlotGoalMaxAge)
     {
-        return false;
+        OutLoc = FollowSlotGoal;
+        bFollowAnchorIsSlot = true;
+        return true;
     }
-    OutLoc = Loc;
-    return true;
+    return false;
 }
 
 function AuditStateEntry()
@@ -7036,6 +7061,7 @@ function UpdateHoldAreaDrift()
 defaultproperties
 {
     ShoppedWave=-1
+    FollowSlotGoalMaxAge=0.8
     LookTurnRate=32768.0
     LookTurnAccel=65536.0
     LookSweepAmp=20.0
