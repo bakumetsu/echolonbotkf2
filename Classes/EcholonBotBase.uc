@@ -1198,12 +1198,16 @@ function bool FireWeaponAt(Actor inActor)
 		{
 			W.StartFire(BOTFM_PRIMARY);
 		}
-		else if (VSizeSq(inActor.Location - Pawn.Location) < BashMaxDistSq && WorldInfo.TimeSeconds >= NextBashTime
+		else if (VSizeSq(inActor.Location - Pawn.Location) < BashMaxDistSq
 			&& mut != None && mut.bBashGuardNow && ShouldSkipBash(Pawn(inActor)))
 		{
-			// Same rule as HandleCQBProximity: shoot the no-bash zed instead of bashing it.
-			NextBashTime = WorldInfo.TimeSeconds + BashInterval;
-			EchelonLog("COMBAT_BASH_SKIP path=fire zed=" $ string(inActor.Class.Name) $ " dist=" $ string(int(VSize(inActor.Location - Pawn.Location))));
+			// Same rule as HandleCQBProximity: shoot the no-bash zed instead of bashing it. The bash timer only
+			// throttles the log, so a skipped bash never costs the shot.
+			if (WorldInfo.TimeSeconds >= NextBashTime)
+			{
+				NextBashTime = WorldInfo.TimeSeconds + BashInterval;
+				EchelonLog("COMBAT_BASH_SKIP path=fire zed=" $ string(inActor.Class.Name) $ " dist=" $ string(int(VSize(inActor.Location - Pawn.Location))));
+			}
 			if (IsInEffectiveRange(inActor) && AimReadyToFire(inActor, W))
 			{
 				W.StartFire(BOTFM_PRIMARY);
