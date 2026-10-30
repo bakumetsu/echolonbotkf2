@@ -3888,6 +3888,10 @@ function bool AuditRateLimit(string Msg)
 	{
 		return true;  // hub audit lines are never throttled; hub_audit.py needs every one
 	}
+	if (Left(Msg, 8) ~= "TRAFFIC_")
+	{
+		return true;  // shadow traffic lines: the overlap scoring needs every would-wait
+	}
 	if (Left(Msg, 6) ~= "TRACE_")
 	{
 		return true;  // bot trace lines (bNavTrace) keep their own 0.25 s pacing
