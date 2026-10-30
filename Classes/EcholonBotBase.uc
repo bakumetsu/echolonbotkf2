@@ -269,6 +269,10 @@ var float AuditLastLog_DWELLTOT;
 var float AuditLastLog_NAVACCEL;
 var transient float FollowSlotLogTime;   // last NAV_FOLLOW_SLOT sample (2 s apart)
 var transient vector FollowSlotGoal;     // last squad-slot / role spot from UpdateGruntOffset while the follow mover owns the move
+var transient int SlotYieldCount;        // how many times the slot move was skipped because a bot state owns movement
+var transient Actor TetherHoldAnchor;    // anchor node the squad leader is standing on while holding (None = not holding)
+var transient float TetherHoldStart;     // WorldInfo.TimeSeconds when the tether hold began
+var transient int CampZAcceptCount;      // how many times the camp slot Z-offset accept was used
 var transient string FollowSlotGoalSrc;  // which caller chose it (slot, wedge, overwatch, ...)
 var transient float FollowSlotGoalTime;  // when it was chosen
 var float FollowSlotGoalMaxAge;          // seconds before the goal counts as stale (CheckGrabbed runs every 0.2 to 0.3 s)
