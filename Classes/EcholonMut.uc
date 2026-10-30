@@ -304,6 +304,7 @@ var() config bool bRemoteShop;
 var transient bool bRemoteShopActive;
 // Shop re-pick fix: while a bot has set the trader aside (NavGoalSkipped), the hub does not pick GoShopping (it bounced back to the hub every frame). On unless ?ShopFix=0 is on the map URL.
 var transient bool bShopFixNow;
+var transient bool bBashGuardNow;              // ?BashGuard= (default 1): FireWeaponAt skips the bash on no-bash zeds
 // Bots get scoreboard pictures from the local avatar server (avatars\Start-AvatarServer.bat, or KF2-Avatars.exe in KFGame\BotAvatars). Off by default.
 var() config bool bBotAvatars;
 // Port of the local avatar server. 0 or less means 8765.
@@ -1288,6 +1289,12 @@ function InitMutator(string Options, out string ErrorMessage)
         bShopFixNow = class'GameInfo'.static.GetIntOption(Options, "ShopFix", 1) != 0;
     }
     EchelonLog("SHOPFIX_CONFIG shopfix=" $ string(bShopFixNow));
+    bBashGuardNow = true;
+    if (class'GameInfo'.static.HasOption(Options, "BashGuard"))
+    {
+        bBashGuardNow = class'GameInfo'.static.GetIntOption(Options, "BashGuard", 1) != 0;
+    }
+    EchelonLog("BASHGUARD_CONFIG bashguard=" $ string(bBashGuardNow));
     EchelonLog("NAV2_CONFIG navv2=" $ string(bNavV2Now));
     bSurveyNavGridNow = bSurveyNavGrid;
     if (class'GameInfo'.static.HasOption(Options, "SurveyNavGrid"))
