@@ -611,12 +611,39 @@ function PostBeginPlay()
     SetTimer(15.0, false, 'NavBenchmarkRun');
 }
 
+// Shadow traffic table (TrafficModeNow > 0): reads the Block= lines through its own map-data object, independent of the survey switch.
+// The object is only asked for NodeByName and the Block list; its Step is never called, so no verdict is applied.
+function TrafficBegin()
+{
+    local EcholonMapData TData;
+    local int I;
+
+    if (TrafficModeNow <= 0 || Traffic != None)
+    {
+        return;
+    }
+    TData = new(None, class'EcholonBot.EcholonMapData'.static.SectionKey(WorldInfo.GetMapName())) class'EcholonBot.EcholonMapData';
+    TData.Begin(self);
+    Traffic = new class'EcholonBot.EcholonTraffic';
+    Traffic.Mut = self;
+    Traffic.MapData = TData;
+    for (I = 0; I < ActiveBots.Length; I++)
+    {
+        if (ActiveBots[I] != None)
+        {
+            ActiveBots[I].Traffic = Traffic;
+        }
+    }
+}
+
 // Load this map's survey data (bSurveyNav only). The object reads its section of KFEcholonMapData.ini when created; Tick resolves the
 // verdicts a few entries per frame. Without the switch, a section or a matching checksum the nav stays as it was.
 function MapDataBegin()
 {
     local string Key;
     local int I;
+
+    TrafficBegin();
 
     if (MapData != None)
     {
@@ -630,18 +657,11 @@ function MapDataBegin()
     Key = class'EcholonBot.EcholonMapData'.static.SectionKey(WorldInfo.GetMapName());
     MapData = new(None, Key) class'EcholonBot.EcholonMapData';
     MapData.Begin(self);
-    if (TrafficModeNow > 0)
-    {
-        Traffic = new class'EcholonBot.EcholonTraffic';
-        Traffic.Mut = self;
-        Traffic.MapData = MapData;
-    }
     for (I = 0; I < ActiveBots.Length; I++)
     {
         if (ActiveBots[I] != None)
         {
             ActiveBots[I].MapData = MapData;
-            ActiveBots[I].Traffic = Traffic;
         }
     }
 }
@@ -1070,7 +1090,7 @@ event Tick(float DeltaTime)
             SetTimer(30.0, true, 'SurveyGridReport');
         }
     }
-    if (Traffic != None && !Traffic.bReady && MapData != None && MapData.bDone)
+    if (Traffic != None && !Traffic.bReady)
     {
         if (Traffic.Step())
         {
