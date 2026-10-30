@@ -2005,9 +2005,9 @@ final function NavTrafficShadow()
                 if (RouteCache[I] == MoveTarget)
                 {
                     N = NavigationPoint(MoveTarget);
-                    P = NavigationPoint(RouteCache[I - 1]);
+                    P = RouteCache[I - 1];
                     if (I + 1 < RouteCache.Length)
-                        N2 = NavigationPoint(RouteCache[I + 1]);
+                        N2 = RouteCache[I + 1];
                     bHop = (P != None && N != None);
                     break;
                 }

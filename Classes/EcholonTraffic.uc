@@ -382,5 +382,5 @@ final function string SummaryText()
 
 final function string BlocksText()
 {
-    return "map=" $ string(Mut.WorldInfo.GetMapName()) $ " count=" $ string(CntBlocks) $ " door=" $ string(CntDoor) $ " spawn=" $ string(CntSpawn) $ " stairs=" $ string(CntStairs) $ " narrow=" $ string(CntNarrow) $ " edges=" $ string(CntEdges) $ " skipped=" $ string(CntSkipped);
+    return "map=" $ Mut.WorldInfo.GetMapName() $ " count=" $ string(CntBlocks) $ " door=" $ string(CntDoor) $ " spawn=" $ string(CntSpawn) $ " stairs=" $ string(CntStairs) $ " narrow=" $ string(CntNarrow) $ " edges=" $ string(CntEdges) $ " skipped=" $ string(CntSkipped);
 }
