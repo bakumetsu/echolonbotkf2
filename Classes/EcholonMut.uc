@@ -310,6 +310,7 @@ var transient bool bTetherHoldAtAnchor;
 var transient bool bCampSlotZAccept;
 // Shop re-pick fix: while a bot has set the trader aside (NavGoalSkipped), the hub does not pick GoShopping (it bounced back to the hub every frame). On unless ?ShopFix=0 is on the map URL.
 var transient bool bShopFixNow;
+var transient bool bBashGuardNow;              // ?BashGuard= (default 1): FireWeaponAt skips the bash on no-bash zeds
 // Bots get scoreboard pictures from the local avatar server (avatars\Start-AvatarServer.bat, or KF2-Avatars.exe in KFGame\BotAvatars). Off by default.
 var() config bool bBotAvatars;
 // Port of the local avatar server. 0 or less means 8765.
@@ -1299,6 +1300,12 @@ function InitMutator(string Options, out string ErrorMessage)
         bShopFixNow = class'GameInfo'.static.GetIntOption(Options, "ShopFix", 1) != 0;
     }
     EchelonLog("SHOPFIX_CONFIG shopfix=" $ string(bShopFixNow));
+    bBashGuardNow = true;
+    if (class'GameInfo'.static.HasOption(Options, "BashGuard"))
+    {
+        bBashGuardNow = class'GameInfo'.static.GetIntOption(Options, "BashGuard", 1) != 0;
+    }
+    EchelonLog("BASHGUARD_CONFIG bashguard=" $ string(bBashGuardNow));
     EchelonLog("NAV2_CONFIG navv2=" $ string(bNavV2Now));
     bSurveyNavGridNow = bSurveyNavGrid;
     if (class'GameInfo'.static.HasOption(Options, "SurveyNavGrid"))
@@ -2995,7 +3002,15 @@ function CheckWave()
 
     if (PrevObjective != KF.MyKFGRI.CurrentObjective)
     {
+        if (PrevObjective != None)
+        {
+            EchelonLog("OBJ_END class=" $ string(PrevObjective.Class.Name) $ " name=" $ string(PrevObjective.Name) $ " t=" $ string(int(WorldInfo.TimeSeconds)));
+        }
         PrevObjective = KF.MyKFGRI.CurrentObjective;
+        if (PrevObjective != None)
+        {
+            EchelonLog("OBJ_START class=" $ string(PrevObjective.Class.Name) $ " name=" $ string(PrevObjective.Name) $ " t=" $ string(int(WorldInfo.TimeSeconds)));
+        }
         HoldVolume = KFMapObjective_DoshHold(PrevObjective);
         if (HoldVolume != None)
         {
@@ -3189,6 +3204,15 @@ function UpdateHuntOrders()
         SquadOrders[i].Leader = L;
         SquadOrders[i].GoalNav = GP;
     }
+}
+
+final function string ZoneVolName(Actor A)
+{
+    if (A == None)
+    {
+        return "None";
+    }
+    return string(A.Name);
 }
 
 final function SetHoldObjective(Volume V)
@@ -4162,7 +4186,7 @@ function ZonePickStep()
         }
         RecentStr = RecentStr $ string(RecentZones[i]);
     }
-    EchelonLog("ZONE_PICK zone=" $ string(ZonePlanner.Zones[Pick].Id) $ " src=" $ ZoneSrcName(ZonePlanner.Zones[Pick].Src) $ " dist=" $ string(int(D)) $ " band=" $ BandName $ " tries=" $ string(ZoneTries) $ " recent=" $ RecentStr $ " reason=" $ ZonePickReason $ " wave_total=" $ string(ZoneWaveTotal) $ " hold=" $ string(int(ZoneHoldNow + 0.5)) $ " minhold=" $ string(int(ZoneMinHoldNow + 0.5)) $ " huntmax=" $ string(ZoneHuntMaxNow));
+    EchelonLog("ZONE_PICK zone=" $ string(ZonePlanner.Zones[Pick].Id) $ " src=" $ ZoneSrcName(ZonePlanner.Zones[Pick].Src) $ " vol=" $ ZoneVolName(ZonePlanner.Zones[Pick].Source) $ " dist=" $ string(int(D)) $ " band=" $ BandName $ " tries=" $ string(ZoneTries) $ " recent=" $ RecentStr $ " reason=" $ ZonePickReason $ " wave_total=" $ string(ZoneWaveTotal) $ " hold=" $ string(int(ZoneHoldNow + 0.5)) $ " minhold=" $ string(int(ZoneMinHoldNow + 0.5)) $ " huntmax=" $ string(ZoneHuntMaxNow));
     ZoneCommit(Pick);
 }
 

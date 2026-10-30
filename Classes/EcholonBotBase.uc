@@ -1205,10 +1205,25 @@ function bool FireWeaponAt(Actor inActor)
 		{
 			W.StartFire(BOTFM_PRIMARY);
 		}
+		else if (VSizeSq(inActor.Location - Pawn.Location) < BashMaxDistSq
+			&& mut != None && mut.bBashGuardNow && ShouldSkipBash(Pawn(inActor)))
+		{
+			// Same rule as HandleCQBProximity: shoot the no-bash zed instead of bashing it. The bash timer only
+			// throttles the log, so a skipped bash never costs the shot.
+			if (WorldInfo.TimeSeconds >= NextBashTime)
+			{
+				NextBashTime = WorldInfo.TimeSeconds + BashInterval;
+				EchelonLog("COMBAT_BASH_SKIP path=fire zed=" $ string(inActor.Class.Name) $ " dist=" $ string(int(VSize(inActor.Location - Pawn.Location))));
+			}
+			if (IsInEffectiveRange(inActor) && AimReadyToFire(inActor, W))
+			{
+				W.StartFire(BOTFM_PRIMARY);
+			}
+		}
 		else if (VSizeSq(inActor.Location - Pawn.Location) < BashMaxDistSq && WorldInfo.TimeSeconds >= NextBashTime)
 		{
 			NextBashTime = WorldInfo.TimeSeconds + BashInterval;
-			EchelonLog("COMBAT_BASH zed=" $ string(inActor.Class.Name) $ " dist=" $ string(int(VSize(inActor.Location - Pawn.Location))));
+			EchelonLog("COMBAT_BASH zed=" $ string(inActor.Class.Name) $ " dist=" $ string(int(VSize(inActor.Location - Pawn.Location))) $ " weapon=" $ string(W.Class.Name) $ " gun_ready=" $ string(HasUsableRangedWeapon()));
 			W.StartFire(BOTFM_BASH);
 		}
 		else
@@ -6484,7 +6499,7 @@ function HandleCQBProximity()
             NextBashTime = now + CQB_BASH_INTERVAL;
 
             W = KFWeapon(Pawn.Weapon);
-            bSkipBash = (IsNoBashZed(Enemy) && HasGunWithAmmo() && (KPawn == None || KPawn.InteractionPawn == None));
+            bSkipBash = ShouldSkipBash(Enemy);
             if (W != None && !bSkipBash)
             {
                 if (W.bMeleeWeapon)
@@ -6498,7 +6513,7 @@ function HandleCQBProximity()
             }
             if (bSkipBash)
             {
-                EchelonLog("COMBAT_BASH_SKIP zed=" $ string(Enemy.Class.Name) $ " melee=" $ string(W != None && W.bMeleeWeapon));
+                EchelonLog("COMBAT_BASH_SKIP path=cqb zed=" $ string(Enemy.Class.Name) $ " melee=" $ string(W != None && W.bMeleeWeapon));
                 if (W != None && W.bMeleeWeapon)
                 {
                     SwitchToBestWeapon(true);
@@ -6723,6 +6738,13 @@ final function bool IsNoBashZed(Pawn P)
     if (M.bLargeZed || M.IsA('KFPawn_ZedHusk') || M.IsA('KFPawn_ZedSiren') || M.IsA('KFPawn_ZedBloat') || M.IsA('KFPawn_ZedScrake') || M.IsA('KFPawn_ZedFleshpound') || M.IsA('KFPawn_ZedFleshpoundMini') || M.IsA('KFPawn_ZedHans') || M.IsA('KFPawn_ZedPatriarch') || M.IsA('KFPawn_ZedMatriarch') || M.IsA('KFPawn_ZedFleshpoundKing') || M.IsA('KFPawn_ZedBloatKing'))
         return true;
     return false;
+}
+
+// One shared no-bash rule (T-14): a no-bash zed is never bashed while the bot has a gun with ammo, unless
+// a grab holds the bot (the bash is its break-free).
+final function bool ShouldSkipBash(Pawn P)
+{
+    return (IsNoBashZed(P) && HasGunWithAmmo() && (KPawn == None || KPawn.InteractionPawn == None));
 }
 
 final function bool HasGunWithAmmo()
