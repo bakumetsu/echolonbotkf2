@@ -29,6 +29,7 @@ var array<Controller> TCtrl;
 var array<Object> TSquad;
 var array<float> TExpiry;
 var array<float> TWouldAt;
+var array<float> TStillSince;
 var int CntBlocks;
 var int CntDoor;
 var int CntSpawn;
@@ -311,6 +312,7 @@ final function bool Near(Controller C, Object Squad, int Prio, vector Loc, vecto
     local int H;
     local float HSpd;
     local vector HV;
+    local vector SV;
 
     Now = Mut.WorldInfo.TimeSeconds;
     WouldInfo = "";
@@ -338,6 +340,7 @@ final function bool Near(Controller C, Object Squad, int Prio, vector Loc, vecto
             TSquad.Remove(I, 1);
             TExpiry.Remove(I, 1);
             TWouldAt.Remove(I, 1);
+            TStillSince.Remove(I, 1);
         }
     }
 
@@ -359,6 +362,18 @@ final function bool Near(Controller C, Object Squad, int Prio, vector Loc, vecto
         if (D <= LEAVE_XY)
         {
             TExpiry[idx] = Now + TICKET_LIFE;
+            if (C.Pawn != None)
+            {
+                SV = C.Pawn.Velocity;
+                SV.Z = 0.0;
+                if (VSize(SV) < 30.0)
+                {
+                    if (TStillSince[idx] < 0.0)
+                        TStillSince[idx] = Now;
+                }
+                else
+                    TStillSince[idx] = -1.0;
+            }
             return true;
         }
         // C leaves its block
@@ -376,6 +391,7 @@ final function bool Near(Controller C, Object Squad, int Prio, vector Loc, vecto
         TSquad.Remove(idx, 1);
         TExpiry.Remove(idx, 1);
         TWouldAt.Remove(idx, 1);
+        TStillSince.Remove(idx, 1);
     }
 
     // Step d: find nearest block by proximity
@@ -398,6 +414,7 @@ final function bool Near(Controller C, Object Squad, int Prio, vector Loc, vecto
         TWouldAt.AddItem(Now);
     else
         TWouldAt.AddItem(-1.0);
+    TStillSince.AddItem(-1.0);
     CntTickets++;
 
     // Step g: report would-wait
@@ -416,6 +433,10 @@ final function bool Near(Controller C, Object Squad, int Prio, vector Loc, vecto
                 WouldInfo = WouldInfo $ "1";
             else
                 WouldInfo = WouldInfo $ "0";
+            if (TStillSince[H] >= 0.0)
+                WouldInfo = WouldInfo $ " hstallsecs=" $ string(int(Now - TStillSince[H]));
+            else
+                WouldInfo = WouldInfo $ " hstallsecs=0";
         }
     }
 
@@ -450,6 +471,7 @@ final function Leave(Controller C, out string EndInfo)
             TSquad.Remove(I, 1);
             TExpiry.Remove(I, 1);
             TWouldAt.Remove(I, 1);
+            TStillSince.Remove(I, 1);
             break;
         }
     }
