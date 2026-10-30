@@ -275,6 +275,9 @@ var transient float DiagAgeMax;
 var transient float DiagLastRun;         // time of the last UpdateGruntOffset run while following
 var transient float DiagMaxGap;          // longest gap between runs while following
 var transient float DiagLogTime;
+var transient int ZoneOvrCnt;            // times the squad-slot goal overrode the zone-planner spot in the current phase
+var transient int ZoneOvrPhase;
+var transient float ZoneOvrTime;
 var transient int NavFollowStaleFalls;   // follow decisions that fell back to the leader because the slot goal was stale or missing
 var transient int NavFollowOwnSkips;   // squad-slot moves skipped because the follow mover owned the move (follow-owns-move switch)
 var bool bHasHoldPosition;
@@ -1655,6 +1658,30 @@ final function bool NavRerouteWalk(Vector Dest, Actor ViewFocus, bool bSerpent, 
 final function bool FollowOwnsMove()
 {
     return mut != None && mut.bFollowOwnsMoveNow && IsInState('FollowingLeader');
+}
+
+// The slot goal overrode a zone-planner spot: count it per phase and log the count when the phase changes or the overrides stop (NAV_ZONE_OVERRIDE, per bot; add up per group).
+final function ZoneOverrideNote()
+{
+    local int IterPhase;
+
+    IterPhase = mut.GetSquadPhase(EcholonBot(self));
+    if (ZoneOvrCnt > 0 && IterPhase != ZoneOvrPhase)
+    {
+        ZoneOverrideFlush();
+    }
+    ZoneOvrPhase = IterPhase;
+    ZoneOvrCnt++;
+    ZoneOvrTime = WorldInfo.TimeSeconds;
+}
+
+final function ZoneOverrideFlush()
+{
+    if (ZoneOvrCnt > 0)
+    {
+        EchelonLog("NAV_ZONE_OVERRIDE group=" $ string(GroupID) $ " phase=" $ string(ZoneOvrPhase) $ " count=" $ string(ZoneOvrCnt));
+        ZoneOvrCnt = 0;
+    }
 }
 
 // T-64 diagnosis: count one event for NAV_FOLLOW_DIAG (only while the follow mover owns the move).
@@ -3861,6 +3888,19 @@ function bool FollowGetOrderAnchor(out vector OutLoc)
     {
         return false;
     }
+    // Follow-owns-move (T-64): aim at the squad slot / role spot UpdateGruntOffset last chose, even in the zone-planner phases (as the old slot point mover did); a stale goal falls back to the zone spot, then the leader.
+    if (FollowOwnsMove() && WorldInfo.TimeSeconds - FollowSlotGoalTime < FollowSlotGoalMaxAge)
+    {
+        if (mut.IsSquadInObjectivePhase(EcholonBot(self)))
+        {
+            ZoneOverrideNote();
+        }
+        OutLoc = FollowSlotGoal;
+        bFollowAnchorIsSlot = true;
+        FollowDiag(11);
+        DiagAgeSum += WorldInfo.TimeSeconds - FollowSlotGoalTime;
+        return true;
+    }
     if (mut.IsSquadInObjectivePhase(EcholonBot(self)))
     {
         Loc = mut.GetSlotLocation(EcholonBot(self));
@@ -3870,15 +3910,6 @@ function bool FollowGetOrderAnchor(out vector OutLoc)
             OutLoc = Loc;
             return true;
         }
-    }
-    // Follow-owns-move (T-64): aim at the squad slot / role spot UpdateGruntOffset last chose; a stale goal falls back to the leader.
-    if (FollowOwnsMove() && WorldInfo.TimeSeconds - FollowSlotGoalTime < FollowSlotGoalMaxAge)
-    {
-        OutLoc = FollowSlotGoal;
-        bFollowAnchorIsSlot = true;
-        FollowDiag(11);
-        DiagAgeSum += WorldInfo.TimeSeconds - FollowSlotGoalTime;
-        return true;
     }
     if (FollowOwnsMove())
     {
@@ -7105,7 +7136,7 @@ function UpdateHoldAreaDrift()
 defaultproperties
 {
     ShoppedWave=-1
-    FollowSlotGoalMaxAge=0.8
+    FollowSlotGoalMaxAge=1.5
     LookTurnRate=32768.0
     LookTurnAccel=65536.0
     LookSweepAmp=20.0

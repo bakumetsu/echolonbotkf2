@@ -3413,6 +3413,18 @@ function bool IsSquadInObjectivePhase(EcholonBot B)
     return (SquadOrders[GroupIdx].Phase == PHASE_ENROUTE) || (SquadOrders[GroupIdx].Phase == PHASE_HOLDING);
 }
 
+function int GetSquadPhase(EcholonBot B)
+{
+    local int GroupIdx;
+
+    if (B == None)
+        return -1;
+    GroupIdx = B.GroupID - 1;
+    if (GroupIdx < 0 || GroupIdx >= SquadOrders.Length)
+        return -1;
+    return SquadOrders[GroupIdx].Phase;
+}
+
 function vector GetSlotLocation(EcholonBot B)
 {
     local int GroupIdx, SlotIdx;

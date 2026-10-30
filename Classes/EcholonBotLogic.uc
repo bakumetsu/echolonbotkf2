@@ -552,6 +552,10 @@ function CheckGrabbed()
         UpdateGruntOffset();
         FollowSlotSample();
         FollowDiagLog();
+        if (ZoneOvrCnt > 0 && WorldInfo.TimeSeconds - ZoneOvrTime > 5.0)
+        {
+            ZoneOverrideFlush();
+        }
     }
 }
 
