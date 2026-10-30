@@ -272,6 +272,9 @@ var transient vector FollowSlotGoal;     // last squad-slot / role spot from Upd
 var transient int SlotYieldCount;        // how many times the slot move was skipped because a bot state owns movement
 var transient Actor TetherHoldAnchor;    // anchor node the squad leader is standing on while holding (None = not holding)
 var transient float TetherHoldStart;     // WorldInfo.TimeSeconds when the tether hold began
+var transient float TetherHoldLast;      // last tick the hold ran
+var transient Actor TetherNoHoldAnchor;  // anchor that hit the hold cap
+var transient float TetherNoHoldUntil;   // no new hold on that anchor before this time
 var transient int CampZAcceptCount;      // how many times the camp slot Z-offset accept was used
 var transient string FollowSlotGoalSrc;  // which caller chose it (slot, wedge, overwatch, ...)
 var transient float FollowSlotGoalTime;  // when it was chosen

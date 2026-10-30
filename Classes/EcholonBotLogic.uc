@@ -2022,16 +2022,30 @@ function bool TetherHoldNow()
     {
         TetherHoldEnd("anchor");
     }
+    if (TetherHoldAnchor != None && WorldInfo.TimeSeconds - TetherHoldLast > 1.0)
+        TetherHoldEnd("gap");
     if (!Pawn.ReachedDestination(AssignedAnchor))
     {
         TetherHoldEnd("left");
         return false;
     }
+    if (TetherNoHoldAnchor == AssignedAnchor && WorldInfo.TimeSeconds < TetherNoHoldUntil)
+        return false;
     if (TetherHoldAnchor == None)
     {
         TetherHoldAnchor = AssignedAnchor;
         TetherHoldStart = WorldInfo.TimeSeconds;
+        TetherHoldLast = WorldInfo.TimeSeconds;
     }
+    if (WorldInfo.TimeSeconds - TetherHoldStart >= 15.0)
+    {
+        TetherNoHoldAnchor = AssignedAnchor;
+        TetherNoHoldUntil = WorldInfo.TimeSeconds + 10.0;
+        TetherHoldLast = WorldInfo.TimeSeconds;
+        TetherHoldEnd("cap");
+        return false;
+    }
+    TetherHoldLast = WorldInfo.TimeSeconds;
     MoveFlags = 0;
     Pawn.Acceleration = vect(0, 0, 0);
     return true;
@@ -2041,7 +2055,8 @@ function TetherHoldEnd(string Why)
 {
     if (TetherHoldAnchor == None)
         return;
-    EchelonLog("TETHER_HOLD anchor=" $ string(TetherHoldAnchor) $ " secs=" $ string(WorldInfo.TimeSeconds - TetherHoldStart) $ " why=" $ Why);
+    EchelonLog("TETHER_HOLD anchor=" $ string(TetherHoldAnchor) $ " secs=" $ string(TetherHoldLast - TetherHoldStart) $ " why=" $ Why);
+    TetherHoldLast = 0.0;
     TetherHoldAnchor = None;
     TetherHoldStart = 0.0;
 }
