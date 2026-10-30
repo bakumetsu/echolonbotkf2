@@ -94,7 +94,7 @@ state PickNextMove
             if (RegroupElapsed < REGROUP_HARD_TIMEOUT && Pawn != None)
             {
                 if (RegroupElapsed < REGROUP_DURATION
-                    && KFGRI.bTraderIsOpen && NextShoppingTime < WorldInfo.TimeSeconds && KFGRI.OpenedTrader != None)
+                    && KFGRI.bTraderIsOpen && NextShoppingTime < WorldInfo.TimeSeconds && KFGRI.OpenedTrader != None && !ShopGoalBlocked())
                 {
                     if (mut.bRemoteShopActive)
                     {
@@ -263,7 +263,7 @@ state PickNextMove
         }
 
         // Priority 9: Economy
-        if (KFGRI.bTraderIsOpen && NextShoppingTime < WorldInfo.TimeSeconds && KFGRI.OpenedTrader != None)
+        if (KFGRI.bTraderIsOpen && NextShoppingTime < WorldInfo.TimeSeconds && KFGRI.OpenedTrader != None && !ShopGoalBlocked())
         {
             if (mut != None && mut.bRemoteShopActive)
             {
