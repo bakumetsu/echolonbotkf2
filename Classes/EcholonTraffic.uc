@@ -230,6 +230,26 @@ final function int DirToward(int B, vector Loc, vector Head)
     return 1;
 }
 
+// Index of the first live ticket of block B held by another squad that conflicts with a ticket in direction Dir
+// (bOpposite: opposite direction; else same direction), -1 when none.
+final function int FirstHolder(int B, int Dir, Object Squad, bool bOpposite)
+{
+    local int I;
+    local float Now;
+
+    Now = Mut.WorldInfo.TimeSeconds;
+    for (I = 0; I < TBlock.Length; I++)
+    {
+        if (TBlock[I] != B || TSquad[I] == Squad || TExpiry[I] <= Now)
+            continue;
+        if (bOpposite && TDir[I] != Dir)
+            return I;
+        if (!bOpposite && TDir[I] == Dir)
+            return I;
+    }
+    return -1;
+}
+
 final function int Occupied(int B, int Dir, Object Squad, bool bOpposite)
 {
     local int I, Count;
@@ -288,6 +308,9 @@ final function bool Near(Controller C, Object Squad, int Prio, vector Loc, vecto
     local bool bRefuse;
     local string Why;
     local int Load;
+    local int H;
+    local float HSpd;
+    local vector HV;
 
     Now = Mut.WorldInfo.TimeSeconds;
     WouldInfo = "";
@@ -382,6 +405,18 @@ final function bool Near(Controller C, Object Squad, int Prio, vector Loc, vecto
     {
         CntWould++;
         WouldInfo = "block=" $ BId[B] $ " kind=" $ BKind[B] $ " dir=" $ string(Dir) $ " prio=" $ string(Prio) $ " why=" $ Why $ " load=" $ string(Load) $ " x=" $ string(int(Loc.X)) $ " y=" $ string(int(Loc.Y)) $ " z=" $ string(int(Loc.Z));
+        H = FirstHolder(B, Dir, Squad, (Why == "opposite"));
+        if (H >= 0 && TCtrl[H] != None && TCtrl[H].Pawn != None)
+        {
+            HV = TCtrl[H].Pawn.Velocity;
+            HV.Z = 0.0;
+            HSpd = VSize(HV);
+            WouldInfo = WouldInfo $ " holder=" $ string(TCtrl[H].Name) $ " hstall=";
+            if (HSpd < 30.0)
+                WouldInfo = WouldInfo $ "1";
+            else
+                WouldInfo = WouldInfo $ "0";
+        }
     }
 
     // Step h
