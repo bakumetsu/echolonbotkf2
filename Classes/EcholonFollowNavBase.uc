@@ -125,6 +125,7 @@ var float FollowNarrowSince;      // when this bot began waiting for a squadmate
 var float FollowNarrowQuietUntil; // no narrow wait before this time (after a wait that timed out)
 var EcholonNavScan NavScan;        // start-of-match link scan result (bad links), set by EcholonMut.RegisterBot
 var EcholonNavGrid NavGrid;           // shared tile table, set by EcholonMut.RegisterBot
+var EcholonTraffic Traffic;           // shadow traffic table (None when TrafficMode is 0), set by EcholonMut
 var bool bNavGridOn;                  // true while the grid steers this bot (set by the owner class)
 var vector NavGridDir;                // last direction the grid chose
 var float NavGridKeepUntil;           // keep NavGridDir until this game time unless it becomes blocked

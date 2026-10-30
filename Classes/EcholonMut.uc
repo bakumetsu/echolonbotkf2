@@ -168,6 +168,9 @@ var transient float NavScanR;                 // body radius used by the scan
 var transient float NavScanH;                 // body half height used by the scan
 var transient float NavScanKnee;              // trace height above the floor (knee), set in NavScanBegin
 var config int ConfigVer;
+var() config int TrafficMode;                   // traffic table: 0 off, 1 shadow (log only, nobody is held). ?Traffic=0/1 overrides for one match
+var transient int TrafficModeNow;               // TrafficMode after the ?Traffic= option
+var transient EcholonTraffic Traffic;           // shadow reservation table (None when TrafficModeNow is 0)
 var() config float NavBudgetLimit;            // stalled seconds on one spot before a rescue
 var() config int NavBudgetStalls;             // stall series on one spot before a rescue
 var() config float NavBudgetMinGap;           // minimum seconds between the first and the last counted series
@@ -627,11 +630,18 @@ function MapDataBegin()
     Key = class'EcholonBot.EcholonMapData'.static.SectionKey(WorldInfo.GetMapName());
     MapData = new(None, Key) class'EcholonBot.EcholonMapData';
     MapData.Begin(self);
+    if (TrafficModeNow > 0)
+    {
+        Traffic = new class'EcholonBot.EcholonTraffic';
+        Traffic.Mut = self;
+        Traffic.MapData = MapData;
+    }
     for (I = 0; I < ActiveBots.Length; I++)
     {
         if (ActiveBots[I] != None)
         {
             ActiveBots[I].MapData = MapData;
+            ActiveBots[I].Traffic = Traffic;
         }
     }
 }
@@ -1060,6 +1070,13 @@ event Tick(float DeltaTime)
             SetTimer(30.0, true, 'SurveyGridReport');
         }
     }
+    if (Traffic != None && !Traffic.bReady && MapData != None && MapData.bDone)
+    {
+        if (Traffic.Step())
+        {
+            EchelonLog("TRAFFIC_BLOCKS " $ Traffic.BlocksText());
+        }
+    }
     if (NavGrid != None && NavGrid.bSurveyReady)
     {
         SurveyUnpacked = NavGrid.SurveyUnpackStep();
@@ -1232,6 +1249,16 @@ function InitMutator(string Options, out string ErrorMessage)
         bFollowOwnsMoveNow = class'GameInfo'.static.GetIntOption(Options, "FollowOwn", 0) != 0;
     }
     EchelonLog("FOLLOWOWN_CONFIG followown=" $ string(bFollowOwnsMoveNow));
+    TrafficModeNow = TrafficMode;
+    if (class'GameInfo'.static.HasOption(Options, "Traffic"))
+    {
+        TrafficModeNow = class'GameInfo'.static.GetIntOption(Options, "Traffic", 0);
+    }
+    if (TrafficModeNow < 0 || TrafficModeNow > 1)
+    {
+        TrafficModeNow = 0;
+    }
+    EchelonLog("TRAFFIC_CONFIG mode=" $ string(TrafficModeNow));
     EchelonLog("LOOK_CONFIG lookv2=" $ string(bLookV2Now));
     EchelonLog("NAV2_CONFIG navv2=" $ string(bNavV2Now));
     bSurveyNavGridNow = bSurveyNavGrid;
@@ -1822,6 +1849,7 @@ function RegisterBot(EcholonBot NewBot)
     NewBot.NavScan = NavScan;
     NewBot.NavGrid = NavGrid;
     NewBot.MapData = MapData;
+    NewBot.Traffic = Traffic;
     NewBot.WdLastHubContactTime = WorldInfo.TimeSeconds;
 }
 
@@ -2910,6 +2938,10 @@ function CheckWave()
 
     if (KF.WaveNum != OldWaveNum)
     {
+        if (Traffic != None && Traffic.bReady)
+        {
+            EchelonLog("TRAFFIC_SUMMARY wave=" $ string(OldWaveNum) $ " " $ Traffic.SummaryText());
+        }
         OldWaveNum = byte(KF.WaveNum);
         bNewWave = true;
         if ((ZedCountScaling > 0.0) && KF.SpawnManager.WaveTotalAI > 4)

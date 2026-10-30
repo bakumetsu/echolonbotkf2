@@ -139,6 +139,10 @@ var byte PlayStyle;
 var Actor AssignedAnchor;
 var EBotRank BotRank;
 var EcholonBot SquadLeader;
+var Actor TrafficLastN;                 // last hop end node the shadow traffic gate asked about
+var float TrafficNextCheck;             // next 0.25 s poll of the shadow traffic gate
+var float TrafficNextRenew;             // next ticket renewal for the same hop
+var bool bTrafficTicket;                // the table holds a ticket for this bot
 var vector LastValidSquadLeaderPos;
 var float LastValidSLTime;
 var int BlockedCounter;
@@ -1963,6 +1967,90 @@ function FollowOnGaveUp()
     EchelonLog("NAV_RETRY_EXHAUSTED");
 }
 
+// Shadow-mode traffic gate: every 0.25 s computes the bot's current hop (P, N, N2)
+// and queries the traffic table for would-wait / would-end info. Logs only; never
+// moves or holds the bot.
+final function NavTrafficShadow()
+{
+    local NavigationPoint P, N, N2;
+    local int I, Prio;
+    local string Would, EndI;
+    local Object Sq;
+    local bool bHop;
+    local float Now;
+
+    if (Traffic == None || !Traffic.bReady || Pawn == None)
+        return;
+
+    Now = WorldInfo.TimeSeconds;
+    if (Now < TrafficNextCheck)
+        return;
+    TrafficNextCheck = Now + 0.25;
+
+    bHop = false;
+    if (Enemy == None && Pawn.Health > 0)
+    {
+        if (IsInState('FollowingLeader') && bFollowMoveActive && FollowNode != None && FollowRouteIdx > 0 && FollowRouteIdx < FollowRoute.Length && FollowRoute[FollowRouteIdx] == FollowNode)
+        {
+            N = NavigationPoint(FollowNode);
+            P = NavigationPoint(FollowRoute[FollowRouteIdx - 1]);
+            if (FollowRouteIdx + 1 < FollowRoute.Length)
+                N2 = NavigationPoint(FollowRoute[FollowRouteIdx + 1]);
+            bHop = (P != None && N != None);
+        }
+        else if (MoveFlags == 2 && MoveTarget != None)
+        {
+            for (I = 1; I < RouteCache.Length; I++)
+            {
+                if (RouteCache[I] == MoveTarget)
+                {
+                    N = NavigationPoint(MoveTarget);
+                    P = NavigationPoint(RouteCache[I - 1]);
+                    if (I + 1 < RouteCache.Length)
+                        N2 = NavigationPoint(RouteCache[I + 1]);
+                    bHop = (P != None && N != None);
+                    break;
+                }
+            }
+        }
+    }
+
+    if (!bHop)
+    {
+        if (bTrafficTicket)
+        {
+            Traffic.Leave(self, EndI);
+            bTrafficTicket = false;
+            TrafficLastN = None;
+            if (EndI != "")
+                EchelonLog("TRAFFIC_WOULD_END " $ EndI);
+        }
+        return;
+    }
+
+    if (N == TrafficLastN && Now < TrafficNextRenew)
+        return;
+    TrafficLastN = N;
+    TrafficNextRenew = Now + 1.0;
+
+    Sq = SquadLeader;
+    if (Sq == None)
+        Sq = FollowLeaderCtrl;
+    if (Sq == None)
+        Sq = self;
+
+    Prio = 1;
+    if (SquadLeader == None || SquadLeader == EcholonBot(self))
+        Prio = 2;
+
+    Traffic.Gate(self, Sq, Prio, P, N, N2, Would, EndI);
+    bTrafficTicket = true;
+    if (EndI != "")
+        EchelonLog("TRAFFIC_WOULD_END " $ EndI);
+    if (Would != "")
+        EchelonLog("TRAFFIC_WOULD_WAIT " $ Would);
+}
+
 function Tick(float Delta)
 {
     local KFPawn_Monster MonCheck;
@@ -1973,6 +2061,10 @@ function Tick(float Delta)
     }
 
     FollowSampleCrumb();
+    if (Traffic != None)
+    {
+        NavTrafficShadow();
+    }
     if (WorldInfo.TimeSeconds >= NavBlockNextCheck)
     {
         NavBlockNextCheck = WorldInfo.TimeSeconds + 1.0;
