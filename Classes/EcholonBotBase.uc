@@ -3889,7 +3889,7 @@ function bool FollowGetOrderAnchor(out vector OutLoc)
         return false;
     }
     // Follow-owns-move (T-64): aim at the squad slot / role spot UpdateGruntOffset last chose, even in the zone-planner phases (as the old slot point mover did); a stale goal falls back to the zone spot, then the leader.
-    if (FollowOwnsMove() && WorldInfo.TimeSeconds - FollowSlotGoalTime < FollowSlotGoalMaxAge)
+    if (FollowOwnsMove() && FollowSlotGoalTime > 0.0 && WorldInfo.TimeSeconds - FollowSlotGoalTime < FollowSlotGoalMaxAge)
     {
         if (mut.IsSquadInObjectivePhase(EcholonBot(self)))
         {
