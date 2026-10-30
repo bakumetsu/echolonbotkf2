@@ -220,7 +220,12 @@ final function int NearestBlock(vector Loc, out float Dist)
 
 final function int DirToward(int B, vector Loc, vector Head)
 {
-    if (VDot(Head, BEnd[B].Location - Loc) > 0.0)
+    local float D;
+    local NavigationPoint NP;
+
+    NP = BEnd[B];
+    D = Head dot (NP.Location - Loc);
+    if (D > 0.0)
         return 0;
     return 1;
 }
