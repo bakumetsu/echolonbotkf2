@@ -5218,6 +5218,12 @@ final function bool IsTraderFreeTime()
 	return (KFGRI != None && KFGRI.bTraderIsOpen && KFGRI.GetTraderTimeRemaining() > TRADER_REFORM_REMAINING);
 }
 
+// True when the hub must not send the bot to GoShopping now: the trader is set aside for this bot (the state would bounce back to the hub at once).
+final function bool ShopGoalBlocked()
+{
+	return mut != None && mut.bShopFixNow && KFGRI != None && NavGoalSkipped(KFGRI.OpenedTrader);
+}
+
 // ---------------------------------------------------------------- one owner of the view outside combat (C4)
 // Walking: look 150 uu ahead along the move direction; idle: a slow level sweep of +-20 degrees (5 s per sweep);
 // turn rate capped at 180 degrees/s outside combat. In combat the enemy decides as before.
