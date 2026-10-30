@@ -2,11 +2,14 @@
 // Computes tickets and reports where a bot WOULD have to wait; never holds
 // anyone. Pure Object: no timers, no logging, no GotoState. Callers log.
 // One instance lives on EcholonMut; the mutator calls Step() once per frame
-// until it returns true, then Gate() per hop.
+// until it returns true, then Near() per hop.
 class EcholonTraffic extends Object transient;
 
 const PER_FRAME = 10;
 const TICKET_LIFE = 5.0;
+const NEAR_XY = 300.0;
+const LEAVE_XY = 450.0;
+const NEAR_Z = 150.0;
 
 var EcholonMut Mut;
 var EcholonMapData MapData;
@@ -138,28 +141,86 @@ final function bool Step()
     return bReady;
 }
 
-final function int EdgeBlockOf(NavigationPoint P, NavigationPoint N)
+final function float BlockDist(int B, vector Loc)
 {
     local int I;
+    local float Best;
+    local vector Diff;
+    local float D;
+    local NavigationPoint N;
 
-    if (P == None || N == None)
-        return -1;
-
+    Best = 999999.0;
     for (I = 0; I < EFrom.Length; I++)
     {
-        if ((EFrom[I] == P && ETo[I] == N) || (EFrom[I] == N && ETo[I] == P))
-            return EBlock[I];
+        if (EBlock[I] != B)
+            continue;
+        N = EFrom[I];
+        if (N != None && Abs(N.Location.Z - Loc.Z) <= NEAR_Z)
+        {
+            Diff = N.Location - Loc;
+            Diff.Z = 0.0;
+            D = VSize(Diff);
+            if (D < Best)
+                Best = D;
+        }
+        N = ETo[I];
+        if (N != None && Abs(N.Location.Z - Loc.Z) <= NEAR_Z)
+        {
+            Diff = N.Location - Loc;
+            Diff.Z = 0.0;
+            D = VSize(Diff);
+            if (D < Best)
+                Best = D;
+        }
     }
-    return -1;
+    return Best;
 }
 
-final function int DirOf(int B, NavigationPoint P, NavigationPoint N)
+final function int NearestBlock(vector Loc, out float Dist)
 {
-    local float D2N, D2P;
+    local int I;
+    local float Best;
+    local int BestBlock;
+    local vector Diff;
+    local float D;
+    local NavigationPoint N;
 
-    D2N = VSizeSq(N.Location - BEnd[B].Location);
-    D2P = VSizeSq(P.Location - BEnd[B].Location);
-    if (D2N < D2P)
+    Best = 999999.0;
+    BestBlock = -1;
+    for (I = 0; I < EFrom.Length; I++)
+    {
+        N = EFrom[I];
+        if (N != None && Abs(N.Location.Z - Loc.Z) <= NEAR_Z)
+        {
+            Diff = N.Location - Loc;
+            Diff.Z = 0.0;
+            D = VSize(Diff);
+            if (D <= NEAR_XY && D < Best)
+            {
+                Best = D;
+                BestBlock = EBlock[I];
+            }
+        }
+        N = ETo[I];
+        if (N != None && Abs(N.Location.Z - Loc.Z) <= NEAR_Z)
+        {
+            Diff = N.Location - Loc;
+            Diff.Z = 0.0;
+            D = VSize(Diff);
+            if (D <= NEAR_XY && D < Best)
+            {
+                Best = D;
+                BestBlock = EBlock[I];
+            }
+        }
+    }
+    Dist = Best;
+    return BestBlock;
+}
+
+final function int DirToward(int B, vector Loc, vector Head)
+{
+    if (VDot(Head, BEnd[B].Location - Loc) > 0.0)
         return 0;
     return 1;
 }
@@ -210,52 +271,49 @@ final function bool Refused(int B, int Dir, Object Squad, out string Why, out in
     return false;
 }
 
-final function bool Gate(Controller C, Object Squad, int Prio, NavigationPoint P, NavigationPoint N, NavigationPoint N2, out string WouldInfo, out string EndInfo)
+final function bool Near(Controller C, Object Squad, int Prio, vector Loc, vector Head, out string WouldInfo, out string EndInfo)
 {
     local float Now;
     local int I;
-    local int B;
     local int idx;
+    local float D;
     local float secs;
+    local int B;
     local int Dir;
     local bool bRefuse;
     local string Why;
     local int Load;
-    local int B2;
-    local int Dir2;
 
     Now = Mut.WorldInfo.TimeSeconds;
     WouldInfo = "";
     EndInfo = "";
 
-    // Step 1: sweep dead tickets (skip C's own for step 3)
+    // Step a: sweep dead tickets (skip C's own)
     for (I = TCtrl.Length - 1; I >= 0; I--)
     {
+        if (TCtrl[I] == C)
+            continue;
         if (TExpiry[I] < Now || TCtrl[I] == None || TCtrl[I].Pawn == None || TCtrl[I].Pawn.Health <= 0)
         {
-            if (TCtrl[I] != C)
+            if (TWouldAt[I] >= 0.0)
             {
-                if (TWouldAt[I] >= 0.0)
-                {
-                    if (Now < TExpiry[I])
-                        SumWouldSecs += Now - TWouldAt[I];
-                    else
-                        SumWouldSecs += TExpiry[I] - TWouldAt[I];
-                    CntWouldEnd++;
-                }
-                TBlock.Remove(I, 1);
-                TDir.Remove(I, 1);
-                TPrio.Remove(I, 1);
-                TCtrl.Remove(I, 1);
-                TSquad.Remove(I, 1);
-                TExpiry.Remove(I, 1);
-                TWouldAt.Remove(I, 1);
+                if (Now < TExpiry[I])
+                    SumWouldSecs += Now - TWouldAt[I];
+                else
+                    SumWouldSecs += TExpiry[I] - TWouldAt[I];
+                CntWouldEnd++;
             }
+            TBlock.Remove(I, 1);
+            TDir.Remove(I, 1);
+            TPrio.Remove(I, 1);
+            TCtrl.Remove(I, 1);
+            TSquad.Remove(I, 1);
+            TExpiry.Remove(I, 1);
+            TWouldAt.Remove(I, 1);
         }
     }
 
-    // Step 2
-    B = EdgeBlockOf(P, N);
+    // Step b: find C's ticket
     idx = -1;
     for (I = 0; I < TCtrl.Length; I++)
     {
@@ -266,10 +324,11 @@ final function bool Gate(Controller C, Object Squad, int Prio, NavigationPoint P
         }
     }
 
-    // Step 3
+    // Step c: existing ticket - stay or leave
     if (idx >= 0)
     {
-        if (B == TBlock[idx])
+        D = BlockDist(TBlock[idx], Loc);
+        if (D <= LEAVE_XY)
         {
             TExpiry[idx] = Now + TICKET_LIFE;
             return true;
@@ -291,28 +350,16 @@ final function bool Gate(Controller C, Object Squad, int Prio, NavigationPoint P
         TWouldAt.Remove(idx, 1);
     }
 
-    // Step 4
+    // Step d: find nearest block by proximity
+    B = NearestBlock(Loc, D);
     if (B < 0)
         return true;
 
-    // Step 5
-    Dir = DirOf(B, P, N);
+    // Step e: direction and refusal check
+    Dir = DirToward(B, Loc, Head);
     bRefuse = Refused(B, Dir, Squad, Why, Load);
-    if (!bRefuse && N2 != None)
-    {
-        B2 = EdgeBlockOf(N, N2);
-        if (B2 >= 0 && B2 != B)
-        {
-            Dir2 = DirOf(B2, N, N2);
-            if (Refused(B2, Dir2, Squad, Why, Load))
-            {
-                bRefuse = true;
-                Why = "chain";
-            }
-        }
-    }
 
-    // Step 6
+    // Step f: add ticket
     TBlock.AddItem(B);
     TDir.AddItem(Dir);
     TPrio.AddItem(Prio);
@@ -325,14 +372,14 @@ final function bool Gate(Controller C, Object Squad, int Prio, NavigationPoint P
         TWouldAt.AddItem(-1.0);
     CntTickets++;
 
-    // Step 7
+    // Step g: report would-wait
     if (bRefuse)
     {
         CntWould++;
-        WouldInfo = "block=" $ BId[B] $ " kind=" $ BKind[B] $ " dir=" $ string(Dir) $ " prio=" $ string(Prio) $ " why=" $ Why $ " load=" $ string(Load);
+        WouldInfo = "block=" $ BId[B] $ " kind=" $ BKind[B] $ " dir=" $ string(Dir) $ " prio=" $ string(Prio) $ " why=" $ Why $ " load=" $ string(Load) $ " x=" $ string(int(Loc.X)) $ " y=" $ string(int(Loc.Y)) $ " z=" $ string(int(Loc.Z));
     }
 
-    // Step 8
+    // Step h
     return true;
 }
 
