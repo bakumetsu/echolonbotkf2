@@ -139,6 +139,9 @@ var byte PlayStyle;
 var Actor AssignedAnchor;
 var EBotRank BotRank;
 var EcholonBot SquadLeader;
+var vector TrafficHead;                 // last non-zero walking direction (flat), for the traffic gate
+var float TrafficNextCheck;             // next 0.25 s poll of the shadow traffic gate
+var bool bTrafficTicket;                // the table holds a ticket for this bot
 var vector LastValidSquadLeaderPos;
 var float LastValidSLTime;
 var int BlockedCounter;
@@ -1963,6 +1966,61 @@ function FollowOnGaveUp()
     EchelonLog("NAV_RETRY_EXHAUSTED");
 }
 
+// Proximity gate: polls traffic table every 0.25 s to log would-wait info.
+// Never moves or holds the bot; pure logging side-channel.
+// Replaces legacy hop-edge logic (P, N, N2, FollowRoute, RouteCache, etc.).
+final function NavTrafficShadow()
+{
+	local int Prio;
+	local string Would, EndI;
+	local Object Sq;
+	local float Now, Spd;
+	local vector V;
+
+	if (Traffic == None || !Traffic.bReady || Pawn == None)
+		return;
+	Now = WorldInfo.TimeSeconds;
+	if (Now < TrafficNextCheck)
+		return;
+	TrafficNextCheck = Now + 0.25;
+
+	if (Enemy != None || Pawn.Health <= 0)
+	{
+		if (bTrafficTicket)
+		{
+			Traffic.Leave(self, EndI);
+			bTrafficTicket = false;
+			if (EndI != "")
+				EchelonLog("TRAFFIC_WOULD_END " $ EndI);
+		}
+		return;
+	}
+
+	V = Pawn.Velocity;
+	V.Z = 0.0;
+	Spd = VSize(V);
+	if (Spd > 30.0)
+		TrafficHead = V / Spd;
+	if (VSizeSq(TrafficHead) < 0.01)
+		TrafficHead = vector(Pawn.Rotation);
+
+	Sq = SquadLeader;
+	if (Sq == None)
+		Sq = FollowLeaderCtrl;
+	if (Sq == None)
+		Sq = self;
+	Prio = 1;
+	if (SquadLeader == None || SquadLeader == EcholonBot(self))
+		Prio = 2;
+
+	Traffic.Near(self, Sq, Prio, Pawn.Location, TrafficHead, Would, EndI);
+	bTrafficTicket = true;
+	if (EndI != "")
+		EchelonLog("TRAFFIC_WOULD_END " $ EndI);
+	if (Would != "")
+		EchelonLog("TRAFFIC_WOULD_WAIT " $ Would);
+}
+
 function Tick(float Delta)
 {
     local KFPawn_Monster MonCheck;
@@ -1973,6 +2031,10 @@ function Tick(float Delta)
     }
 
     FollowSampleCrumb();
+    if (Traffic != None)
+    {
+        NavTrafficShadow();
+    }
     if (WorldInfo.TimeSeconds >= NavBlockNextCheck)
     {
         NavBlockNextCheck = WorldInfo.TimeSeconds + 1.0;
@@ -3825,6 +3887,10 @@ function bool AuditRateLimit(string Msg)
 	if (Left(Msg, 4) ~= "HUB_")
 	{
 		return true;  // hub audit lines are never throttled; hub_audit.py needs every one
+	}
+	if (Left(Msg, 8) ~= "TRAFFIC_")
+	{
+		return true;  // shadow traffic lines: the overlap scoring needs every would-wait
 	}
 	if (Left(Msg, 6) ~= "TRACE_")
 	{

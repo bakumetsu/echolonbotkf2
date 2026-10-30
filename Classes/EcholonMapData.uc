@@ -35,6 +35,7 @@ var config int OriginX;
 var config int OriginY;
 var config int LevelH;
 var config array<string> LinkV;         // "from>to:verdict"
+var config array<string> Block;         // traffic block: "id:kind:cap:A>B:from>to,from>to" (kit tool traffic_blocks.py)
 var config array<string> NodeV;         // "name:verdict"
 var config array<string> Spot;          // "x,y,z,count"
 var config array<string> GridChunk;        // "cx,cy,lvl,packed"
