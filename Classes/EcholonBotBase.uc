@@ -1201,7 +1201,7 @@ function bool FireWeaponAt(Actor inActor)
 		else if (VSizeSq(inActor.Location - Pawn.Location) < BashMaxDistSq && WorldInfo.TimeSeconds >= NextBashTime)
 		{
 			NextBashTime = WorldInfo.TimeSeconds + BashInterval;
-			EchelonLog("COMBAT_BASH zed=" $ string(inActor.Class.Name) $ " dist=" $ string(int(VSize(inActor.Location - Pawn.Location))));
+			EchelonLog("COMBAT_BASH zed=" $ string(inActor.Class.Name) $ " dist=" $ string(int(VSize(inActor.Location - Pawn.Location))) $ " weapon=" $ string(W.Class.Name) $ " gun_ready=" $ string(HasUsableRangedWeapon()));
 			W.StartFire(BOTFM_BASH);
 		}
 		else

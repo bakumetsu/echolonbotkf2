@@ -2984,7 +2984,15 @@ function CheckWave()
 
     if (PrevObjective != KF.MyKFGRI.CurrentObjective)
     {
+        if (PrevObjective != None)
+        {
+            EchelonLog("OBJ_END class=" $ string(PrevObjective.Class.Name) $ " name=" $ string(PrevObjective.Name) $ " t=" $ string(int(WorldInfo.TimeSeconds)));
+        }
         PrevObjective = KF.MyKFGRI.CurrentObjective;
+        if (PrevObjective != None)
+        {
+            EchelonLog("OBJ_START class=" $ string(PrevObjective.Class.Name) $ " name=" $ string(PrevObjective.Name) $ " t=" $ string(int(WorldInfo.TimeSeconds)));
+        }
         HoldVolume = KFMapObjective_DoshHold(PrevObjective);
         if (HoldVolume != None)
         {
@@ -3178,6 +3186,15 @@ function UpdateHuntOrders()
         SquadOrders[i].Leader = L;
         SquadOrders[i].GoalNav = GP;
     }
+}
+
+final function string ZoneVolName(Actor A)
+{
+    if (A == None)
+    {
+        return "None";
+    }
+    return string(A.Name);
 }
 
 final function SetHoldObjective(Volume V)
@@ -4151,7 +4168,7 @@ function ZonePickStep()
         }
         RecentStr = RecentStr $ string(RecentZones[i]);
     }
-    EchelonLog("ZONE_PICK zone=" $ string(ZonePlanner.Zones[Pick].Id) $ " src=" $ ZoneSrcName(ZonePlanner.Zones[Pick].Src) $ " dist=" $ string(int(D)) $ " band=" $ BandName $ " tries=" $ string(ZoneTries) $ " recent=" $ RecentStr $ " reason=" $ ZonePickReason $ " wave_total=" $ string(ZoneWaveTotal) $ " hold=" $ string(int(ZoneHoldNow + 0.5)) $ " minhold=" $ string(int(ZoneMinHoldNow + 0.5)) $ " huntmax=" $ string(ZoneHuntMaxNow));
+    EchelonLog("ZONE_PICK zone=" $ string(ZonePlanner.Zones[Pick].Id) $ " src=" $ ZoneSrcName(ZonePlanner.Zones[Pick].Src) $ " vol=" $ ZoneVolName(ZonePlanner.Zones[Pick].Source) $ " dist=" $ string(int(D)) $ " band=" $ BandName $ " tries=" $ string(ZoneTries) $ " recent=" $ RecentStr $ " reason=" $ ZonePickReason $ " wave_total=" $ string(ZoneWaveTotal) $ " hold=" $ string(int(ZoneHoldNow + 0.5)) $ " minhold=" $ string(int(ZoneMinHoldNow + 0.5)) $ " huntmax=" $ string(ZoneHuntMaxNow));
     ZoneCommit(Pick);
 }
 
