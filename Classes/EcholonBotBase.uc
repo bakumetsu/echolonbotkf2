@@ -265,7 +265,21 @@ var float AuditLastLog_GEN;
 var float AuditLastLog_DWELLTOT;
 var float AuditLastLog_NAVACCEL;
 var transient float FollowSlotLogTime;   // last NAV_FOLLOW_SLOT sample (2 s apart)
-var transient int NavFollowOwnSkips;     // squad-slot moves skipped because the follow mover owned the move (follow-owns-move switch)
+var transient vector FollowSlotGoal;     // last squad-slot / role spot from UpdateGruntOffset while the follow mover owns the move
+var transient string FollowSlotGoalSrc;  // which caller chose it (slot, wedge, overwatch, ...)
+var transient float FollowSlotGoalTime;  // when it was chosen
+var float FollowSlotGoalMaxAge;          // seconds before the goal counts as stale (CheckGrabbed runs every 0.2 to 0.3 s)
+var transient int DiagCnt[20];           // T-64 diagnosis counters for NAV_FOLLOW_DIAG (0 runs 1 sync 2 lost 3 overwatch 4 hold 5 rescue 6 reload_drift 7 wedge 8 slot 9 slot_invalid 10 anchor_obj 11 anchor_slot 12 anchor_stale 13 anchor_none 14 reload_anchor 15 overwatch_target 16 lost_tag 17 vip_tag 18 grapple)
+var transient float DiagAgeSum;          // slot goal age at each stale or fresh anchor read
+var transient float DiagAgeMax;
+var transient float DiagLastRun;         // time of the last UpdateGruntOffset run while following
+var transient float DiagMaxGap;          // longest gap between runs while following
+var transient float DiagLogTime;
+var transient int ZoneOvrCnt;            // times the squad-slot goal overrode the zone-planner spot in the current phase
+var transient int ZoneOvrPhase;
+var transient float ZoneOvrTime;
+var transient int NavFollowStaleFalls;   // follow decisions that fell back to the leader because the slot goal was stale or missing
+var transient int NavFollowOwnSkips;   // squad-slot moves skipped because the follow mover owned the move (follow-owns-move switch)
 var bool bHasHoldPosition;
 var vector HoldPosition;
 var float LastTriageTime;
@@ -1649,12 +1663,71 @@ final function bool FollowOwnsMove()
     return mut != None && mut.bFollowOwnsMoveNow && IsInState('FollowingLeader');
 }
 
+// The slot goal overrode a zone-planner spot: count it per phase and log the count when the phase changes or the overrides stop (NAV_ZONE_OVERRIDE, per bot; add up per group).
+final function ZoneOverrideNote()
+{
+    local int IterPhase;
+
+    IterPhase = mut.GetSquadPhase(EcholonBot(self));
+    if (ZoneOvrCnt > 0 && IterPhase != ZoneOvrPhase)
+    {
+        ZoneOverrideFlush();
+    }
+    ZoneOvrPhase = IterPhase;
+    ZoneOvrCnt++;
+    ZoneOvrTime = WorldInfo.TimeSeconds;
+}
+
+final function ZoneOverrideFlush()
+{
+    if (ZoneOvrCnt > 0)
+    {
+        EchelonLog("NAV_ZONE_OVERRIDE group=" $ string(GroupID) $ " phase=" $ string(ZoneOvrPhase) $ " count=" $ string(ZoneOvrCnt));
+        ZoneOvrCnt = 0;
+    }
+}
+
+// T-64 diagnosis: count one event for NAV_FOLLOW_DIAG (only while the follow mover owns the move).
+final function FollowDiag(int Idx)
+{
+    if (FollowOwnsMove())
+    {
+        DiagCnt[Idx]++;
+    }
+}
+
+// Which caller's spot the follow mover is steering to (slot, wedge, overwatch, ...); "-" when it steers to the leader or the switch is off.
+final function string FollowSlotGoalLogText()
+{
+    if (bFollowOrderAnchorActive && bFollowAnchorIsSlot)
+    {
+        return FollowSlotGoalSrc;
+    }
+    return "-";
+}
+
 // MoveToX for the squad-slot movers (grunt offset, reload drift, wedge): skipped while the follow mover owns the move. SrcText names the caller in NAV2_MOVE_BEGIN (src=).
 final function GruntMoveToX(string SrcText, vector Dest)
 {
     if (FollowOwnsMove())
     {
+        // The follow mover steers to this spot (FollowGetOrderAnchor) instead of the leader.
         NavFollowOwnSkips++;
+        if (SrcText == "reload_anchor")
+        {
+            DiagCnt[14]++;
+        }
+        else if (SrcText == "lost_leader")
+        {
+            DiagCnt[16]++;
+        }
+        else if (SrcText == "vip")
+        {
+            DiagCnt[17]++;
+        }
+        FollowSlotGoal = Dest;
+        FollowSlotGoalSrc = SrcText;
+        FollowSlotGoalTime = WorldInfo.TimeSeconds;
         return;
     }
     NavSrcTag = SrcText;
@@ -3813,21 +3886,48 @@ function bool FollowGetOrderAnchor(out vector OutLoc)
     local vector Loc;
 
     OutLoc = vect(0, 0, 0);
+    bFollowAnchorIsSlot = false;
     if (mut == None)
     {
         return false;
     }
-    if (!mut.IsSquadInObjectivePhase(EcholonBot(self)))
+    // Follow-owns-move (T-64): aim at the squad slot / role spot UpdateGruntOffset last chose, even in the zone-planner phases (as the old slot point mover did); a stale goal falls back to the zone spot, then the leader.
+    if (FollowOwnsMove() && FollowSlotGoalTime > 0.0 && WorldInfo.TimeSeconds - FollowSlotGoalTime < FollowSlotGoalMaxAge)
     {
-        return false;
+        if (mut.IsSquadInObjectivePhase(EcholonBot(self)))
+        {
+            ZoneOverrideNote();
+        }
+        OutLoc = FollowSlotGoal;
+        bFollowAnchorIsSlot = true;
+        FollowDiag(11);
+        DiagAgeSum += WorldInfo.TimeSeconds - FollowSlotGoalTime;
+        return true;
     }
-    Loc = mut.GetSlotLocation(EcholonBot(self));
-    if (Loc == vect(0, 0, 0))
+    if (mut.IsSquadInObjectivePhase(EcholonBot(self)))
     {
-        return false;
+        Loc = mut.GetSlotLocation(EcholonBot(self));
+        if (Loc != vect(0, 0, 0))
+        {
+            FollowDiag(10);
+            OutLoc = Loc;
+            return true;
+        }
     }
-    OutLoc = Loc;
-    return true;
+    if (FollowOwnsMove())
+    {
+        NavFollowStaleFalls++;
+        if (FollowSlotGoalTime <= 0.0)
+        {
+            DiagCnt[13]++;
+        }
+        else
+        {
+            DiagCnt[12]++;
+            DiagAgeMax = FMax(DiagAgeMax, WorldInfo.TimeSeconds - FollowSlotGoalTime);
+        }
+    }
+    return false;
 }
 
 function AuditStateEntry()
@@ -7070,6 +7170,7 @@ function UpdateHoldAreaDrift()
 defaultproperties
 {
     ShoppedWave=-1
+    FollowSlotGoalMaxAge=1.5
     LookTurnRate=32768.0
     LookTurnAccel=65536.0
     LookSweepAmp=20.0

@@ -177,7 +177,8 @@ var() config bool bNavV2;                     // nav redesign Stage A: route poi
 var transient bool bNavV2Now;                 // bNavV2 after the ?NavV2= option
 var() config bool bLookV2;                     // look direction rework (bot-look-direction): eased route-following view; off by default (a config bool is false when absent). ?LookV2=1/0 overrides for one match
 var transient bool bLookV2Now;                 // bLookV2 after the ?LookV2= option
-var() config bool bFollowOwnsMove;                // follow-owns-move (T-37): while a bot is in FollowingLeader the follow mover is the only mover (the squad-slot MoveToX callers are skipped); off by default (a config bool is false when absent). ?FollowOwn=1/0 overrides for one match
+var() config bool bFollowOwnsMove;                // follow-owns-move (T-37): while a bot is in FollowingLeader the follow mover is the only mover (the squad-slot MoveToX callers are skipped); on by default (FollowOwnConfigVer < 1 switches it on once; a config bool is false when absent). ?FollowOwn=1/0 overrides for one match
+var() config int FollowOwnConfigVer;             // 0 = bFollowOwnsMove default never written; 1 = written once (separate from ConfigVer)
 var transient bool bFollowOwnsMoveNow;           // bFollowOwnsMove after the ?FollowOwn= option
 var config string _Separator1;
 var() config byte NumBots;
@@ -518,6 +519,14 @@ function PostBeginPlay()
     {
         bWaveSprint = true;
         WaveSprintConfigVer = 1;
+        SaveConfig();
+    }
+
+    // Follow-owns-move (T-64) is on by default: the first time FollowOwnConfigVer is below 1 it is switched on and saved, so a user who turns it off later keeps that choice.
+    if (FollowOwnConfigVer < 1)
+    {
+        bFollowOwnsMove = true;
+        FollowOwnConfigVer = 1;
         SaveConfig();
     }
     // A zone value cleared by hand reads 0: use the built-in default.
