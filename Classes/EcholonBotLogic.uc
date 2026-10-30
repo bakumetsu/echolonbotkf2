@@ -551,6 +551,7 @@ function CheckGrabbed()
     {
         UpdateGruntOffset();
         FollowSlotSample();
+        FollowDiagLog();
     }
 }
 
@@ -575,6 +576,35 @@ function FollowSlotSample()
     EchelonLog("NAV_FOLLOW_SLOT dist=" $ string(int(VSize2D(IterSlot - Pawn.Location))) $ " leader=" $ string(IterLeaderDist) $ " skips=" $ string(NavFollowOwnSkips) $ " goal=" $ FollowSlotGoalLogText() $ " stale=" $ string(NavFollowStaleFalls));
 }
 
+// T-64 diagnosis: every 5 s per following grunt, what UpdateGruntOffset and FollowGetOrderAnchor did in that window (counters reset after each line).
+function FollowDiagLog()
+{
+    local int IterI;
+    local float IterAnchors;
+
+    if (!FollowOwnsMove() || WorldInfo.TimeSeconds - DiagLogTime < 5.0)
+    {
+        return;
+    }
+    DiagLogTime = WorldInfo.TimeSeconds;
+    IterAnchors = float(Max(DiagCnt[10] + DiagCnt[11] + DiagCnt[12] + DiagCnt[13], 1));
+    EchelonLog("NAV_FOLLOW_DIAG runs=" $ string(DiagCnt[0]) $ " maxgap=" $ string(DiagMaxGap)
+        $ " ret_sync=" $ string(DiagCnt[1]) $ " ret_lost=" $ string(DiagCnt[2]) $ " br_overwatch=" $ string(DiagCnt[3]) $ " br_hold=" $ string(DiagCnt[4])
+        $ " br_rescue=" $ string(DiagCnt[5]) $ " br_reload=" $ string(DiagCnt[6]) $ " br_wedge=" $ string(DiagCnt[7]) $ " br_slot=" $ string(DiagCnt[8])
+        $ " slot_invalid=" $ string(DiagCnt[9]) $ " tag_reload_anchor=" $ string(DiagCnt[14]) $ " tag_overwatch=" $ string(DiagCnt[15])
+        $ " tag_lost=" $ string(DiagCnt[16]) $ " tag_vip=" $ string(DiagCnt[17])
+        $ " a_obj=" $ string(DiagCnt[10]) $ " a_slot=" $ string(DiagCnt[11]) $ " a_stale=" $ string(DiagCnt[12]) $ " a_none=" $ string(DiagCnt[13])
+        $ " age_avg=" $ string(DiagAgeSum / IterAnchors) $ " age_max_stale=" $ string(DiagAgeMax)
+        $ " rank=" $ string(int(BotRank)));
+    for (IterI = 0; IterI < 20; IterI++)
+    {
+        DiagCnt[IterI] = 0;
+    }
+    DiagAgeSum = 0.0;
+    DiagAgeMax = 0.0;
+    DiagMaxGap = 0.0;
+}
+
 function UpdateGruntOffset()
 {
     local vector GruntTarget;
@@ -589,11 +619,22 @@ function UpdateGruntOffset()
         return;
     }
 
+    if (FollowOwnsMove())
+    {
+        DiagCnt[0]++;
+        if (DiagLastRun > 0.0 && WorldInfo.TimeSeconds - DiagLastRun < 3.0)
+        {
+            DiagMaxGap = FMax(DiagMaxGap, WorldInfo.TimeSeconds - DiagLastRun);
+        }
+        DiagLastRun = WorldInfo.TimeSeconds;
+    }
+
     ApplyPanicVariance();
     TrackReloadState();
 
     if (SyncLineFocus())
     {
+        FollowDiag(1);
         return;
     }
 
@@ -601,6 +642,7 @@ function UpdateGruntOffset()
 
     if (SquadLeader == None || SquadLeader.Pawn == None || SquadLeader.Pawn.Health <= 0)
     {
+        FollowDiag(2);
         if (LastValidSquadLeaderPos != vect(0, 0, 0))
         {
             GruntMoveToX("lost_leader", LastValidSquadLeaderPos);
@@ -635,8 +677,10 @@ function UpdateGruntOffset()
 
     if (bOverwatchMoving)
     {
+        FollowDiag(3);
         if (UpdateOverwatchMovement(OverwatchMoveTarget))
         {
+            FollowDiag(15);
             GruntMoveToX("overwatch", OverwatchMoveTarget);
         }
         return;
@@ -644,6 +688,7 @@ function UpdateGruntOffset()
 
     if (CurrentOrder == 'CMD_HoldArea' && Enemy == None)
     {
+        FollowDiag(4);
         UpdateSectorWatch();
         return;
     }
@@ -652,6 +697,7 @@ function UpdateGruntOffset()
 
     if (RescueUntil > WorldInfo.TimeSeconds)
     {
+        FollowDiag(5);
         MoveToX(RescueLoc);
         return;
     }
@@ -660,12 +706,14 @@ function UpdateGruntOffset()
 
     if (bReloadDriftMove && ReloadDriftUntil > WorldInfo.TimeSeconds)
     {
+        FollowDiag(6);
         GruntMoveToX("reload_drift", ReloadDriftLoc);
         return;
     }
 
     if (SquadLeader != None && SquadLeader.bWedgeActive)
     {
+        FollowDiag(7);
         GruntTarget = SquadLeader.Pawn.Location;
         ApplyWedgeTarget(GruntTarget);
         GruntTarget = ApplyZStep(GruntTarget);
@@ -687,10 +735,12 @@ function UpdateGruntOffset()
 
     if (!ValidateOffsetTarget(GruntTarget))
     {
+        FollowDiag(9);
         GruntTarget = SquadLeader.Pawn.Location;
     }
     GruntTarget = NavSnapSpot(GruntTarget, SquadLeader.Pawn.Location);
 
+    FollowDiag(8);
     GruntMoveToX("slot", GruntTarget);
 }
 

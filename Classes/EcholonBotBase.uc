@@ -269,6 +269,12 @@ var transient vector FollowSlotGoal;     // last squad-slot / role spot from Upd
 var transient string FollowSlotGoalSrc;  // which caller chose it (slot, wedge, overwatch, ...)
 var transient float FollowSlotGoalTime;  // when it was chosen
 var float FollowSlotGoalMaxAge;          // seconds before the goal counts as stale (CheckGrabbed runs every 0.2 to 0.3 s)
+var transient int DiagCnt[20];           // T-64 diagnosis counters for NAV_FOLLOW_DIAG (0 runs 1 sync 2 lost 3 overwatch 4 hold 5 rescue 6 reload_drift 7 wedge 8 slot 9 slot_invalid 10 anchor_obj 11 anchor_slot 12 anchor_stale 13 anchor_none 14 reload_anchor 15 overwatch_target 16 lost_tag 17 vip_tag 18 grapple)
+var transient float DiagAgeSum;          // slot goal age at each stale or fresh anchor read
+var transient float DiagAgeMax;
+var transient float DiagLastRun;         // time of the last UpdateGruntOffset run while following
+var transient float DiagMaxGap;          // longest gap between runs while following
+var transient float DiagLogTime;
 var transient int NavFollowStaleFalls;   // follow decisions that fell back to the leader because the slot goal was stale or missing
 var transient int NavFollowOwnSkips;   // squad-slot moves skipped because the follow mover owned the move (follow-owns-move switch)
 var bool bHasHoldPosition;
@@ -1651,6 +1657,15 @@ final function bool FollowOwnsMove()
     return mut != None && mut.bFollowOwnsMoveNow && IsInState('FollowingLeader');
 }
 
+// T-64 diagnosis: count one event for NAV_FOLLOW_DIAG (only while the follow mover owns the move).
+final function FollowDiag(int Idx)
+{
+    if (FollowOwnsMove())
+    {
+        DiagCnt[Idx]++;
+    }
+}
+
 // Which caller's spot the follow mover is steering to (slot, wedge, overwatch, ...); "-" when it steers to the leader or the switch is off.
 final function string FollowSlotGoalLogText()
 {
@@ -1668,6 +1683,18 @@ final function GruntMoveToX(string SrcText, vector Dest)
     {
         // The follow mover steers to this spot (FollowGetOrderAnchor) instead of the leader.
         NavFollowOwnSkips++;
+        if (SrcText == "reload_anchor")
+        {
+            DiagCnt[14]++;
+        }
+        else if (SrcText == "lost_leader")
+        {
+            DiagCnt[16]++;
+        }
+        else if (SrcText == "vip")
+        {
+            DiagCnt[17]++;
+        }
         FollowSlotGoal = Dest;
         FollowSlotGoalSrc = SrcText;
         FollowSlotGoalTime = WorldInfo.TimeSeconds;
@@ -3839,6 +3866,7 @@ function bool FollowGetOrderAnchor(out vector OutLoc)
         Loc = mut.GetSlotLocation(EcholonBot(self));
         if (Loc != vect(0, 0, 0))
         {
+            FollowDiag(10);
             OutLoc = Loc;
             return true;
         }
@@ -3848,11 +3876,22 @@ function bool FollowGetOrderAnchor(out vector OutLoc)
     {
         OutLoc = FollowSlotGoal;
         bFollowAnchorIsSlot = true;
+        FollowDiag(11);
+        DiagAgeSum += WorldInfo.TimeSeconds - FollowSlotGoalTime;
         return true;
     }
     if (FollowOwnsMove())
     {
         NavFollowStaleFalls++;
+        if (FollowSlotGoalTime <= 0.0)
+        {
+            DiagCnt[13]++;
+        }
+        else
+        {
+            DiagCnt[12]++;
+            DiagAgeMax = FMax(DiagAgeMax, WorldInfo.TimeSeconds - FollowSlotGoalTime);
+        }
     }
     return false;
 }
