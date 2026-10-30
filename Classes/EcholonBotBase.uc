@@ -1199,7 +1199,7 @@ function bool FireWeaponAt(Actor inActor)
 			W.StartFire(BOTFM_PRIMARY);
 		}
 		else if (VSizeSq(inActor.Location - Pawn.Location) < BashMaxDistSq && WorldInfo.TimeSeconds >= NextBashTime
-			&& mut != None && mut.bBashGuardNow && ShouldSkipBash(inActor))
+			&& mut != None && mut.bBashGuardNow && ShouldSkipBash(Pawn(inActor)))
 		{
 			// Same rule as HandleCQBProximity: shoot the no-bash zed instead of bashing it.
 			NextBashTime = WorldInfo.TimeSeconds + BashInterval;
