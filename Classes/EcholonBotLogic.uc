@@ -745,7 +745,33 @@ function UpdateGruntOffset()
     GruntTarget = NavSnapSpot(GruntTarget, SquadLeader.Pawn.Location);
 
     FollowDiag(8);
+    if (mut != None && mut.bGruntSlotYield && SlotYieldsToState())
+    {
+        SlotYieldCount++;
+        if (SlotYieldCount % 25 == 1)
+            EchelonLog("NAV_SLOT_YIELD state=" $ string(GetStateName()) $ " count=" $ string(SlotYieldCount));
+        return;
+    }
+    if (mut != None && mut.bCampSlotZAccept && IsInState('Camp') && VSize2D(GruntTarget - Pawn.Location) < 50.0
+        && Abs(GruntTarget.Z - Pawn.Location.Z) < 90.0 && FastTrace(GruntTarget, Pawn.Location))
+    {
+        MoveFlags = 0;
+        Pawn.Acceleration = vect(0, 0, 0);
+        CampZAcceptCount++;
+        if (CampZAcceptCount % 25 == 1)
+            EchelonLog("NAV_CAMP_Z_ACCEPT dz=" $ string(int(GruntTarget.Z - Pawn.Location.Z)) $ " d2=" $ string(int(VSize2D(GruntTarget - Pawn.Location))) $ " count=" $ string(CampZAcceptCount));
+        return;
+    }
     GruntMoveToX("slot", GruntTarget);
+}
+
+function bool SlotYieldsToState()
+{
+    if (IsInState('GoShopping'))
+        return true;
+    if (KFGRI != None && KFGRI.bTraderIsOpen && (IsInState('PickNextMove') || IsInState('Roaming')))
+        return true;
+    return false;
 }
 
 function vector ApplyZStep(vector T)
@@ -1968,9 +1994,71 @@ function bool EvaluateLeaderMove()
 {
     UpdatePillarOfSaltTracking();
     if (bAttemptingUnweld)
+    {
+        TetherHoldEnd("unweld");
         return false;
+    }
     UpdateCQBFormation();
+    if (TetherHoldNow())
+    {
+        return true;
+    }
     return MoveTowardGoal(AssignedAnchor, vect(0,0,0), true);
+}
+
+function bool TetherHoldNow()
+{
+    if (mut == None || !mut.bTetherHoldAtAnchor || NavigationPoint(AssignedAnchor) == None || Pawn == None)
+    {
+        TetherHoldEnd("off");
+        return false;
+    }
+    if (Enemy != None && Enemy.IsAliveAndWell())
+    {
+        TetherHoldEnd("enemy");
+        return false;
+    }
+    if (TetherHoldAnchor != None && TetherHoldAnchor != AssignedAnchor)
+    {
+        TetherHoldEnd("anchor");
+    }
+    if (TetherHoldAnchor != None && WorldInfo.TimeSeconds - TetherHoldLast > 1.0)
+        TetherHoldEnd("gap");
+    if (!Pawn.ReachedDestination(AssignedAnchor))
+    {
+        TetherHoldEnd("left");
+        return false;
+    }
+    if (TetherNoHoldAnchor == AssignedAnchor && WorldInfo.TimeSeconds < TetherNoHoldUntil)
+        return false;
+    if (TetherHoldAnchor == None)
+    {
+        TetherHoldAnchor = AssignedAnchor;
+        TetherHoldStart = WorldInfo.TimeSeconds;
+        TetherHoldLast = WorldInfo.TimeSeconds;
+    }
+    if (WorldInfo.TimeSeconds - TetherHoldStart >= 15.0)
+    {
+        TetherNoHoldAnchor = AssignedAnchor;
+        TetherNoHoldUntil = WorldInfo.TimeSeconds + 10.0;
+        TetherHoldLast = WorldInfo.TimeSeconds;
+        TetherHoldEnd("cap");
+        return false;
+    }
+    TetherHoldLast = WorldInfo.TimeSeconds;
+    MoveFlags = 0;
+    Pawn.Acceleration = vect(0, 0, 0);
+    return true;
+}
+
+function TetherHoldEnd(string Why)
+{
+    if (TetherHoldAnchor == None)
+        return;
+    EchelonLog("TETHER_HOLD anchor=" $ string(TetherHoldAnchor) $ " secs=" $ string(TetherHoldLast - TetherHoldStart) $ " why=" $ Why);
+    TetherHoldLast = 0.0;
+    TetherHoldAnchor = None;
+    TetherHoldStart = 0.0;
 }
 
 function bool EvaluateFollowerMove()

@@ -302,6 +302,12 @@ var() config bool bBotsCountInSkipTraderVote;
 // here, or for one match with ?RemoteShop=1 on the map URL (?RemoteShop=0 forces it off).
 var() config bool bRemoteShop;
 var transient bool bRemoteShopActive;
+// T-39 F1: grunts do not issue the squad-slot move while shopping or on a trader walk
+var transient bool bGruntSlotYield;
+// T-39 F2: a leader standing on its reached tether anchor holds instead of moving
+var transient bool bTetherHoldAtAnchor;
+// T-39 F3: Camp accepts a slot within 2D reach and under 90 uu height gap
+var transient bool bCampSlotZAccept;
 // Shop re-pick fix: while a bot has set the trader aside (NavGoalSkipped), the hub does not pick GoShopping (it bounced back to the hub every frame). On unless ?ShopFix=0 is on the map URL.
 var transient bool bShopFixNow;
 var transient bool bBashGuardNow;              // ?BashGuard= (default 1): FireWeaponAt skips the bash on no-bash zeds
@@ -1231,6 +1237,11 @@ function InitMutator(string Options, out string ErrorMessage)
     {
         EchelonLog("SHOP_REMOTE_MODE on=1 source=" $ (class'GameInfo'.static.HasOption(Options, "RemoteShop") ? "url" : "config"));
     }
+
+    bGruntSlotYield = !(class'GameInfo'.static.ParseOption(Options, "SlotYield") ~= "0");
+    bTetherHoldAtAnchor = !(class'GameInfo'.static.ParseOption(Options, "TetherHold") ~= "0");
+    bCampSlotZAccept = !(class'GameInfo'.static.ParseOption(Options, "CampZ") ~= "0");
+    EchelonLog("HOTSPOT_SWITCHES slot_yield=" $ string(bGruntSlotYield) $ " tether_hold=" $ string(bTetherHoldAtAnchor) $ " camp_z=" $ string(bCampSlotZAccept));
 
     // Our controller makes the spectator keys work on bots (click, middle click, Space, wheel) when the human is dead,
     // in normal play as well as in playtest mode. Everything it overrides sits in state Spectating (see EcholonSpectatorPC).
