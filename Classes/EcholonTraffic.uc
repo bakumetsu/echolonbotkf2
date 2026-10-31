@@ -10,6 +10,7 @@ const TICKET_LIFE = 5.0;
 const NEAR_XY = 300.0;
 const LEAVE_XY = 450.0;
 const NEAR_Z = 150.0;
+const BUSY_LOAD = 2;
 
 var EcholonMut Mut;
 var EcholonMapData MapData;
@@ -41,6 +42,11 @@ var int CntTickets;
 var int CntWould;
 var int CntWouldEnd;
 var float SumWouldSecs;
+var bool bRoute;
+var int CntRoute;
+var int CntRouteBlocked;
+var int CntRouteFound;
+var int CntRouteFall;
 
 final function bool Step()
 {
@@ -477,15 +483,49 @@ final function Leave(Controller C, out string EndInfo)
     }
 }
 
+// Fills Pairs with the node pairs (From at 2i, To at 2i+1) of every edge of every busy block: a block is busy when
+// other squads hold at least BUSY_LOAD live tickets on it (either direction). Own squad's tickets do not count.
+final function int BusyEdges(Object Squad, out array<NavigationPoint> Pairs)
+{
+    local int B, I, Load, Count;
+    local array<int> BusyFlag;
+
+    Pairs.Length = 0;
+    BusyFlag.Length = BId.Length;
+    Count = 0;
+    for (B = 0; B < BId.Length; B++)
+    {
+        Load = Occupied(B, 0, Squad, false) + Occupied(B, 0, Squad, true);
+        if (Load >= BUSY_LOAD)
+            BusyFlag[B] = 1;
+        else
+            BusyFlag[B] = 0;
+    }
+    for (I = 0; I < EFrom.Length; I++)
+    {
+        if (BusyFlag[EBlock[I]] == 1 && EFrom[I] != None && ETo[I] != None)
+        {
+            Pairs.AddItem(EFrom[I]);
+            Pairs.AddItem(ETo[I]);
+            Count++;
+        }
+    }
+    return Count;
+}
+
 final function string SummaryText()
 {
     local string S;
 
-    S = "tickets=" $ string(CntTickets) $ " would=" $ string(CntWould) $ " would_end=" $ string(CntWouldEnd) $ " would_secs=" $ string(int(SumWouldSecs + 0.5)) $ " live=" $ string(TCtrl.Length);
+    S = "tickets=" $ string(CntTickets) $ " would=" $ string(CntWould) $ " would_end=" $ string(CntWouldEnd) $ " would_secs=" $ string(int(SumWouldSecs + 0.5)) $ " live=" $ string(TCtrl.Length) $ " route=" $ string(CntRoute) $ " route_blocked=" $ string(CntRouteBlocked) $ " route_found=" $ string(CntRouteFound) $ " route_fall=" $ string(CntRouteFall);
     CntTickets = 0;
     CntWould = 0;
     CntWouldEnd = 0;
     SumWouldSecs = 0.0;
+    CntRoute = 0;
+    CntRouteBlocked = 0;
+    CntRouteFound = 0;
+    CntRouteFall = 0;
     return S;
 }
 

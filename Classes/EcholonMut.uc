@@ -171,6 +171,8 @@ var config int ConfigVer;
 var() config int TrafficMode;                   // traffic table: 0 off, 1 shadow (log only, nobody is held). ?Traffic=0/1 overrides for one match
 var transient int TrafficModeNow;               // TrafficMode after the ?Traffic= option
 var transient EcholonTraffic Traffic;           // shadow reservation table (None when TrafficModeNow is 0)
+var() config int TrafficRoute;                  // crowd-aware routing for long walks (needs the traffic table): 0 off, 1 on. ?TrafficRoute=0/1 overrides for one match
+var transient int TrafficRouteNow;              // TrafficRoute after the ?TrafficRoute= option
 var() config float NavBudgetLimit;            // stalled seconds on one spot before a rescue
 var() config int NavBudgetStalls;             // stall series on one spot before a rescue
 var() config float NavBudgetMinGap;           // minimum seconds between the first and the last counted series
@@ -636,6 +638,7 @@ function TrafficBegin()
     Traffic = new class'EcholonBot.EcholonTraffic';
     Traffic.Mut = self;
     Traffic.MapData = TData;
+    Traffic.bRoute = (TrafficRouteNow == 1);
     for (I = 0; I < ActiveBots.Length; I++)
     {
         if (ActiveBots[I] != None)
@@ -1292,7 +1295,20 @@ function InitMutator(string Options, out string ErrorMessage)
     {
         TrafficModeNow = 0;
     }
-    EchelonLog("TRAFFIC_CONFIG mode=" $ string(TrafficModeNow));
+    TrafficRouteNow = TrafficRoute;
+    if (class'GameInfo'.static.HasOption(Options, "TrafficRoute"))
+    {
+        TrafficRouteNow = class'GameInfo'.static.GetIntOption(Options, "TrafficRoute", 0);
+    }
+    if (TrafficRouteNow != 1)
+    {
+        TrafficRouteNow = 0;
+    }
+    if (TrafficRouteNow == 1 && TrafficModeNow == 0)
+    {
+        TrafficModeNow = 1;
+    }
+    EchelonLog("TRAFFIC_CONFIG mode=" $ string(TrafficModeNow) $ " route=" $ string(TrafficRouteNow));
     EchelonLog("LOOK_CONFIG lookv2=" $ string(bLookV2Now));
     bShopFixNow = true;
     if (class'GameInfo'.static.HasOption(Options, "ShopFix"))
