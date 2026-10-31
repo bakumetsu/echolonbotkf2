@@ -440,7 +440,7 @@ state Roaming
             return;
         }
 
-        if (!BuildPathToward(RandGoal))
+        if (!BuildPathTowardLong(RandGoal))
         {
             RandGoal = None;
             NavRandomStep();
@@ -618,7 +618,7 @@ state DoObjective extends Roaming
             RandGoal = None;
             return;
         }
-        if (!BuildPathToward(RandGoal))
+        if (!BuildPathTowardLong(RandGoal))
         {
             RandGoal = None;
             NavRandomStep();
@@ -1708,7 +1708,7 @@ state GoShopping
             MoveToX(KFGRI.OpenedTrader.Location);
             return;
         }
-        if (BuildPathToward(KFGRI.OpenedTrader))
+        if (BuildPathTowardLong(KFGRI.OpenedTrader))
         {
             TraderRetryCount = 0;
             MoveTowardX(MoveTarget);

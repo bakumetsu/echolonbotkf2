@@ -1636,7 +1636,7 @@ final function bool NavRerouteWalk(Vector Dest, Actor ViewFocus, bool bSerpent, 
     bReach = WalkPointReachable(Dest);
     PrevTarget = MoveTarget;
     Res = "route";
-    if (!BuildPathTo(Dest))
+    if (!BuildPathToLong(Dest))
     {
         Res = "noroute";
     }
@@ -2895,6 +2895,39 @@ final function bool BuildPathTo(Vector Dest)
     }
 
     return MoveTarget != None;
+}
+
+// Long walks (trader, roam, routed point walks): same as BuildPathToward/BuildPathTo, but the search first tries with busy traffic blocks blocked.
+final function bool BuildPathTowardLong(Actor Other)
+{
+    local bool bOk;
+
+    bTrafficRoute = true;
+    TrafficSquad = SquadLeader;
+    if (TrafficSquad == None)
+    {
+        TrafficSquad = FollowLeaderCtrl;
+    }
+    bOk = BuildPathToward(Other);
+    bTrafficRoute = false;
+    TrafficSquad = None;
+    return bOk;
+}
+
+final function bool BuildPathToLong(Vector Dest)
+{
+    local bool bOk;
+
+    bTrafficRoute = true;
+    TrafficSquad = SquadLeader;
+    if (TrafficSquad == None)
+    {
+        TrafficSquad = FollowLeaderCtrl;
+    }
+    bOk = BuildPathTo(Dest);
+    bTrafficRoute = false;
+    TrafficSquad = None;
+    return bOk;
 }
 
 final function bool BuildRandomPath()

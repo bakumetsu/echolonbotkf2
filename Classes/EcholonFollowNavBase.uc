@@ -126,6 +126,8 @@ var float FollowNarrowQuietUntil; // no narrow wait before this time (after a wa
 var EcholonNavScan NavScan;        // start-of-match link scan result (bad links), set by EcholonMut.RegisterBot
 var EcholonNavGrid NavGrid;           // shared tile table, set by EcholonMut.RegisterBot
 var EcholonTraffic Traffic;           // shadow traffic table (None when TrafficMode is 0), set by EcholonMut
+var bool bTrafficRoute;               // set by BuildPathTowardLong/BuildPathToLong: this search is a long walk that may avoid busy traffic blocks
+var Object TrafficSquad;             // squad key of the walker for the route pass, set by the Long wrappers
 var bool bNavGridOn;                  // true while the grid steers this bot (set by the owner class)
 var vector NavGridDir;                // last direction the grid chose
 var float NavGridKeepUntil;           // keep NavGridDir until this game time unless it becomes blocked
@@ -2029,6 +2031,46 @@ function string FollowGoalText()
     return FollowVecText(FollowLastGoalPos);
 }
 
+function int TrafficEdgesBlock(out array<ReachSpec> OutBlocked)
+{
+    local array<NavigationPoint> Pairs;
+    local object Sq;
+    local int I, N, Count;
+    local ReachSpec S;
+    local NavigationPoint From, To;
+    local int J;
+
+    Sq = TrafficSquad;
+    if (Sq == None)
+        Sq = self;
+    N = Traffic.BusyEdges(Sq, Pairs);
+    Count = 0;
+    for (I = 0; I < N; I++)
+    {
+        From = Pairs[2 * I];
+        To = Pairs[2 * I + 1];
+        for (J = 0; J < From.PathList.Length; J++)
+        {
+            S = From.PathList[J];
+            if (S != None && S.GetEnd() == To)
+            {
+                if (NavBlockSpec(S, OutBlocked))
+                    Count++;
+            }
+        }
+        for (J = 0; J < To.PathList.Length; J++)
+        {
+            S = To.PathList[J];
+            if (S != None && S.GetEnd() == From)
+            {
+                if (NavBlockSpec(S, OutBlocked))
+                    Count++;
+            }
+        }
+    }
+    return Count;
+}
+
 // Path toward Goal (or to Dest when Goal is None) that avoids every special edge this bot has seen.
 // Known special edges are marked BlockedBy only for the duration of the search, so zeds keep them.
 function Actor FollowFindWalkablePath(Actor Goal, vector Dest, optional bool bLast)
@@ -2040,6 +2082,10 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest, optional bool bLa
     local int IterCSpecial, IterCOwn, IterCSquad, IterCSurvey, IterCScan, IterB0, IterNameCount;
     local string IterNames;
     local bool IterStrict;
+    local bool IterTraffic;
+    local int IterCTraffic;
+    local bool IterCounted;
+    local vector IterGoalPos;
 
     FollowLastGoal = Goal;
     FollowLastGoalPos = Dest;
@@ -2052,6 +2098,19 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest, optional bool bLa
     }
     IterStrict = true;
     NavBlockLeakCheck("search");
+    IterTraffic = false;
+    IterCTraffic = 0;
+    IterTraffic = (!bLast && bTrafficRoute && Traffic != None && Traffic.bReady && Traffic.bRoute && Pawn != None);
+    if (IterTraffic)
+    {
+        if (Goal != None)
+            IterGoalPos = Goal.Location;
+        else
+            IterGoalPos = Dest;
+        IterTraffic = (VSize(IterGoalPos - Pawn.Location) > 1200.0);
+    }
+    if (IterTraffic)
+        Traffic.CntRoute++;
     for (IterPass = 0; IterPass < 4; IterPass++)
     {
         IterBlocked.Length = 0;
@@ -2085,6 +2144,16 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest, optional bool bLa
             IterCSurvey = IterBlocked.Length - IterB0;
             class'Path_AvoidClosedDoors'.static.AvoidClosedDoors(Pawn, true);
         }
+        IterCTraffic = 0;
+        if (IterTraffic)
+        {
+            IterCTraffic = TrafficEdgesBlock(IterBlocked);
+            if (IterCTraffic > 0 && !IterCounted)
+            {
+                Traffic.CntRouteBlocked++;
+                IterCounted = true;
+            }
+        }
         FollowPlanBegin();
         NavCountSearch();
         if (Goal != None)
@@ -2109,6 +2178,29 @@ function Actor FollowFindWalkablePath(Actor Goal, vector Dest, optional bool bLa
             }
         }
         NavBlockRestore(IterBlocked);
+        if (IterTraffic)
+        {
+            if (IterFirst != None)
+            {
+                if (IterCTraffic > 0)
+                {
+                    Traffic.CntRouteFound++;
+                    EchelonLog("TRAFFIC_ROUTE result=found blocked=" $ string(IterCTraffic) $ " goal=" $ FollowGoalText());
+                }
+                IterTraffic = false;
+            }
+            else
+            {
+                if (IterCTraffic > 0)
+                {
+                    Traffic.CntRouteFall++;
+                    EchelonLog("TRAFFIC_ROUTE result=fallback blocked=" $ string(IterCTraffic) $ " goal=" $ FollowGoalText());
+                }
+                IterTraffic = false;
+                IterPass--;
+                continue;
+            }
+        }
         if (IterFirst == None)
         {
             if (IterStrict && !bLast && MapData != None && MapData.bUsable && MapData.bDone && IterSurveyLevel < 3)
