@@ -188,6 +188,8 @@ var() config bool bNavV2;                     // nav redesign Stage A: route poi
 var transient bool bNavV2Now;                 // bNavV2 after the ?NavV2= option
 var() config bool bLookV2;                     // look direction rework (bot-look-direction): eased route-following view; off by default (a config bool is false when absent). ?LookV2=1/0 overrides for one match
 var transient bool bLookV2Now;                 // bLookV2 after the ?LookV2= option
+var() config bool bLookDirLog;                 // look-direction log (T-98): logs LOOK_DIR_MIS / LOOK_DIR_CORNER lines; off by default. ?LookDirLog=1/0 overrides for one match
+var transient bool bLookDirLogNow;             // bLookDirLog after the ?LookDirLog= option
 var() config bool bFollowOwnsMove;                // follow-owns-move (T-37): while a bot is in FollowingLeader the follow mover is the only mover (the squad-slot MoveToX callers are skipped); on by default (FollowOwnConfigVer < 1 switches it on once; a config bool is false when absent). ?FollowOwn=1/0 overrides for one match
 var() config int FollowOwnConfigVer;             // 0 = bFollowOwnsMove default never written; 1 = written once (separate from ConfigVer)
 var transient bool bFollowOwnsMoveNow;           // bFollowOwnsMove after the ?FollowOwn= option
@@ -1298,6 +1300,11 @@ function InitMutator(string Options, out string ErrorMessage)
     {
         bLookV2Now = class'GameInfo'.static.GetIntOption(Options, "LookV2", 0) != 0;
     }
+    bLookDirLogNow = bLookDirLog;
+    if (class'GameInfo'.static.HasOption(Options, "LookDirLog"))
+    {
+        bLookDirLogNow = class'GameInfo'.static.GetIntOption(Options, "LookDirLog", 0) != 0;
+    }
     bFollowOwnsMoveNow = bFollowOwnsMove;
     if (class'GameInfo'.static.HasOption(Options, "FollowOwn"))
     {
@@ -1333,7 +1340,7 @@ function InitMutator(string Options, out string ErrorMessage)
         TrafficModeNow = 1;
     }
     EchelonLog("TRAFFIC_CONFIG mode=" $ string(TrafficModeNow) $ " route=" $ string(TrafficRouteNow));
-    EchelonLog("LOOK_CONFIG lookv2=" $ string(bLookV2Now));
+    EchelonLog("LOOK_CONFIG lookv2=" $ string(bLookV2Now) $ " lookdirlog=" $ string(bLookDirLogNow));
     bShopFixNow = true;
     if (class'GameInfo'.static.HasOption(Options, "ShopFix"))
     {
