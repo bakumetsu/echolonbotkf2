@@ -409,9 +409,8 @@ var float HeadlessAvoidDist;       // detect radius in uu
 var float LastZedSwitchTime;
 var float LastZedPickLog;
 var array<Pawn> ZedSeenList;
-var float HardOverrideDist;
-var float HardOverrideGap;
 var float HeadlessKeepDist;        // minimum safe distance in uu
+var float LastZedSkipLog;
 var bool bAllowHeadlessPick;
 var bool bHeadlessBurst;
 var float HeadlessBurstTime;
@@ -1222,22 +1221,38 @@ function bool IsCloseMeleeThreat(Pawn Z)
     return true;
 }
 
+function ZedSkipLog(Pawn Other, string Why, float BaseOther, float BaseEnemy)
+{
+    local float Now;
+    Now = WorldInfo.TimeSeconds;
+    if (Now - LastZedSkipLog < 1.0)
+        return;
+    LastZedSkipLog = Now;
+    EchelonLog("ZED_OVERRIDE_SKIP zed=" $ string(Other.Class.Name) $ " dist=" $ string(int(VSize(Other.Location - Pawn.Location))) $ " why=" $ Why $ " incumbent=" $ string(Enemy.Class.Name) $ " base_new=" $ string(int(BaseOther)) $ " base_old=" $ string(int(BaseEnemy)));
+}
+
 function bool ZedHardOverride(Pawn Other)
 {
     local float BaseOther;
     local float BaseEnemy;
     if (mut == None || !mut.bZedTargetingNow)
         return false;
-    if (WorldInfo.TimeSeconds - LastZedSwitchTime < HardOverrideGap)
-        return false;
-    if (VSize(Other.Location - Pawn.Location) > HardOverrideDist)
+    if (VSize(Other.Location - Pawn.Location) > mut.ZedHardOverrideDist)
         return false;
     if (!Other.IsA('KFPawn_ZedSiren') && !Other.IsA('KFPawn_ZedHusk') && !IsCloseMeleeThreat(Other))
         return false;
     BaseOther = GetEnemyThreatBase(Other);
     BaseEnemy = GetEnemyThreatBase(Enemy);
-    if (BaseOther < BaseEnemy)
+    if (WorldInfo.TimeSeconds - LastZedSwitchTime < mut.ZedHardOverrideGap)
+    {
+        ZedSkipLog(Other, "gap", BaseOther, BaseEnemy);
         return false;
+    }
+    if (BaseOther < BaseEnemy)
+    {
+        ZedSkipLog(Other, "base", BaseOther, BaseEnemy);
+        return false;
+    }
     return true;
 }
 
@@ -1269,7 +1284,7 @@ function ZedPickLog(Pawn Prev, bool bOverride)
         RunnerScore = int(GetEnemyThreat(Prev));
     }
     Score = int(GetEnemyThreat(Enemy));
-    EchelonLog("ZED_PICK zed=" $ string(Enemy.Class.Name) $ " score=" $ string(Score) $ " runner=" $ RunnerStr $ " runner_score=" $ string(RunnerScore) $ " reason=" $ Reason);
+    EchelonLog("ZED_PICK zed=" $ string(Enemy.Class.Name) $ " score=" $ string(Score) $ " dist=" $ string(int(VSize(Enemy.Location - Pawn.Location))) $ " runner=" $ RunnerStr $ " runner_score=" $ string(RunnerScore) $ " reason=" $ Reason);
 }
 
 function NoteZedSeen(Pawn P)
@@ -7754,8 +7769,7 @@ defaultproperties
     LookSweepAmp=20.0
     LookSweepPeriod=5.0
     LookAheadDist=150.0
-    HardOverrideDist=400.0
-    HardOverrideGap=2.0
+    // D-11 distances are config keys on EcholonMut (ZedHardOverrideDist and the other Zed* keys)
     HeadlessAvoidDist=150.0
     HeadlessKeepDist=100.0
     RetreatMaxDist=750.0

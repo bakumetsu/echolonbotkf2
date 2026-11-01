@@ -196,6 +196,10 @@ var() config int FollowOwnConfigVer;             // 0 = bFollowOwnsMove default 
 var() config bool bZedTargeting;
 var() config int ZedTargetConfigVer;
 // Transient mirror of bZedTargeting for the current match (may be overridden by ?ZedTarget).
+// D-11: Zed hard-override distance (uu), tuned without a compile
+var() config float ZedHardOverrideDist;
+// D-11: Zed hard-override gap (seconds), tuned without a compile
+var() config float ZedHardOverrideGap;
 var transient bool bZedTargetingNow;
 var transient bool bFollowOwnsMoveNow;           // bFollowOwnsMove after the ?FollowOwn= option
 var config string _Separator1;
@@ -576,7 +580,16 @@ function PostBeginPlay()
         ZedTargetConfigVer = 1;
         SaveConfig();
     }
-    // A zone value cleared by hand reads 0: use the built-in default.
+    if (ZedTargetConfigVer < 2)
+    {
+        ZedHardOverrideDist = 400.0;
+        ZedHardOverrideGap = 2.0;
+        ZedTargetConfigVer = 2;
+        SaveConfig();
+    }
+    if (ZedHardOverrideDist <= 0.0) ZedHardOverrideDist = 400.0;
+    if (ZedHardOverrideGap < 0.0) ZedHardOverrideGap = 2.0;
+    if (ZedHeadlessAvoidDist <= 0.0)    if (ZedHeadlessKeepDist <= 0.0)    if (ZedHeadlessFinishMin <= 0.0)    // A zone value cleared by hand reads 0: use the built-in default.
     if (ZoneHoldBase < 0.0)
         ZoneHoldBase = 40.0;
     if (ZoneHoldPerZed < 0.0)
