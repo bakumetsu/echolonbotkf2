@@ -219,6 +219,7 @@ var() config float ZedFreeNearMelee;
 var() config int ZedOverwhelmCount;
 var transient EcholonZedCoord ZedCoord;
 var transient bool bZedTargetingNow;
+var transient bool bZedCoordShadowNow;
 var transient bool bFollowOwnsMoveNow;           // bFollowOwnsMove after the ?FollowOwn= option
 var config string _Separator1;
 var() config byte NumBots;
@@ -1336,7 +1337,7 @@ function RemoteShopSweep()
 // D-23 phase 1: shadow-mode coordinator, computes and logs the per-fireteam plan; bots do not act on it.
 function ZedRoleTick()
 {
-    if (!bZedTargetingNow)
+    if (!bZedTargetingNow && !bZedCoordShadowNow)
         return;
     if (ZedCoord == None)
         ZedCoord = new(self) class'EcholonZedCoord';
@@ -1420,7 +1421,11 @@ function InitMutator(string Options, out string ErrorMessage)
         bZedTargetingNow = class'GameInfo'.static.GetIntOption(Options, "ZedTarget", 0) != 0;
     }
     EchelonLog("ZEDTARGET_CONFIG zedtarget=" $ string(bZedTargetingNow) $ " rows=" $ string(class'EcholonZedProfile'.static.RowCount()));
-    if (bZedTargetingNow)
+    bZedCoordShadowNow = false;
+    if (class'GameInfo'.static.HasOption(Options, "ZedCoordShadow"))
+        bZedCoordShadowNow = class'GameInfo'.static.GetIntOption(Options, "ZedCoordShadow", 0) != 0;
+    EchelonLog("ZEDCOORD_CONFIG shadow=" $ string(bZedCoordShadowNow) $ " targeting=" $ string(bZedTargetingNow));
+    if (bZedTargetingNow || bZedCoordShadowNow)
         SetTimer(0.5, true, 'ZedRoleTick');
     TrafficModeNow = TrafficMode;
     if (class'GameInfo'.static.HasOption(Options, "Traffic"))
