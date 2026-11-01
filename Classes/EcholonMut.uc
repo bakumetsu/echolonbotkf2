@@ -200,19 +200,10 @@ var() config int ZedTargetConfigVer;
 var() config float ZedHardOverrideDist;
 // D-11: Zed hard-override gap (seconds), tuned without a compile
 var() config float ZedHardOverrideGap;
-<<<<<<< HEAD
-=======
-// D-11: Zed headless avoid distance (uu), tuned without a compile
-var() config float ZedHeadlessAvoidDist;
-// D-11: Zed headless keep distance (uu), tuned without a compile
-var() config float ZedHeadlessKeepDist;
-// D-11: Zed headless finish minimum (uu), tuned without a compile
-var() config float ZedHeadlessFinishMin;
 // D-11: periodic re-pick interval (seconds) for far Siren/Husk
 var() config float ZedRepickSecs;
 // D-11: eased distance weight for Siren/Husk only; tuned without a compile; 0.5 = same distance weight as every other zed
 var() config float ZedSpecialDistWeight;
->>>>>>> c5f20da (feat(combat): re-pick a far Siren or Husk and switch the zed switch off by default)
 var transient bool bZedTargetingNow;
 var transient bool bFollowOwnsMoveNow;           // bFollowOwnsMove after the ?FollowOwn= option
 var config string _Separator1;
