@@ -14,12 +14,13 @@ var EcholonMut Mut;
 var array<EcholonBot> Elig;
 var array<int> Order;
 var array<KFPawn_Monster> ScanBig; var array<KFPawn_Monster> ScanCaster;
-var int TickOps, TickCount, TickMaxOps; var float WindowStart;
+var int TickOps, TickCount, TickMaxOps, TotalOps; var float WindowStart;
 
 function Tick(EcholonMut M)
 {
-    local int i, j, NewLen;
+    local int i, j, k, NewLen;
     local KFPawn_Monster Z;
+    local EcholonBot B;
     local float T;
     local bool Found;
 
@@ -43,22 +44,26 @@ function Tick(EcholonMut M)
 
     for (i = 0; i < NewLen; i++)
     {
-        if (M.Fireteams[i].Anchor != None)
+        for (k = 0; k < M.Fireteams[i].Members.Length; k++)
         {
-            foreach M.WorldInfo.AllPawns(class'KFPawn_Monster', Z, M.Fireteams[i].Anchor.Location, M.ZedScanDist)
+            B = M.Fireteams[i].Members[k];
+            if (B != None && B.Pawn != None && B.Pawn.Health > 0)
             {
-                TickOps++;
-                Found = false;
-                for (j = 0; j < ScanBig.Length; j++)
-                    if (ScanBig[j] == Z) { Found = true; break; }
-                for (j = 0; j < ScanCaster.Length; j++)
-                    if (ScanCaster[j] == Z) { Found = true; break; }
-                if (!Found)
+                foreach M.WorldInfo.AllPawns(class'KFPawn_Monster', Z, B.Pawn.Location, M.ZedScanDist)
                 {
-                    if (Z.IsA('KFPawn_ZedFleshpound') || Z.IsA('KFPawn_ZedFleshpoundMini') || Z.IsA('KFPawn_ZedScrake'))
-                        ScanBig[ScanBig.Length] = Z;
-                    else if ((Z.IsA('KFPawn_ZedSiren') || Z.IsA('KFPawn_ZedHusk')) && !Z.bIsHeadless)
-                        ScanCaster[ScanCaster.Length] = Z;
+                    TickOps++;
+                    Found = false;
+                    for (j = 0; j < ScanBig.Length; j++)
+                        if (ScanBig[j] == Z) { Found = true; break; }
+                    for (j = 0; j < ScanCaster.Length; j++)
+                        if (ScanCaster[j] == Z) { Found = true; break; }
+                    if (!Found)
+                    {
+                        if (Z.IsA('KFPawn_ZedFleshpound') || Z.IsA('KFPawn_ZedFleshpoundMini') || Z.IsA('KFPawn_ZedScrake'))
+                            ScanBig[ScanBig.Length] = Z;
+                        else if ((Z.IsA('KFPawn_ZedSiren') || Z.IsA('KFPawn_ZedHusk')) && !Z.bIsHeadless)
+                            ScanCaster[ScanCaster.Length] = Z;
+                    }
                 }
             }
         }
@@ -81,12 +86,14 @@ function Tick(EcholonMut M)
         }
         TickCount++;
         if (TickOps > TickMaxOps) TickMaxOps = TickOps;
+        TotalOps += TickOps;
         if (T - WindowStart >= 30.0)
         {
-            Mut.EchelonLog("ZED_TICK avg_us=" @ ((TickOps * 3) / 2) @ " max_ops=" @ TickMaxOps @ " ticks=" @ TickCount @ " est=1");
+            Mut.EchelonLog("ZED_TICK avg_us=" $ string(int(float(TotalOps) * 1.5 / float(Max(TickCount,1)))) $ " max_ops=" $ string(TickMaxOps) $ " ticks=" $ string(TickCount) $ " est=1");
             WindowStart = T;
             TickCount = 0;
             TickMaxOps = 0;
+            TotalOps = 0;
         }
         return;
     }
@@ -120,12 +127,14 @@ function Tick(EcholonMut M)
 
     TickCount++;
     if (TickOps > TickMaxOps) TickMaxOps = TickOps;
+    TotalOps += TickOps;
     if (T - WindowStart >= 30.0)
     {
-        Mut.EchelonLog("ZED_TICK avg_us=" @ ((TickOps * 3) / 2) @ " max_ops=" @ TickMaxOps @ " ticks=" @ TickCount @ " est=1");
+        Mut.EchelonLog("ZED_TICK avg_us=" $ string(int(float(TotalOps) * 1.5 / float(Max(TickCount,1)))) $ " max_ops=" $ string(TickMaxOps) $ " ticks=" $ string(TickCount) $ " est=1");
         WindowStart = T;
         TickCount = 0;
         TickMaxOps = 0;
+        TotalOps = 0;
     }
 }
 
@@ -222,6 +231,7 @@ final function UpdateTracks()
         if (ti < 0)
         {
             ti = Cur.Tracks.Length;
+            Cur.Tracks.Length = ti + 1;
             Cur.Tracks[ti].Z = Z;
             Cur.Tracks[ti].Band = BAND_FAR;
             Cur.Tracks[ti].BeyondSince = 0;
@@ -287,12 +297,7 @@ final function UpdateTracks()
             Dead[Dead.Length] = i;
     }
     for (i = Dead.Length - 1; i >= 0; i--)
-    {
-        ti = Dead[i];
-        Cur.Tracks.Length = Cur.Tracks.Length - 1;
-        if (ti < Cur.Tracks.Length)
-            Cur.Tracks[ti] = Cur.Tracks[Cur.Tracks.Length];
-    }
+        Cur.Tracks.Remove(Dead[i], 1);
 }
 
 final function BuildOrder()
@@ -499,6 +504,11 @@ final function ProcessSlots()
 	local bool bFound, bIsLead, bFocusOK, bInElig, bWasAnchor;
 	local array<int> ZedSeq;
 
+	// Prune expired no-retake entries
+	for (i = Cur.NoRetakes.Length - 1; i >= 0; i--)
+		if (Cur.NoRetakes[i].Until <= Now)
+			Cur.NoRetakes.Remove(i, 1);
+
 	// --- Step A: release invalid slots ---
 	for (i = 0; i < Cur.SlotBots.Length; i++)
 	{
@@ -674,6 +684,14 @@ final function ProcessSlots()
 			}
 		}
 	}
+
+	// Compact slot arrays
+	for (i = Cur.SlotBots.Length - 1; i >= 0; i--)
+		if (Cur.SlotBots[i] == None)
+		{
+			Cur.SlotBots.Remove(i, 1);
+			Cur.SlotZeds.Remove(i, 1);
+		}
 }
 
 final function ReleaseSlot(int SlotIdx, string Why)
@@ -686,11 +704,13 @@ final function ReleaseSlot(int SlotIdx, string Why)
 	Z = Cur.SlotZeds[SlotIdx];
 	if (B == None) return;
 	LogRole(B, Z, "release", Why);
-	// Add no-retake entry
-	NR.B = B;
-	NR.Z = Z;
-	NR.Until = Now + Mut.ZedQuotaHoldSec;
-	Cur.NoRetakes[Cur.NoRetakes.Length] = NR;
+	if (Why == "lost_los" || Why == "not_engaged" || Why == "hurt")
+	{
+		NR.B = B;
+		NR.Z = Z;
+		NR.Until = Now + 5.0;
+		Cur.NoRetakes[Cur.NoRetakes.Length] = NR;
+	}
 	Cur.SlotBots[SlotIdx] = None;
 	Cur.SlotZeds[SlotIdx] = None;
 }
