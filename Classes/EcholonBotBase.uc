@@ -1132,6 +1132,52 @@ final function float GetSpecialZedFactor(Pawn Other)
     return 1.0;
 }
 
+// D-11: table-driven zed priority; falls back to legacy GetSpecialZedFactor when switch off or zed unlisted.
+final function float GetZedPriority(Pawn Other)
+{
+    local KFPawn_Monster M;
+    local float P;
+    M = KFPawn_Monster(Other);
+    if (M == None)
+        return 1.0;
+    if (mut == None || !mut.bZedTargetingNow)
+        return GetSpecialZedFactor(Other);
+    P = class'EcholonZedProfile'.static.GetPriority(Other);
+    if (P < 0.0)
+        P = GetSpecialZedFactor(Other);
+    return P + PerkZedPriorityBonus(Other);
+}
+
+// D-12 overrides per perk; the base returns today's value.
+function float PerkZedPriorityBonus(Pawn Z)
+{
+    return 0.0;
+}
+
+function PerkZedBand(Pawn Z, out float BandMin, out float BandMax)
+{
+}
+
+function bool PerkAllowBash(Pawn Z, bool bProfileAllows)
+{
+    return bProfileAllows;
+}
+
+function class<KFWeapon> PerkWeaponForZed(Pawn Z)
+{
+    return None;
+}
+
+function name PerkAimBone(Pawn Z, name ProfileBone)
+{
+    return ProfileBone;
+}
+
+final function bool ZedAllowsBash(Pawn Z)
+{
+    return PerkAllowBash(Z, class'EcholonZedProfile'.static.GetAllowBash(Z));
+}
+
 function float GetEnemyThreat(Pawn Other)
 {
     local float V;
@@ -1143,7 +1189,7 @@ function float GetEnemyThreat(Pawn Other)
     }
     // Special zeds first: the factor scales the base score before the distance penalty, so a Siren or
     // Fleshpound still wins over a closer Clot but a far one does not pull a bot across the room.
-    V *= GetSpecialZedFactor(Other);
+    V *= GetZedPriority(Other);
     V -= (VSize(Other.Location - Pawn.Location) / 2.0);
     if (Other == Enemy)
     {
@@ -7042,6 +7088,8 @@ final function bool IsNoBashZed(Pawn P)
     M = KFPawn_Monster(P);
     if (M == None)
         return false;
+    if (mut != None && mut.bZedTargetingNow)
+        return (M.bLargeZed || !ZedAllowsBash(P));
     if (M.bLargeZed || M.IsA('KFPawn_ZedHusk') || M.IsA('KFPawn_ZedSiren') || M.IsA('KFPawn_ZedBloat') || M.IsA('KFPawn_ZedScrake') || M.IsA('KFPawn_ZedFleshpound') || M.IsA('KFPawn_ZedFleshpoundMini') || M.IsA('KFPawn_ZedHans') || M.IsA('KFPawn_ZedPatriarch') || M.IsA('KFPawn_ZedMatriarch') || M.IsA('KFPawn_ZedFleshpoundKing') || M.IsA('KFPawn_ZedBloatKing'))
         return true;
     return false;

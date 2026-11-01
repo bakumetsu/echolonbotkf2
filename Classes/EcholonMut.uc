@@ -192,6 +192,11 @@ var() config bool bLookDirLog;                 // look-direction log (T-98): log
 var transient bool bLookDirLogNow;             // bLookDirLog after the ?LookDirLog= option
 var() config bool bFollowOwnsMove;                // follow-owns-move (T-37): while a bot is in FollowingLeader the follow mover is the only mover (the squad-slot MoveToX callers are skipped); on by default (FollowOwnConfigVer < 1 switches it on once; a config bool is false when absent). ?FollowOwn=1/0 overrides for one match
 var() config int FollowOwnConfigVer;             // 0 = bFollowOwnsMove default never written; 1 = written once (separate from ConfigVer)
+// D-11 special-zed targeting switch; on by default; ?ZedTarget=1/0 overrides for one match.
+var() config bool bZedTargeting;
+var() config int ZedTargetConfigVer;
+// Transient mirror of bZedTargeting for the current match (may be overridden by ?ZedTarget).
+var transient bool bZedTargetingNow;
 var transient bool bFollowOwnsMoveNow;           // bFollowOwnsMove after the ?FollowOwn= option
 var config string _Separator1;
 var() config byte NumBots;
@@ -563,6 +568,14 @@ function PostBeginPlay()
     if (HeadlessKeepAvoidDist <= 0.0) HeadlessKeepAvoidDist = 300.0;
     if (HeadlessKeepKeepDist <= 0.0) HeadlessKeepKeepDist = 200.0;
     if (HeadlessKeepFinishMin <= 0.0) HeadlessKeepFinishMin = 300.0;
+    // D-11: write zed profile defaults to config on first run; stamp prevents rewrite until a later default change bumps this.
+    if (ZedTargetConfigVer < 1)
+    {
+        bZedTargeting = true;
+        class'EcholonZedProfile'.static.WriteDefaults();
+        ZedTargetConfigVer = 1;
+        SaveConfig();
+    }
     // A zone value cleared by hand reads 0: use the built-in default.
     if (ZoneHoldBase < 0.0)
         ZoneHoldBase = 40.0;
@@ -1317,6 +1330,13 @@ function InitMutator(string Options, out string ErrorMessage)
         bHeadlessKeepNow = class'GameInfo'.static.GetIntOption(Options, "HeadlessKeep", 0) != 0;
     }
     EchelonLog("HEADLESSKEEP_CONFIG headlesskeep=" $ string(bHeadlessKeepNow) $ " avoid=" $ string(int(HeadlessKeepAvoidDist)) $ " keep=" $ string(int(HeadlessKeepKeepDist)) $ " finish=" $ string(int(HeadlessKeepFinishMin)));
+    // D-11: mirror the zed targeting switch; ?ZedTarget=1/0 overrides for one match.
+    bZedTargetingNow = bZedTargeting;
+    if (class'GameInfo'.static.HasOption(Options, "ZedTarget"))
+    {
+        bZedTargetingNow = class'GameInfo'.static.GetIntOption(Options, "ZedTarget", 0) != 0;
+    }
+    EchelonLog("ZEDTARGET_CONFIG zedtarget=" $ string(bZedTargetingNow) $ " rows=" $ string(class'EcholonZedProfile'.static.RowCount()));
     TrafficModeNow = TrafficMode;
     if (class'GameInfo'.static.HasOption(Options, "Traffic"))
     {
