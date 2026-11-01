@@ -551,7 +551,7 @@ final function ProcessSlots()
 	}
 
 	// --- Step C: per-zed fill / release with focus rule ---
-	ZedSeq = [];
+	ZedSeq.Length = 0;
 	if (Cur.LeadZed != None && TrackIndex(Cur.LeadZed) >= 0)
 	{
 		ZedSeq[0] = TrackIndex(Cur.LeadZed);
@@ -757,8 +757,8 @@ final function LogRole(EcholonBot B, Pawn Z, string Role, string Why)
 	lQuota = QuotaFor(lBand, CurN);
 	if (Z != None)
 	{
-		zedName = Z.Class.Name;
-		zid = Z.Name;
+		zedName = string(Z.Class.Name);
+		zid = string(Z.Name);
 	}
 	else
 	{
@@ -767,7 +767,7 @@ final function LogRole(EcholonBot B, Pawn Z, string Role, string Why)
 	}
 	if (B != None && B.Pawn != None && B.Pawn.Weapon != None)
 	{
-		wepName = B.Pawn.Weapon.Class.Name;
+		wepName = string(B.Pawn.Weapon.Class.Name);
 		lRng = int(B.GetWeaponEffectiveRangeUU(KFWeapon(B.Pawn.Weapon)));
 	}
 	else
@@ -1023,7 +1023,7 @@ final function LogQuota()
         Empty = 0;
 
     if (Cur.LeadZed != None)
-        LeadStr = Cur.LeadZed.Name;
+        LeadStr = string(Cur.LeadZed.Name);
     else
         LeadStr = "None";
     if (Cur.FreeBot != None)
