@@ -205,6 +205,19 @@ var() config float ZedRepickSecs;
 // D-11: eased distance weight for Siren/Husk only; tuned without a compile; 0.5 = same distance weight as every other zed
 var() config float ZedSpecialDistWeight;
 var() config float ZedSelfDefenseDist; // self-defence range (uu)
+// D-23 coordinator keys (uu unless noted); defaults written once by stamp 6
+var() config float ZedBandFar;
+var() config float ZedBandMid;
+var() config float ZedBandClose;
+var() config float ZedBandHyst;
+var() config float ZedQuotaHoldSec;
+var() config float ZedHurtHealthPct;
+var() config float ZedHunterDist;
+var() config float ZedScanDist;
+var() config float ZedFreeNearDist;
+var() config float ZedFreeNearMelee;
+var() config int ZedOverwhelmCount;
+var transient EcholonZedCoord ZedCoord;
 var transient bool bZedTargetingNow;
 var transient bool bFollowOwnsMoveNow;           // bFollowOwnsMove after the ?FollowOwn= option
 var config string _Separator1;
@@ -606,6 +619,31 @@ function PostBeginPlay()
         ZedTargetConfigVer = 4;
         SaveConfig();
     }
+    if (ZedTargetConfigVer < 6)
+    {
+        ZedBandFar = 1000.0;
+        ZedBandMid = 500.0;
+        ZedBandClose = 250.0;
+        ZedBandHyst = 100.0;
+        ZedQuotaHoldSec = 1.5;
+        ZedHurtHealthPct = 40.0;
+        ZedHunterDist = 1500.0;
+        ZedScanDist = 2000.0;
+        ZedFreeNearDist = 500.0;
+        ZedFreeNearMelee = 250.0;
+        ZedOverwhelmCount = 2;
+        ZedTargetConfigVer = 6;
+        SaveConfig();
+    }
+    if (ZedBandFar <= 0.0) ZedBandFar = 1000.0;
+    if (ZedBandMid <= 0.0) ZedBandMid = 500.0;
+    if (ZedBandClose <= 0.0) ZedBandClose = 250.0;
+    if (ZedBandHyst <= 0.0) ZedBandHyst = 100.0;
+    if (ZedQuotaHoldSec <= 0.0) ZedQuotaHoldSec = 1.5;
+    if (ZedHurtHealthPct <= 0.0) ZedHurtHealthPct = 40.0;
+    if (ZedHunterDist <= 0.0) ZedHunterDist = 1500.0;
+    if (ZedScanDist <= 0.0) ZedScanDist = 2000.0;
+    if (ZedOverwhelmCount <= 0) ZedOverwhelmCount = 2;
     if (ZedSelfDefenseDist <= 0.0) ZedSelfDefenseDist = 120.0;
     if (ZedHardOverrideDist <= 0.0) ZedHardOverrideDist = 400.0;
     if (ZedRepickSecs <= 0.0) ZedRepickSecs = 0.8;
@@ -1295,6 +1333,16 @@ function RemoteShopSweep()
     }
 }
 
+// D-23 phase 1: shadow-mode coordinator, computes and logs the per-fireteam plan; bots do not act on it.
+function ZedRoleTick()
+{
+    if (!bZedTargetingNow)
+        return;
+    if (ZedCoord == None)
+        ZedCoord = new(self) class'EcholonZedCoord';
+    ZedCoord.Tick(self);
+}
+
 function InitMutator(string Options, out string ErrorMessage)
 {
     super.InitMutator(Options, ErrorMessage);
@@ -1372,6 +1420,8 @@ function InitMutator(string Options, out string ErrorMessage)
         bZedTargetingNow = class'GameInfo'.static.GetIntOption(Options, "ZedTarget", 0) != 0;
     }
     EchelonLog("ZEDTARGET_CONFIG zedtarget=" $ string(bZedTargetingNow) $ " rows=" $ string(class'EcholonZedProfile'.static.RowCount()));
+    if (bZedTargetingNow)
+        SetTimer(0.5, true, 'ZedRoleTick');
     TrafficModeNow = TrafficMode;
     if (class'GameInfo'.static.HasOption(Options, "Traffic"))
     {
