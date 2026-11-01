@@ -850,7 +850,7 @@ final function ProcessFreeAndCaster()
                 nU = Unslotted.Length;
                 for (i = 1; i < nU; i++)
                 {
-                    if (Unslotted[i].Name < BestBot.Name)
+                    if (string(Unslotted[i].Name) < string(BestBot.Name))
                         BestBot = Unslotted[i];
                 }
             }
@@ -858,7 +858,7 @@ final function ProcessFreeAndCaster()
             {
                 Cur.FreeBot = BestBot;
                 Cur.FreeChangeTime = Now;
-                Mut.EchelonLog("ZED_ROLE team=" + string(CurTeam) + " bot=" + BestBot.LogTag() + " zed=None zid=None role=free band=-1 dist=-1 quota=-1 budget=" + string(CurBudget) + " n=" + string(CurN) + " why=assign wep=None rng=-1");
+                Mut.EchelonLog("ZED_ROLE team=" $ string(CurTeam) $ " bot=" $ BestBot.LogTag() $ " zed=None zid=None role=free band=-1 dist=-1 quota=-1 budget=" $ string(CurBudget) $ " n=" $ string(CurN) $ " why=assign wep=None rng=-1");
             }
             else
             {
@@ -958,7 +958,7 @@ final function ProcessFreeAndCaster()
                     Cur.CasterBot = BestBot;
                     Cur.CasterZed = BestZed;
                     Cur.CasterChangeTime = Now;
-                    Mut.EchelonLog("ZED_ROLE team=" + string(CurTeam) + " bot=" + BestBot.LogTag() + " zed=" + BestZed.Class.Name + " zid=" + BestZed.Name + " role=caster band=-1 dist=" + string(int(BestDist)) + " quota=-1 budget=" + string(CurBudget) + " n=" + string(CurN) + " why=assign wep=" + BestBot.Pawn.Weapon.Class.Name + " rng=" + string(int(BestBot.GetWeaponEffectiveRangeUU(KFWeapon(BestBot.Pawn.Weapon)))) + " los=n/a");
+                    Mut.EchelonLog("ZED_ROLE team=" $ string(CurTeam) $ " bot=" $ BestBot.LogTag() $ " zed=" $ BestZed.Class.Name $ " zid=" $ BestZed.Name $ " role=caster band=-1 dist=" $ string(int(BestDist)) $ " quota=-1 budget=" $ string(CurBudget) $ " n=" $ string(CurN) $ " why=assign wep=" $ BestBot.Pawn.Weapon.Class.Name $ " rng=" $ string(int(BestBot.GetWeaponEffectiveRangeUU(KFWeapon(BestBot.Pawn.Weapon)))) $ " los=n/a");
                 }
             }
             Cur.CasterChangeTime = Now;
@@ -1014,8 +1014,8 @@ final function LogQuota()
         else
             nWanted = nWanted + zQuota;
         if (ZedList != "")
-            ZedList = ZedList + ",";
-        ZedList = ZedList + Z.Class.Name + ":" + string(Cur.Tracks[i].Band) + ":" + string(zQuota) + ":" + string(Assigned);
+            ZedList = ZedList $ ",";
+        ZedList = ZedList $ Z.Class.Name $ ":" $ string(Cur.Tracks[i].Band) $ ":" $ string(zQuota) $ ":" $ string(Assigned);
     }
 
     Empty = nWanted - TotalAssigned;
@@ -1039,7 +1039,7 @@ final function LogQuota()
     else
         OhInt = "0";
 
-    Mut.EchelonLog("ZED_QUOTA team=" + string(CurTeam) + " n=" + string(CurN) + " budget=" + string(CurBudget) + " bigs=" + string(BigCount) + " zeds=" + ZedList + " assigned=" + string(TotalAssigned) + " empty=" + string(Empty) + " engaged=0 lead=" + LeadStr + " free=" + FreeStr + " caster=" + CasterStr + " overwhelmed=" + OhInt);
+    Mut.EchelonLog("ZED_QUOTA team=" $ string(CurTeam) $ " n=" $ string(CurN) $ " budget=" $ string(CurBudget) $ " bigs=" $ string(BigCount) $ " zeds=" $ ZedList $ " assigned=" $ string(TotalAssigned) $ " empty=" $ string(Empty) $ " engaged=0 lead=" $ LeadStr $ " free=" $ FreeStr $ " caster=" $ CasterStr $ " overwhelmed=" $ OhInt);
 }
 
 defaultproperties
