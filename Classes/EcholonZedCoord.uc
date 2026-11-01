@@ -277,26 +277,26 @@ final function UpdateTracks()
 
         curBand = Cur.Tracks[ti].Band;
 
-        if (natBand < curBand)
+        if (natBand > curBand)
         {
             // Moved closer: immediate
             Cur.Tracks[ti].Band = natBand;
             Cur.Tracks[ti].BeyondSince = 0;
         }
-        else if (natBand > curBand)
+        else if (natBand < curBand)
         {
             // Moved farther: hysteresis, drop one level at a time
             if (curBand == BAND_MELEE) hystBnd = Mut.ZedBandClose;
             else if (curBand == BAND_CLOSE) hystBnd = Mut.ZedBandMid;
             else hystBnd = Mut.ZedBandFar;
 
-            if (bestD > hystBnd)
+            if (bestD > hystBnd + Mut.ZedBandHyst)
             {
                 if (Cur.Tracks[ti].BeyondSince == 0)
                     Cur.Tracks[ti].BeyondSince = Now;
                 else if (Now - Cur.Tracks[ti].BeyondSince >= Mut.ZedQuotaHoldSec)
                 {
-                    Cur.Tracks[ti].Band = curBand + 1;
+                    Cur.Tracks[ti].Band = curBand - 1;
                     Cur.Tracks[ti].BeyondSince = 0;
                 }
             }
