@@ -1313,9 +1313,6 @@ function ZedPickLog(Pawn Prev, bool bOverride)
     local int Score;
     if (mut == None || !mut.bZedTargetingNow)
         return;
-    if (WorldInfo.TimeSeconds - LastZedPickLog < 1.0)
-        return;
-    LastZedPickLog = WorldInfo.TimeSeconds;
     if (bOverride && Enemy != None && (Enemy.IsA('KFPawn_ZedSiren') || Enemy.IsA('KFPawn_ZedHusk')))
         Reason = "override";
     else if (bOverride && IsCloseMeleeThreat(Enemy))
@@ -1324,6 +1321,9 @@ function ZedPickLog(Pawn Prev, bool bOverride)
         Reason = "normal";
     if (bRepickNow)
         Reason = "repick";
+    if (Reason == "normal" && !Enemy.IsA('KFPawn_ZedSiren') && !Enemy.IsA('KFPawn_ZedHusk') && WorldInfo.TimeSeconds - LastZedPickLog < 1.0)
+        return;
+    LastZedPickLog = WorldInfo.TimeSeconds;
     if (Prev == None || !Prev.IsAliveAndWell())
     {
         RunnerStr = "none";
