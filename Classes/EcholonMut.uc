@@ -192,7 +192,7 @@ var() config bool bLookDirLog;                 // look-direction log (T-98): log
 var transient bool bLookDirLogNow;             // bLookDirLog after the ?LookDirLog= option
 var() config bool bFollowOwnsMove;                // follow-owns-move (T-37): while a bot is in FollowingLeader the follow mover is the only mover (the squad-slot MoveToX callers are skipped); on by default (FollowOwnConfigVer < 1 switches it on once; a config bool is false when absent). ?FollowOwn=1/0 overrides for one match
 var() config int FollowOwnConfigVer;             // 0 = bFollowOwnsMove default never written; 1 = written once (separate from ConfigVer)
-// D-11 special-zed targeting switch; on by default; ?ZedTarget=1/0 overrides for one match.
+// D-11 special-zed targeting switch; off by default; ?ZedTarget=1/0 overrides for one match.
 var() config bool bZedTargeting;
 var() config int ZedTargetConfigVer;
 // Transient mirror of bZedTargeting for the current match (may be overridden by ?ZedTarget).
@@ -200,6 +200,19 @@ var() config int ZedTargetConfigVer;
 var() config float ZedHardOverrideDist;
 // D-11: Zed hard-override gap (seconds), tuned without a compile
 var() config float ZedHardOverrideGap;
+<<<<<<< HEAD
+=======
+// D-11: Zed headless avoid distance (uu), tuned without a compile
+var() config float ZedHeadlessAvoidDist;
+// D-11: Zed headless keep distance (uu), tuned without a compile
+var() config float ZedHeadlessKeepDist;
+// D-11: Zed headless finish minimum (uu), tuned without a compile
+var() config float ZedHeadlessFinishMin;
+// D-11: periodic re-pick interval (seconds) for far Siren/Husk
+var() config float ZedRepickSecs;
+// D-11: eased distance weight for Siren/Husk only; tuned without a compile; 0.5 = same distance weight as every other zed
+var() config float ZedSpecialDistWeight;
+>>>>>>> c5f20da (feat(combat): re-pick a far Siren or Husk and switch the zed switch off by default)
 var transient bool bZedTargetingNow;
 var transient bool bFollowOwnsMoveNow;           // bFollowOwnsMove after the ?FollowOwn= option
 var config string _Separator1;
@@ -575,7 +588,7 @@ function PostBeginPlay()
     // D-11: write zed profile defaults to config on first run; stamp prevents rewrite until a later default change bumps this.
     if (ZedTargetConfigVer < 1)
     {
-        bZedTargeting = true;
+        bZedTargeting = false;
         class'EcholonZedProfile'.static.WriteDefaults();
         ZedTargetConfigVer = 1;
         SaveConfig();
@@ -587,9 +600,19 @@ function PostBeginPlay()
         ZedTargetConfigVer = 2;
         SaveConfig();
     }
+    if (ZedTargetConfigVer < 3)
+    {
+        ZedRepickSecs = 0.8;
+        ZedSpecialDistWeight = 0.25;
+        bZedTargeting = false;
+        ZedTargetConfigVer = 3;
+        SaveConfig();
+    }
     if (ZedHardOverrideDist <= 0.0) ZedHardOverrideDist = 400.0;
+    if (ZedRepickSecs <= 0.0) ZedRepickSecs = 0.8;
+    if (ZedSpecialDistWeight <= 0.0) ZedSpecialDistWeight = 0.25;
     if (ZedHardOverrideGap < 0.0) ZedHardOverrideGap = 2.0;
-    if (ZedHeadlessAvoidDist <= 0.0)    if (ZedHeadlessKeepDist <= 0.0)    if (ZedHeadlessFinishMin <= 0.0)    // A zone value cleared by hand reads 0: use the built-in default.
+    // A zone value cleared by hand reads 0: use the built-in default.
     if (ZoneHoldBase < 0.0)
         ZoneHoldBase = 40.0;
     if (ZoneHoldPerZed < 0.0)

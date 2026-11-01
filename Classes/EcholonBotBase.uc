@@ -411,6 +411,7 @@ var float LastZedPickLog;
 var array<Pawn> ZedSeenList;
 var float HeadlessKeepDist;        // minimum safe distance in uu
 var float LastZedSkipLog;
+var bool bRepickNow;
 var bool bAllowHeadlessPick;
 var bool bHeadlessBurst;
 var float HeadlessBurstTime;
@@ -821,6 +822,10 @@ function Restart(bool bVehicleTransition)
     SetTimer(0.2 + (FRand() * 0.1), true, 'CheckGrabbed');
     SetTimer(SPRINT_TICK_INTERVAL + (FRand() * 0.05), true, 'SprintTick');
     SetTimer(0.25 + (FRand() * 0.05), true, 'HeadlessAvoidTick');
+    if (mut != None && mut.bZedTargetingNow)
+    {
+        SetTimer(mut.ZedRepickSecs + (FRand() * 0.05), true, 'ZedRepickTick');
+    }
     if (mut != None && mut.bNavTrace)
     {
         TraceLastLoc = Pawn.Location;
@@ -1221,6 +1226,43 @@ function bool IsCloseMeleeThreat(Pawn Z)
     return true;
 }
 
+function ZedRepickTick()
+{
+    local KFPawn_Monster Z;
+    local KFPawn_Monster M;
+
+    if (mut == None || !mut.bZedTargetingNow || Pawn == None || Pawn.Health <= 0)
+        return;
+    if (Enemy == None || !Enemy.IsAliveAndWell())
+        return;
+    M = KFPawn_Monster(Enemy);
+    if (M != None && M.bIsHeadless)
+        return;
+    if (Enemy.IsA('KFPawn_ZedSiren') || Enemy.IsA('KFPawn_ZedHusk'))
+        return;
+    if (WorldInfo.TimeSeconds - LastZedSwitchTime < mut.ZedHardOverrideGap)
+        return;
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', Z, Pawn.Location, ENEMY_SCAN_RADIUS)
+    {
+        if (!Z.IsAliveAndWell() || Z.bIsHeadless || Z == Enemy || (!Z.IsA('KFPawn_ZedSiren') && !Z.IsA('KFPawn_ZedHusk')))
+            continue;
+        if (GetEnemyThreat(Z) < GetEnemyThreat(Enemy))
+            continue;
+        if (IsCloseMeleeThreat(Enemy))
+        {
+            ZedSkipLog(Z, "close", GetEnemyThreatBase(Z), GetEnemyThreatBase(Enemy));
+            return;
+        }
+        if (FastTrace(Z.Location, Pawn.Location))
+        {
+            bRepickNow = true;
+            SetEnemy(Z, true);
+            bRepickNow = false;
+            return;
+        }
+    }
+}
+
 function ZedSkipLog(Pawn Other, string Why, float BaseOther, float BaseEnemy)
 {
     local float Now;
@@ -1273,6 +1315,8 @@ function ZedPickLog(Pawn Prev, bool bOverride)
         Reason = "close_threat";
     else
         Reason = "normal";
+    if (bRepickNow)
+        Reason = "repick";
     if (Prev == None || !Prev.IsAliveAndWell())
     {
         RunnerStr = "none";
@@ -1331,7 +1375,10 @@ function float GetEnemyThreatBase(Pawn Other)
     V *= GetZedPriority(Other);
     if (IsCloseMeleeThreat(Other))
         V *= 1.3;
-    V -= (VSize(Other.Location - Pawn.Location) / 2.0);
+    if (mut != None && mut.bZedTargetingNow && (Other.IsA('KFPawn_ZedSiren') || Other.IsA('KFPawn_ZedHusk')))
+        V -= VSize(Other.Location - Pawn.Location) * mut.ZedSpecialDistWeight;
+    else
+        V -= (VSize(Other.Location - Pawn.Location) / 2.0);
     return V;
 }
 
