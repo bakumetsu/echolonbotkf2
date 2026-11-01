@@ -6092,9 +6092,9 @@ function LookDirLogTick()
     }
 
     misLegsRaw = ((legsYaw - velYaw + 98304) & 65535) - 32768;
-    misLegsDeg = FAbs(misLegsRaw * 360.0 / 65536.0);
+    misLegsDeg = Abs(misLegsRaw * 360.0 / 65536.0);
     misAimRaw = ((aimYaw - velYaw + 98304) & 65535) - 32768;
-    misAimDeg = FAbs(misAimRaw * 360.0 / 65536.0);
+    misAimDeg = Abs(misAimRaw * 360.0 / 65536.0);
 
     if (Focus != None)
     {
