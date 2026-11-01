@@ -173,6 +173,12 @@ var transient int TrafficModeNow;               // TrafficMode after the ?Traffi
 var transient EcholonTraffic Traffic;           // shadow reservation table (None when TrafficModeNow is 0)
 var() config int TrafficRoute;                  // crowd-aware routing for long walks (needs the traffic table): 0 off, 1 on. ?TrafficRoute=0/1 overrides for one match
 var transient int TrafficRouteNow;              // TrafficRoute after the ?TrafficRoute= option
+var() config bool bHeadlessKeep;                // headless keep-distance (T-91): bots keep farther from headless zeds and finish them from a safe distance; off by default. ?HeadlessKeep=1/0 overrides for one match
+var() config int HeadlessKeepConfigVer;         // 0 = distance defaults never written; 1 = written once
+var() config float HeadlessKeepAvoidDist;       // headless detect radius in uu while the switch is on (default 300)
+var() config float HeadlessKeepKeepDist;        // headless minimum safe distance in uu while the switch is on (default 200)
+var() config float HeadlessKeepFinishMin;       // a headless zed is only shot from beyond this distance in uu (default 300)
+var transient bool bHeadlessKeepNow;            // bHeadlessKeep after the ?HeadlessKeep= option
 var() config float NavBudgetLimit;            // stalled seconds on one spot before a rescue
 var() config int NavBudgetStalls;             // stall series on one spot before a rescue
 var() config float NavBudgetMinGap;           // minimum seconds between the first and the last counted series
@@ -543,6 +549,18 @@ function PostBeginPlay()
         FollowOwnConfigVer = 1;
         SaveConfig();
     }
+    if (HeadlessKeepConfigVer < 1)
+    {
+        bHeadlessKeep = false;
+        HeadlessKeepAvoidDist = 300.0;
+        HeadlessKeepKeepDist = 200.0;
+        HeadlessKeepFinishMin = 300.0;
+        HeadlessKeepConfigVer = 1;
+        SaveConfig();
+    }
+    if (HeadlessKeepAvoidDist <= 0.0) HeadlessKeepAvoidDist = 300.0;
+    if (HeadlessKeepKeepDist <= 0.0) HeadlessKeepKeepDist = 200.0;
+    if (HeadlessKeepFinishMin <= 0.0) HeadlessKeepFinishMin = 300.0;
     // A zone value cleared by hand reads 0: use the built-in default.
     if (ZoneHoldBase < 0.0)
         ZoneHoldBase = 40.0;
@@ -1286,6 +1304,12 @@ function InitMutator(string Options, out string ErrorMessage)
         bFollowOwnsMoveNow = class'GameInfo'.static.GetIntOption(Options, "FollowOwn", 0) != 0;
     }
     EchelonLog("FOLLOWOWN_CONFIG followown=" $ string(bFollowOwnsMoveNow));
+    bHeadlessKeepNow = bHeadlessKeep;
+    if (class'GameInfo'.static.HasOption(Options, "HeadlessKeep"))
+    {
+        bHeadlessKeepNow = class'GameInfo'.static.GetIntOption(Options, "HeadlessKeep", 0) != 0;
+    }
+    EchelonLog("HEADLESSKEEP_CONFIG headlesskeep=" $ string(bHeadlessKeepNow) $ " avoid=" $ string(int(HeadlessKeepAvoidDist)) $ " keep=" $ string(int(HeadlessKeepKeepDist)) $ " finish=" $ string(int(HeadlessKeepFinishMin)));
     TrafficModeNow = TrafficMode;
     if (class'GameInfo'.static.HasOption(Options, "Traffic"))
     {
