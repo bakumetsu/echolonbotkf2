@@ -405,6 +405,9 @@ var bool bHeadlessStep;            // true while this function drives Pawn.Accel
 var float HeadlessLogTime;         // throttle for HEADLESS_AVOID logs (1 s)
 var float HeadlessAvoidDist;       // detect radius in uu
 var float HeadlessKeepDist;        // minimum safe distance in uu
+var bool bAllowHeadlessPick;
+var bool bHeadlessBurst;
+var float HeadlessBurstTime;
 var float RetreatStartTime; // when the current retreat began (0 = none)
 var vector RetreatStartLoc; // where it began
 var float RetreatCooldownUntil; // no new retreat before this time (2 s after one ends)
@@ -1015,6 +1018,7 @@ final function bool PickNextEnemy()
 {
     local KFPawn_Monster P;
     local bool bResult;
+    local bool bSawLive;
 
     if (WorldInfo.TimeSeconds - LastLeashDropTime < LEASH_COOLDOWN)
     {
@@ -1026,8 +1030,25 @@ final function bool PickNextEnemy()
     {
         if ((P != Pawn) && P.IsAliveAndWell() && FastTrace(P.Location, Pawn.Location))
         {
+            if (!P.bIsHeadless)
+                bSawLive = true;
             bResult = SetEnemy(P, true) || bResult;
         }
+    }
+    if (!bResult && !bSawLive && mut != None && mut.bHeadlessKeepNow)
+    {
+        bAllowHeadlessPick = true;
+        foreach WorldInfo.AllPawns(class'KFPawn_Monster', P, Pawn.Location, ENEMY_SCAN_RADIUS)
+        {
+            if (P != None && P.IsAliveAndWell())
+            {
+                if (FastTrace(P.Location, Pawn.Location))
+                {
+                    bResult = SetEnemy(P, true) || bResult;
+                }
+            }
+        }
+        bAllowHeadlessPick = false;
     }
     return bResult;
 }
@@ -1042,7 +1063,7 @@ function bool SetEnemy(Pawn Other, optional bool bNoNotify)
     }
 
     M = KFPawn_Monster(Other);
-    if (M != None && M.bIsHeadless)
+    if (M != None && M.bIsHeadless && !(bAllowHeadlessPick && HeadlessFinishable(M, false)))
     {
         return false;
     }
@@ -6002,9 +6023,53 @@ function LookDiagTick(float Delta)
 
 // ---------------------------------------------------------------- keep 2 m from headless zeds (C3)
 // Steers away from a headless zed that is closing in (it still deals damage); called every 0.25 s by a timer.
+final function float HeadlessAvoidRadius()
+{
+    if (mut != None && mut.bHeadlessKeepNow)
+        return mut.HeadlessKeepAvoidDist;
+    return HeadlessAvoidDist;
+}
+
+final function float HeadlessKeepRadius()
+{
+    if (mut != None && mut.bHeadlessKeepNow)
+        return mut.HeadlessKeepKeepDist;
+    return HeadlessKeepDist;
+}
+
+final function bool HeadlessFinishable(KFPawn_Monster M, bool bKeep)
+{
+    local float Dist;
+    if (mut == None || !mut.bHeadlessKeepNow)
+        return false;
+    if (M == None)
+        return false;
+    if (!M.bIsHeadless)
+        return false;
+    if (!M.IsAliveAndWell())
+        return false;
+    if (!HasGunWithAmmo())
+        return false;
+    Dist = VSize(M.Location - Pawn.Location);
+    if (bKeep)
+    {
+        if (Dist > HeadlessKeepRadius())
+            return true;
+        return false;
+    }
+    else
+    {
+        if (Dist > mut.HeadlessKeepFinishMin)
+            return true;
+        return false;
+    }
+}
+
 function HeadlessAvoidTick()
 {
     local KFPawn_Monster Z, NearestZ;
+    local bool bStep;
+    local string ActStr;
     local float NearestDist, Dist, Angle, Rad, CX, SY;
     local vector Away, Dir;
     local int i;
@@ -6015,13 +6080,13 @@ function HeadlessAvoidTick()
         return;
     }
     NearestZ = None;
-    NearestDist = HeadlessAvoidDist;
-    foreach WorldInfo.AllPawns(class'KFPawn_Monster', Z, Pawn.Location, HeadlessAvoidDist)
+    NearestDist = HeadlessAvoidRadius();
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', Z, Pawn.Location, HeadlessAvoidRadius())
     {
         if (Z != None && Z.IsAliveAndWell() && Z.bIsHeadless)
         {
             Dist = VSize(Z.Location - Pawn.Location);
-            if (Dist < NearestDist && ((Z.Velocity dot (Pawn.Location - Z.Location)) > 0 || Dist < HeadlessKeepDist))
+            if (Dist < NearestDist && ((Z.Velocity dot (Pawn.Location - Z.Location)) > 0 || Dist < HeadlessKeepRadius()))
             {
                 NearestDist = Dist;
                 NearestZ = Z;
@@ -6031,6 +6096,11 @@ function HeadlessAvoidTick()
     if (NearestZ == None)
     {
         HeadlessAvoidUntil = 0;
+        if (bHeadlessBurst)
+        {
+            bHeadlessBurst = false;
+            Pawn.StopFiring();
+        }
         if (bHeadlessStep)
         {
             bHeadlessStep = false;
@@ -6076,16 +6146,42 @@ function HeadlessAvoidTick()
     }
     if (!bFound)
     {
+        if (mut != None && mut.bHeadlessKeepNow && HasGunWithAmmo() && (WorldInfo.TimeSeconds - HeadlessBurstTime >= 0.5))
+        {
+            HeadlessBurstTime = WorldInfo.TimeSeconds;
+            bHeadlessBurst = true;
+            FireWeaponAt(NearestZ);
+            if (WorldInfo.TimeSeconds - HeadlessLogTime > 1.0)
+            {
+                HeadlessLogTime = WorldInfo.TimeSeconds;
+                EchelonLog("HEADLESS_AVOID dist=" $ string(int(VSize(NearestZ.Location - Pawn.Location))) $ " state=" $ string(GetStateName()) $ " act=burst");
+            }
+        }
         return;
     }
+    if (bHeadlessBurst)
+    {
+        bHeadlessBurst = false;
+        Pawn.StopFiring();
+    }
     HeadlessAvoidDir = Dir;
-    HeadlessAvoidUntil = WorldInfo.TimeSeconds + 0.4;
+    if (mut != None && mut.bHeadlessKeepNow)
+        HeadlessAvoidUntil = WorldInfo.TimeSeconds + 0.8;
+    else
+        HeadlessAvoidUntil = WorldInfo.TimeSeconds + 0.4;
+    bStep = (MoveFlags == 0 && !(IsInState('FollowingLeader') && bFollowMoveActive));
+    if (!bStep && mut != None && mut.bHeadlessKeepNow && IsInState('FightEnemy'))
+        bStep = true;
+    if (bStep)
+        ActStr = "step";
+    else
+        ActStr = "blend";
     if (WorldInfo.TimeSeconds - HeadlessLogTime > 1.0)
     {
         HeadlessLogTime = WorldInfo.TimeSeconds;
-        EchelonLog("HEADLESS_AVOID dist=" $ string(int(VSize(NearestZ.Location - Pawn.Location))));
+        EchelonLog("HEADLESS_AVOID dist=" $ string(int(VSize(NearestZ.Location - Pawn.Location))) $ " state=" $ string(GetStateName()) $ " act=" $ ActStr);
     }
-    if (MoveFlags == 0 && !(IsInState('FollowingLeader') && bFollowMoveActive))
+    if (bStep)
     {
         bHeadlessStep = true;
         Pawn.Acceleration = Dir * Pawn.GroundSpeed;

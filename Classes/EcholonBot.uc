@@ -226,7 +226,7 @@ state PickNextMove
         }
 
         // Priority 7: Combat Engagement
-        if (Enemy != None && Enemy.IsAliveAndWell() && !(KFPawn_Monster(Enemy) != None && KFPawn_Monster(Enemy).bIsHeadless))
+        if (Enemy != None && Enemy.IsAliveAndWell() && !(KFPawn_Monster(Enemy) != None && KFPawn_Monster(Enemy).bIsHeadless && !HeadlessFinishable(KFPawn_Monster(Enemy), true)))
         {
             if (VSizeSq(Enemy.Location - Pawn.Location) > LEASH_DROP_DIST_SQ)
             {
@@ -671,7 +671,7 @@ state FightEnemy
             FinishedMove();
             return;
         }
-        if (Enemy != none && KFPawn_Monster(Enemy) != none && KFPawn_Monster(Enemy).bIsHeadless)
+        if (Enemy != none && KFPawn_Monster(Enemy) != none && KFPawn_Monster(Enemy).bIsHeadless && !HeadlessFinishable(KFPawn_Monster(Enemy), true))
         {
             if (Pawn != none)
             {
@@ -751,7 +751,7 @@ state FightEnemy
             PickCombatStyle();
             return;
         }
-        if (KFPawn_Monster(Enemy) != None && KFPawn_Monster(Enemy).bIsHeadless)
+        if (KFPawn_Monster(Enemy) != None && KFPawn_Monster(Enemy).bIsHeadless && !HeadlessFinishable(KFPawn_Monster(Enemy), true))
         {
             Reason = "headless";
             LastHubCheckTime = WorldInfo.TimeSeconds;
