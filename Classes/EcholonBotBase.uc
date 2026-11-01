@@ -1246,6 +1246,13 @@ function ZedRepickTick()
     {
         if (!Z.IsAliveAndWell() || Z.bIsHeadless || Z == Enemy || (!Z.IsA('KFPawn_ZedSiren') && !Z.IsA('KFPawn_ZedHusk')))
             continue;
+        if (ZedSeenList.Find(Z) == INDEX_NONE)
+        {
+            if (FastTrace(Z.Location, Pawn.Location))
+            {
+                NoteZedSeen(Z);
+            }
+        }
         if (GetEnemyThreat(Z) < GetEnemyThreat(Enemy))
             continue;
         if (IsCloseMeleeThreat(Enemy))
