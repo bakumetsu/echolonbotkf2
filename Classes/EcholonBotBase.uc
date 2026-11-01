@@ -394,6 +394,8 @@ var transient KFPawn_Monster LookReactZed;   // zed whose reaction time is being
 var transient float LookReactT;       // when LookReactZed first came within 1500 uu with line of sight
 var transient bool bLookReactBehind;  // LookReactZed was behind the bot at that time
 var transient float LookReactScanT;   // next zed scan time (every 0.25 s)
+var transient float LookDirNextT, LookDirMisLogT, LookDirCornerLogT;  // T-98: look-dir log throttle timers
+var transient Actor LookDirCornerNode;  // T-98: last corner node actor for de-dup
 var float LookTurnRate;      // max look turn rate outside combat, rot units/s (default 32768.0)
 var float LookSweepAmp;      // sweep amplitude in degrees (default 20.0)
 var float LookSweepPeriod;   // seconds per full sweep cycle (default 5.0)
@@ -2085,6 +2087,7 @@ function Tick(float Delta)
     }
     UpdateLook(Delta);
     LookDiagTick(Delta);
+    LookDirLogTick();
 
     // Follow-combat escape: route to combat when a Zed has LOS while tethered
     if (IsInState('FollowingLeader') || IsInState('FollowingLeaderBasic'))
@@ -6018,6 +6021,165 @@ function LookDiagTick(float Delta)
     {
         EchelonLog("LOOK_REACT secs=" $ string(Now - LookReactT) $ " dist=" $ string(int(VSize(LookReactZed.Location - Pawn.Location))) $ " behind=" $ string(int(bLookReactBehind)));
         LookReactZed = None;
+    }
+}
+
+// ---------------------------------------------------------------- T-98: look-direction diagnostic log
+
+function LookDirLine(string Tag, float legsD, float velD, float aimD, float twistD, float headD, float misLegsD, float misAimD, float Speed, string focusName, int fdist, string nodeName, string nextName, int cornerDeg)
+{
+    EchelonLog(Tag $ " legs=" $ int(legsD) $ " vel=" $ int(velD) $ " aim=" $ int(aimD) $ " twist=" $ int(twistD) $ " head=" $ int(headD) $ " mislegs=" $ int(misLegsD) $ " misaim=" $ int(misAimD) $ " speed=" $ int(Speed) $ " state=" $ string(GetStateName()) $ " focus=" $ focusName $ " fdist=" $ fdist $ " node=" $ nodeName $ " next=" $ nextName $ " corner=" $ cornerDeg);
+}
+
+function LookDirLogTick()
+{
+    local float Now, Speed, legsDeg, velDeg, aimDeg, twistDeg, headDeg, misLegsDeg, misAimDeg;
+    local vector HV, FocalDir, DirC, DirN;
+    local rotator R1, R2;
+    local int legsYaw, velYaw, aimYaw, headYaw, twistRaw, misLegsRaw, misAimRaw, cornerDegRaw;
+    local string focusName, nodeName, nextName;
+    local int dist;
+    local vector C, N;
+    local bool bCorner;
+    local Actor CurNode;
+
+    Now = WorldInfo.TimeSeconds;
+
+    if (Pawn == None || Pawn.Health <= 0 || mut == None || !mut.bLookDirLogNow)
+    {
+        return;
+    }
+    if (Now < LookDirNextT)
+    {
+        return;
+    }
+    LookDirNextT = Now + 0.1;
+
+    HV.X = Pawn.Velocity.X;
+    HV.Y = Pawn.Velocity.Y;
+    HV.Z = 0;
+    Speed = VSize(HV);
+    if (Speed <= 60.0)
+    {
+        return;
+    }
+
+    R1 = Rotator(HV);
+    velYaw = R1.Yaw;
+    velDeg = velYaw * 360.0 / 65536.0;
+
+    legsYaw = Pawn.Rotation.Yaw;
+    legsDeg = legsYaw * 360.0 / 65536.0;
+
+    aimYaw = Rotation.Yaw;
+    aimDeg = aimYaw * 360.0 / 65536.0;
+
+    twistRaw = ((aimYaw - legsYaw + 98304) & 65535) - 32768;
+    twistDeg = twistRaw * 360.0 / 65536.0;
+
+    FocalDir = GetFocalPoint() - Pawn.Location;
+    if (FocalDir.X != 0.0 || FocalDir.Y != 0.0)
+    {
+        R1 = Rotator(FocalDir);
+        headYaw = R1.Yaw;
+        headDeg = headYaw * 360.0 / 65536.0;
+    }
+    else
+    {
+        headDeg = aimDeg;
+    }
+
+    misLegsRaw = ((legsYaw - velYaw + 98304) & 65535) - 32768;
+    misLegsDeg = FAbs(misLegsRaw * 360.0 / 65536.0);
+    misAimRaw = ((aimYaw - velYaw + 98304) & 65535) - 32768;
+    misAimDeg = FAbs(misAimRaw * 360.0 / 65536.0);
+
+    if (Focus != None)
+    {
+        focusName = string(Focus.Name);
+        dist = int(VSize(Focus.Location - Pawn.Location));
+    }
+    else if (Enemy != None)
+    {
+        focusName = string(Enemy.Name);
+        dist = int(VSize(Enemy.Location - Pawn.Location));
+    }
+    else
+    {
+        focusName = "none";
+        dist = 0;
+    }
+
+    bCorner = NavLookCorner(C, N);
+    cornerDegRaw = 0;
+    nodeName = "none";
+    nextName = "none";
+    CurNode = None;
+
+    if (bCorner)
+    {
+        DirC.X = C.X - Pawn.Location.X;
+        DirC.Y = C.Y - Pawn.Location.Y;
+        DirC.Z = 0;
+        DirN.X = N.X - C.X;
+        DirN.Y = N.Y - C.Y;
+        DirN.Z = 0;
+        if (VSize2D(DirC) > 1.0 && VSize2D(DirN) > 1.0)
+        {
+            R1 = Rotator(DirC);
+            R2 = Rotator(DirN);
+            cornerDegRaw = ((R1.Yaw - R2.Yaw + 98304) & 65535) - 32768;
+            if (cornerDegRaw < 0)
+            {
+                cornerDegRaw = -cornerDegRaw;
+            }
+        }
+        if (MoveFlags == 2 && MoveTarget != None)
+        {
+            nodeName = string(MoveTarget.Name);
+            CurNode = MoveTarget;
+        }
+        else if (IsInState('FollowingLeader') && FollowNode != None)
+        {
+            nodeName = string(FollowNode.Name);
+            CurNode = FollowNode;
+            if (FollowRouteIdx >= 0 && FollowRouteIdx + 1 < FollowRoute.Length && FollowRoute[FollowRouteIdx + 1] != None)
+            {
+                nextName = string(FollowRoute[FollowRouteIdx + 1].Name);
+            }
+        }
+    }
+
+    // MISMATCH
+    if (misLegsDeg > 60.0 || misAimDeg > 60.0)
+    {
+        if (Now - LookDirMisLogT >= 1.0)
+        {
+            LookDirMisLogT = Now;
+            LookDirLine("LOOK_DIR_MIS", legsDeg, velDeg, aimDeg, twistDeg, headDeg, misLegsDeg, misAimDeg, Speed, focusName, dist, nodeName, nextName, cornerDegRaw);
+        }
+    }
+
+    // CORNER
+    if (bCorner && VSize2D(C - Pawn.Location) < 250.0 && cornerDegRaw * 360.0 / 65536.0 > 45.0)
+    {
+        if (CurNode != None)
+        {
+            if (CurNode != LookDirCornerNode)
+            {
+                LookDirCornerNode = CurNode;
+                LookDirCornerLogT = Now;
+                LookDirLine("LOOK_DIR_CORNER", legsDeg, velDeg, aimDeg, twistDeg, headDeg, misLegsDeg, misAimDeg, Speed, focusName, dist, nodeName, nextName, cornerDegRaw);
+            }
+        }
+        else
+        {
+            if (Now - LookDirCornerLogT >= 1.5)
+            {
+                LookDirCornerLogT = Now;
+                LookDirLine("LOOK_DIR_CORNER", legsDeg, velDeg, aimDeg, twistDeg, headDeg, misLegsDeg, misAimDeg, Speed, focusName, dist, nodeName, nextName, cornerDegRaw);
+            }
+        }
     }
 }
 
