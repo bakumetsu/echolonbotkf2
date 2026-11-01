@@ -45,7 +45,7 @@ function Tick(EcholonMut M)
     {
         if (M.Fireteams[i].Anchor != None)
         {
-            while (M.WorldInfo.AllPawns(class'KFPawn_Monster', Z, M.Fireteams[i].Anchor.Location, M.ZedScanDist))
+            foreach M.WorldInfo.AllPawns(class'KFPawn_Monster', Z, M.Fireteams[i].Anchor.Location, M.ZedScanDist)
             {
                 TickOps++;
                 Found = false;
@@ -136,9 +136,9 @@ final function BuildEligible()
 
     Elig.Length = 0;
     n = 0;
-    for (i = 0; i < M.Fireteams[CurTeam].Members.Length; i++)
+    for (i = 0; i < Mut.Fireteams[CurTeam].Members.Length; i++)
     {
-        B = M.Fireteams[CurTeam].Members[i];
+        B = Mut.Fireteams[CurTeam].Members[i];
         if (B != None && B.Pawn != None && B.Pawn.Health > 0 && B.HasUsableRangedWeapon())
         {
             Elig[Elig.Length] = B;
@@ -236,11 +236,11 @@ final function UpdateTracks()
         // Natural band
         if (bFlesh && Cur.Tracks[ti].EnragedUntil > Now && bestD <= 400.0)
             natBand = BAND_MELEE;
-        else if (bestD > M.ZedBandFar)
+        else if (bestD > Mut.ZedBandFar)
             natBand = BAND_FAR;
-        else if (bestD > M.ZedBandMid)
+        else if (bestD > Mut.ZedBandMid)
             natBand = BAND_MID;
-        else if (bestD > M.ZedBandClose)
+        else if (bestD > Mut.ZedBandClose)
             natBand = BAND_CLOSE;
         else
             natBand = BAND_MELEE;
@@ -256,15 +256,15 @@ final function UpdateTracks()
         else if (natBand > curBand)
         {
             // Moved farther: hysteresis, drop one level at a time
-            if (curBand == BAND_MELEE) hystBnd = M.ZedBandClose;
-            else if (curBand == BAND_CLOSE) hystBnd = M.ZedBandMid;
-            else hystBnd = M.ZedBandFar;
+            if (curBand == BAND_MELEE) hystBnd = Mut.ZedBandClose;
+            else if (curBand == BAND_CLOSE) hystBnd = Mut.ZedBandMid;
+            else hystBnd = Mut.ZedBandFar;
 
             if (bestD > hystBnd)
             {
                 if (Cur.Tracks[ti].BeyondSince == 0)
                     Cur.Tracks[ti].BeyondSince = Now;
-                else if (Now - Cur.Tracks[ti].BeyondSince >= M.ZedQuotaHoldSec)
+                else if (Now - Cur.Tracks[ti].BeyondSince >= Mut.ZedQuotaHoldSec)
                 {
                     Cur.Tracks[ti].Band = curBand + 1;
                     Cur.Tracks[ti].BeyondSince = 0;
@@ -300,9 +300,9 @@ final function BuildOrder()
     local int i, j, n;
 
     Order.Length = Cur.Tracks.Length;
+    n = Order.Length;
     for (i = 0; i < n; i++)
         Order[i] = i;
-    n = Order.Length;
 
     // Insertion sort: enraged-latched first, then smaller D
     for (i = 1; i < n; i++)
@@ -349,9 +349,9 @@ final function UpdateLead()
         Cur.CandLead = None;
         Cur.CandLeadSince = 0;
         Cur.LeadZed = None;
-        if (Cur.Order.Length > 0)
+        if (Order.Length > 0)
         {
-            TargetIdx = Cur.Order[0];
+            TargetIdx = Order[0];
             Cur.LeadZed = Cur.Tracks[TargetIdx].Z;
             Cur.LeadChangeTime = Now;
         }
@@ -365,14 +365,14 @@ final function UpdateLead()
     // (a) another zed enraged-latched, lead not
     if (Cur.Tracks[LeadIdx].EnragedUntil <= Now)
     {
-        for (I = 0; I < Cur.Order.Length; I++)
+        for (I = 0; I < Order.Length; I++)
         {
-            if (Cur.Order[I] == LeadIdx)
+            if (Order[I] == LeadIdx)
                 continue;
-            if (Cur.Tracks[Cur.Order[I]].EnragedUntil > Now)
+            if (Cur.Tracks[Order[I]].EnragedUntil > Now)
             {
                 bNeedSwitch = true;
-                TargetIdx = Cur.Order[I];
+                TargetIdx = Order[I];
                 break;
             }
         }
@@ -383,24 +383,24 @@ final function UpdateLead()
     {
         bCandFound = false;
         bCandReady = false;
-        for (I = 0; I < Cur.Order.Length; I++)
+        for (I = 0; I < Order.Length; I++)
         {
-            if (Cur.Order[I] == LeadIdx)
+            if (Order[I] == LeadIdx)
                 continue;
-            if (Cur.Tracks[Cur.Order[I]].D < LeadD - 100.0)
+            if (Cur.Tracks[Order[I]].D < LeadD - 100.0)
             {
                 bCandFound = true;
-                if (Cur.CandLead == Cur.Tracks[Cur.Order[I]].Z)
+                if (Cur.CandLead == Cur.Tracks[Order[I]].Z)
                 {
                     if (Now - Cur.CandLeadSince >= 1.5)
                     {
                         bCandReady = true;
-                        TargetIdx = Cur.Order[I];
+                        TargetIdx = Order[I];
                     }
                 }
                 else
                 {
-                    Cur.CandLead = Cur.Tracks[Cur.Order[I]].Z;
+                    Cur.CandLead = Cur.Tracks[Order[I]].Z;
                     Cur.CandLeadSince = Now;
                 }
                 break;
@@ -438,7 +438,7 @@ final function UpdateOverwhelmed()
     local bool bNewCond, bEnragedMelee;
     local EcholonBot FTLeader;
 
-    FTLeader = M.Fireteams[CurTeam].Leader;
+    FTLeader = Mut.Fireteams[CurTeam].Leader;
     if (FTLeader != None && FTLeader.IsInState('TacticalRetreat'))
         return;
 
@@ -456,7 +456,7 @@ final function UpdateOverwhelmed()
         }
     }
 
-    if (CloseMeleeCount >= M.ZedOverwhelmCount)
+    if (CloseMeleeCount >= Mut.ZedOverwhelmCount)
         bNewCond = true;
     if (bEnragedMelee && CloseMeleeCount >= 2)
         bNewCond = true;
@@ -561,13 +561,13 @@ final function ProcessSlots()
 	{
 		SeqLen = 0;
 	}
-	for (i = 0; i < Cur.Order.Length; i++)
+	for (i = 0; i < Order.Length; i++)
 	{
 		bIsLead = false;
-		if (SeqLen > 0 && Cur.Order[i] == ZedSeq[0])
+		if (SeqLen > 0 && Order[i] == ZedSeq[0])
 			bIsLead = true;
 		if (!bIsLead)
-			ZedSeq[ZedSeq.Length] = Cur.Order[i];
+			ZedSeq[ZedSeq.Length] = Order[i];
 	}
 
 	for (i = 0; i < ZedSeq.Length; i++)
@@ -680,16 +680,17 @@ final function ReleaseSlot(int SlotIdx, string Why)
 {
 	local EcholonBot B;
 	local Pawn Z;
+	local NoRetake NR;
 
 	B = Cur.SlotBots[SlotIdx];
 	Z = Cur.SlotZeds[SlotIdx];
 	if (B == None) return;
 	LogRole(B, Z, "release", Why);
 	// Add no-retake entry
-	Cur.NoRetakes[Cur.NoRetakes.Length] = default NoRetake;
-	Cur.NoRetakes[Cur.NoRetakes.Length - 1].B = B;
-	Cur.NoRetakes[Cur.NoRetakes.Length - 1].Z = Z;
-	Cur.NoRetakes[Cur.NoRetakes.Length - 1].Until = Now + Mut.ZedQuotaHoldSec;
+	NR.B = B;
+	NR.Z = Z;
+	NR.Until = Now + Mut.ZedQuotaHoldSec;
+	Cur.NoRetakes[Cur.NoRetakes.Length] = NR;
 	Cur.SlotBots[SlotIdx] = None;
 	Cur.SlotZeds[SlotIdx] = None;
 }
@@ -730,7 +731,7 @@ final function float CandidateScore(EcholonBot B, Pawn Z, int Band)
 	d = VSize(B.Pawn.Location - Z.Location);
 	if (d > 250 || Band == BAND_MELEE)
 		s += 10;
-	if (B != M.Fireteams[CurTeam].Leader && (Band == BAND_FAR || Band == BAND_MID))
+	if (B != Mut.Fireteams[CurTeam].Leader && (Band == BAND_FAR || Band == BAND_MID))
 		s += 10;
 	rng = B.GetWeaponEffectiveRangeUU(KFWeapon(B.Pawn.Weapon));
 	if (rng >= d)
@@ -837,7 +838,7 @@ final function ProcessFreeAndCaster()
             BestBot = None;
             for (i = 0; i < Unslotted.Length; i++)
             {
-                if (Unslotted[i] == M.Fireteams[CurTeam].Leader)
+                if (Unslotted[i] == Mut.Fireteams[CurTeam].Leader)
                 {
                     BestBot = Unslotted[i];
                     break;
@@ -903,7 +904,7 @@ final function ProcessFreeAndCaster()
         if (bKeepCaster)
         {
             Dist = VSize(Cur.CasterBot.Pawn.Location - Cur.CasterZed.Location);
-            if (Dist > M.ZedHunterDist)
+            if (Dist > Mut.ZedHunterDist)
                 bKeepCaster = false;
         }
     }
@@ -929,7 +930,7 @@ final function ProcessFreeAndCaster()
                     if (Dist < ZedMinDist)
                         ZedMinDist = Dist;
                 }
-                if (ZedMinDist <= M.ZedHunterDist && ZedMinDist < BestDist)
+                if (ZedMinDist <= Mut.ZedHunterDist && ZedMinDist < BestDist)
                 {
                     BestDist = ZedMinDist;
                     BestZed = Z;
