@@ -6038,7 +6038,8 @@ function LookDirLogTick()
     local rotator R1, R2;
     local int legsYaw, velYaw, aimYaw, headYaw, twistRaw, misLegsRaw, misAimRaw, cornerDegRaw;
     local string focusName, nodeName, nextName;
-    local int dist;
+    local int dist, I;
+    local float cornerAngle;
     local vector C, N;
     local bool bCorner;
     local Actor CurNode;
@@ -6061,6 +6062,7 @@ function LookDirLogTick()
     Speed = VSize(HV);
     if (Speed <= 60.0)
     {
+        LookDirCornerNode = None;
         return;
     }
 
@@ -6138,6 +6140,14 @@ function LookDirLogTick()
         {
             nodeName = string(MoveTarget.Name);
             CurNode = MoveTarget;
+            for (I = 0; I <= RouteCache.Length - 2; I++)
+            {
+                if (RouteCache[I] == MoveTarget && RouteCache[I + 1] != None)
+                {
+                    nextName = string(RouteCache[I + 1].Name);
+                    break;
+                }
+            }
         }
         else if (IsInState('FollowingLeader') && FollowNode != None)
         {
@@ -6150,18 +6160,24 @@ function LookDirLogTick()
         }
     }
 
+    cornerAngle = cornerDegRaw * 360.0 / 65536.0;
+    if (!bCorner || VSize2D(C - Pawn.Location) >= 250.0 || cornerAngle <= 45.0)
+    {
+        LookDirCornerNode = None;
+    }
+
     // MISMATCH
     if (misLegsDeg > 60.0 || misAimDeg > 60.0)
     {
         if (Now - LookDirMisLogT >= 1.0)
         {
             LookDirMisLogT = Now;
-            LookDirLine("LOOK_DIR_MIS", legsDeg, velDeg, aimDeg, twistDeg, headDeg, misLegsDeg, misAimDeg, Speed, focusName, dist, nodeName, nextName, cornerDegRaw);
+            LookDirLine("LOOK_DIR_MIS", legsDeg, velDeg, aimDeg, twistDeg, headDeg, misLegsDeg, misAimDeg, Speed, focusName, dist, nodeName, nextName, int(cornerAngle));
         }
     }
 
     // CORNER
-    if (bCorner && VSize2D(C - Pawn.Location) < 250.0 && cornerDegRaw * 360.0 / 65536.0 > 45.0)
+    if (bCorner && VSize2D(C - Pawn.Location) < 250.0 && cornerAngle > 45.0)
     {
         if (CurNode != None)
         {
@@ -6169,7 +6185,7 @@ function LookDirLogTick()
             {
                 LookDirCornerNode = CurNode;
                 LookDirCornerLogT = Now;
-                LookDirLine("LOOK_DIR_CORNER", legsDeg, velDeg, aimDeg, twistDeg, headDeg, misLegsDeg, misAimDeg, Speed, focusName, dist, nodeName, nextName, cornerDegRaw);
+                LookDirLine("LOOK_DIR_CORNER", legsDeg, velDeg, aimDeg, twistDeg, headDeg, misLegsDeg, misAimDeg, Speed, focusName, dist, nodeName, nextName, int(cornerAngle));
             }
         }
         else
@@ -6177,7 +6193,7 @@ function LookDirLogTick()
             if (Now - LookDirCornerLogT >= 1.5)
             {
                 LookDirCornerLogT = Now;
-                LookDirLine("LOOK_DIR_CORNER", legsDeg, velDeg, aimDeg, twistDeg, headDeg, misLegsDeg, misAimDeg, Speed, focusName, dist, nodeName, nextName, cornerDegRaw);
+                LookDirLine("LOOK_DIR_CORNER", legsDeg, velDeg, aimDeg, twistDeg, headDeg, misLegsDeg, misAimDeg, Speed, focusName, dist, nodeName, nextName, int(cornerAngle));
             }
         }
     }
