@@ -204,6 +204,7 @@ var() config float ZedHardOverrideGap;
 var() config float ZedRepickSecs;
 // D-11: eased distance weight for Siren/Husk only; tuned without a compile; 0.5 = same distance weight as every other zed
 var() config float ZedSpecialDistWeight;
+var() config float ZedSelfDefenseDist; // self-defence range (uu)
 var transient bool bZedTargetingNow;
 var transient bool bFollowOwnsMoveNow;           // bFollowOwnsMove after the ?FollowOwn= option
 var config string _Separator1;
@@ -599,6 +600,13 @@ function PostBeginPlay()
         ZedTargetConfigVer = 3;
         SaveConfig();
     }
+    if (ZedTargetConfigVer < 4)
+    {
+        ZedSelfDefenseDist = 120.0;
+        ZedTargetConfigVer = 4;
+        SaveConfig();
+    }
+    if (ZedSelfDefenseDist <= 0.0) ZedSelfDefenseDist = 120.0;
     if (ZedHardOverrideDist <= 0.0) ZedHardOverrideDist = 400.0;
     if (ZedRepickSecs <= 0.0) ZedRepickSecs = 0.8;
     if (ZedSpecialDistWeight <= 0.0) ZedSpecialDistWeight = 0.25;

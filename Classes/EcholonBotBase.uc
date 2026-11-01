@@ -412,6 +412,7 @@ var array<Pawn> ZedSeenList;
 var float HeadlessKeepDist;        // minimum safe distance in uu
 var float LastZedSkipLog;
 var bool bRepickNow;
+var bool bSelfDefNow;
 var bool bAllowHeadlessPick;
 var bool bHeadlessBurst;
 var float HeadlessBurstTime;
@@ -1103,7 +1104,8 @@ function bool SetEnemy(Pawn Other, optional bool bNoNotify)
     EnemyEncounterTime = WorldInfo.TimeSeconds;
 
     bOverride = false;
-    if (Enemy != None && GetEnemyThreat(Enemy) > GetEnemyThreat(Other))
+    bSelfDefNow = false;
+    if (Enemy != None && !ZedSelfDefense(Other) && GetEnemyThreat(Enemy) > GetEnemyThreat(Other))
     {
         if (ZedHardOverride(Other))
         {
@@ -1226,6 +1228,45 @@ function bool IsCloseMeleeThreat(Pawn Z)
     return true;
 }
 
+final function bool IsSelfDefThreat(Pawn Z)
+{
+    local KFPawn_Monster M;
+    if (mut == None || !mut.bZedTargetingNow)
+        return false;
+    M = KFPawn_Monster(Z);
+    if (M == None)
+        return false;
+    if (!M.IsAliveAndWell())
+        return false;
+    if (M.bIsHeadless)
+        return false;
+    if (M.IsA('KFPawn_ZedSiren') || M.IsA('KFPawn_ZedHusk') || M.IsA('KFPawn_ZedBloat'))
+        return false;
+    if (class'EcholonZedProfile'.static.GetBandMax(Z) > 0.0)
+        return false;
+    if (VSize(Z.Location - Pawn.Location) > mut.ZedSelfDefenseDist)
+        return false;
+    if ((Z.Controller != None && Z.Controller.Enemy == Pawn) || ((Z.Velocity dot (Pawn.Location - Z.Location)) > 0.0))
+        return true;
+    return false;
+}
+
+final function bool ZedSelfDefense(Pawn Z)
+{
+    if (Enemy == None)
+        return false;
+    if (Z == Enemy)
+        return false;
+    if (!IsSelfDefThreat(Z))
+        return false;
+    if (WorldInfo.TimeSeconds - LastZedSwitchTime < 1.0)
+        return false;
+    if (VSize(Enemy.Location - Pawn.Location) <= VSize(Z.Location - Pawn.Location))
+        return false;
+    bSelfDefNow = true;
+    return true;
+}
+
 function ZedRepickTick()
 {
     local KFPawn_Monster Z;
@@ -1235,6 +1276,14 @@ function ZedRepickTick()
         return;
     if (Enemy == None || !Enemy.IsAliveAndWell())
         return;
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', Z, Pawn.Location, mut.ZedSelfDefenseDist)
+    {
+        if (Z != Enemy && IsSelfDefThreat(Z) && ZedSelfDefense(Z))
+        {
+            SetEnemy(Z, true);
+            return;
+        }
+    }
     M = KFPawn_Monster(Enemy);
     if (M != None && M.bIsHeadless)
         return;
@@ -1321,6 +1370,8 @@ function ZedPickLog(Pawn Prev, bool bOverride)
         Reason = "normal";
     if (bRepickNow)
         Reason = "repick";
+    if (bSelfDefNow)
+        Reason = "selfdef";
     if (Reason == "normal" && !Enemy.IsA('KFPawn_ZedSiren') && !Enemy.IsA('KFPawn_ZedHusk') && WorldInfo.TimeSeconds - LastZedPickLog < 1.0)
         return;
     LastZedPickLog = WorldInfo.TimeSeconds;
