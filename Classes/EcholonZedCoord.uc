@@ -289,7 +289,7 @@ final function UpdateTracks()
     for (i = Dead.Length - 1; i >= 0; i--)
     {
         ti = Dead[i];
-        Cur.Tracks.Length--;
+        Cur.Tracks.Length = Cur.Tracks.Length - 1;
         if (ti < Cur.Tracks.Length)
             Cur.Tracks[ti] = Cur.Tracks[Cur.Tracks.Length];
     }
@@ -542,7 +542,7 @@ final function ProcessSlots()
 			if (Cur.SlotBots[i] != None)
 			{
 				ReleaseSlot(i, "budget");
-				totalAssigned--;
+				totalAssigned = totalAssigned - 1;
 				bFound = true;
 				break;
 			}
@@ -613,7 +613,7 @@ final function ProcessSlots()
 				if (Cur.SlotZeds[k] == Z && Cur.SlotBots[k] != None)
 				{
 					ReleaseSlot(k, "band_drop");
-					totalAssigned--;
+					totalAssigned = totalAssigned - 1;
 					j++;
 				}
 			}
@@ -741,20 +741,20 @@ final function float CandidateScore(EcholonBot B, Pawn Z, int Band)
 
 final function LogRole(EcholonBot B, Pawn Z, string Role, string Why)
 {
-	local int band, dist, q, rng;
+	local int lBand, lDist, lQuota, lRng;
 	local string zedName, zid, wepName;
 
 	if (Z != None && TrackIndex(Z) >= 0)
 	{
-		band = Cur.Tracks[TrackIndex(Z)].Band;
-		dist = int(VSize(B.Pawn.Location - Z.Location));
+		lBand = Cur.Tracks[TrackIndex(Z)].Band;
+		lDist = int(VSize(B.Pawn.Location - Z.Location));
 	}
 	else
 	{
-		band = 0;
-		dist = 0;
+		lBand = 0;
+		lDist = 0;
 	}
-	q = QuotaFor(band, CurN);
+	lQuota = QuotaFor(lBand, CurN);
 	if (Z != None)
 	{
 		zedName = Z.Class.Name;
@@ -768,17 +768,17 @@ final function LogRole(EcholonBot B, Pawn Z, string Role, string Why)
 	if (B != None && B.Pawn != None && B.Pawn.Weapon != None)
 	{
 		wepName = B.Pawn.Weapon.Class.Name;
-		rng = int(B.GetWeaponEffectiveRangeUU(KFWeapon(B.Pawn.Weapon)));
+		lRng = int(B.GetWeaponEffectiveRangeUU(KFWeapon(B.Pawn.Weapon)));
 	}
 	else
 	{
 		wepName = "None";
-		rng = 0;
+		lRng = 0;
 	}
 	Mut.EchelonLog("ZED_ROLE team=" @ CurTeam @ " bot=" @ B.LogTag() @ " zed=" @ zedName
-		@ " zid=" @ zid @ " role=" @ Role @ " band=" @ band @ " dist=" @ dist
-		@ " quota=" @ q @ " budget=" @ CurBudget @ " n=" @ CurN @ " why=" @ Why
-		@ " wep=" @ wepName @ " rng=" @ rng);
+		@ " zid=" @ zid @ " role=" @ Role @ " band=" @ lBand @ " dist=" @ lDist
+		@ " quota=" @ lQuota @ " budget=" @ CurBudget @ " n=" @ CurN @ " why=" @ Why
+		@ " wep=" @ wepName @ " rng=" @ lRng);
 }
 
 final function bool BotSlotted(EcholonBot B)
@@ -794,7 +794,7 @@ final function bool BotSlotted(EcholonBot B)
 
 final function ProcessFreeAndCaster()
 {
-    local int i, j;
+    local int i, j, nU;
     local EcholonBot B, BestBot;
     local Pawn Z, BestZed;
     local float Dist, BestDist, ZedMinDist;
@@ -847,7 +847,8 @@ final function ProcessFreeAndCaster()
             if (BestBot == None && Unslotted.Length > 0)
             {
                 BestBot = Unslotted[0];
-                for (i = 1; i < Unslotted.Length; i++)
+                nU = Unslotted.Length;
+                for (i = 1; i < nU; i++)
                 {
                     if (Unslotted[i].Name < BestBot.Name)
                         BestBot = Unslotted[i];
@@ -979,7 +980,7 @@ final function LogQuota()
 {
     local int i;
     local Pawn Z;
-    local int BigCount, TotalAssigned, TotalWanted, Empty, Q, Assigned;
+    local int BigCount, TotalAssigned, nWanted, Empty, zQuota, Assigned;
     local string ZedList, LeadStr, FreeStr, CasterStr, OhInt;
 
     if (Now - Cur.LastQuotaLog < 5.0)
@@ -999,25 +1000,25 @@ final function LogQuota()
 
     ZedList = "";
     TotalAssigned = 0;
-    TotalWanted = 0;
+    nWanted = 0;
     for (i = 0; i < Cur.Tracks.Length; i++)
     {
         Z = Cur.Tracks[i].Z;
         if (Z == None || Z.bDeleteMe || !Z.IsAliveAndWell())
             continue;
-        Q = QuotaFor(Cur.Tracks[i].Band, CurN);
+        zQuota = QuotaFor(Cur.Tracks[i].Band, CurN);
         Assigned = CountAssigned(Z);
-        TotalAssigned += Assigned;
-        if (Q > CurBudget)
-            TotalWanted += CurBudget;
+        TotalAssigned = TotalAssigned + Assigned;
+        if (zQuota > CurBudget)
+            nWanted = nWanted + CurBudget;
         else
-            TotalWanted += Q;
+            nWanted = nWanted + zQuota;
         if (ZedList != "")
             ZedList = ZedList + ",";
-        ZedList = ZedList + Z.Class.Name + ":" + string(Cur.Tracks[i].Band) + ":" + string(Q) + ":" + string(Assigned);
+        ZedList = ZedList + Z.Class.Name + ":" + string(Cur.Tracks[i].Band) + ":" + string(zQuota) + ":" + string(Assigned);
     }
 
-    Empty = TotalWanted - TotalAssigned;
+    Empty = nWanted - TotalAssigned;
     if (Empty < 0)
         Empty = 0;
 
