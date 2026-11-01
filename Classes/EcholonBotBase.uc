@@ -6067,13 +6067,13 @@ function LookDirLogTick()
     }
 
     R1 = Rotator(HV);
-    velYaw = R1.Yaw;
+    velYaw = R1.Yaw & 65535;
     velDeg = velYaw * 360.0 / 65536.0;
 
-    legsYaw = Pawn.Rotation.Yaw;
+    legsYaw = Pawn.Rotation.Yaw & 65535;
     legsDeg = legsYaw * 360.0 / 65536.0;
 
-    aimYaw = Rotation.Yaw;
+    aimYaw = Rotation.Yaw & 65535;
     aimDeg = aimYaw * 360.0 / 65536.0;
 
     twistRaw = ((aimYaw - legsYaw + 98304) & 65535) - 32768;
@@ -6083,7 +6083,7 @@ function LookDirLogTick()
     if (FocalDir.X != 0.0 || FocalDir.Y != 0.0)
     {
         R1 = Rotator(FocalDir);
-        headYaw = R1.Yaw;
+        headYaw = R1.Yaw & 65535;
         headDeg = headYaw * 360.0 / 65536.0;
     }
     else
