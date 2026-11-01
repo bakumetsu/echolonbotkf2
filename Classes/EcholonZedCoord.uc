@@ -42,29 +42,49 @@ function Tick(EcholonMut M)
     ScanCaster.Length = 0;
     TickOps = 0;
 
-    for (i = 0; i < NewLen; i++)
+    foreach M.WorldInfo.AllPawns(class'KFPawn_Monster', Z)
     {
-        for (k = 0; k < M.Fireteams[i].Members.Length; k++)
+        if (Z.IsAliveAndWell())
         {
-            B = M.Fireteams[i].Members[k];
-            if (B != None && B.Pawn != None && B.Pawn.Health > 0)
+            if (Z.IsA('KFPawn_ZedFleshpound') || Z.IsA('KFPawn_ZedFleshpoundMini') || Z.IsA('KFPawn_ZedScrake'))
             {
-                foreach M.WorldInfo.AllPawns(class'KFPawn_Monster', Z, B.Pawn.Location, M.ZedScanDist)
+                TickOps++;
+                Found = false;
+                for (i = 0; i < NewLen && !Found; i++)
                 {
-                    TickOps++;
-                    Found = false;
-                    for (j = 0; j < ScanBig.Length; j++)
-                        if (ScanBig[j] == Z) { Found = true; break; }
-                    for (j = 0; j < ScanCaster.Length; j++)
-                        if (ScanCaster[j] == Z) { Found = true; break; }
-                    if (!Found)
+                    for (k = 0; k < M.Fireteams[i].Members.Length && !Found; k++)
                     {
-                        if (Z.IsA('KFPawn_ZedFleshpound') || Z.IsA('KFPawn_ZedFleshpoundMini') || Z.IsA('KFPawn_ZedScrake'))
-                            ScanBig[ScanBig.Length] = Z;
-                        else if ((Z.IsA('KFPawn_ZedSiren') || Z.IsA('KFPawn_ZedHusk')) && !Z.bIsHeadless)
-                            ScanCaster[ScanCaster.Length] = Z;
+                        B = M.Fireteams[i].Members[k];
+                        if (B != None && B.Pawn != None && B.Pawn.Health > 0)
+                        {
+                            TickOps++;
+                            if (VSize(Z.Location - B.Pawn.Location) <= M.ZedScanDist)
+                                Found = true;
+                        }
                     }
                 }
+                if (Found)
+                    ScanBig[ScanBig.Length] = Z;
+            }
+            else if ((Z.IsA('KFPawn_ZedSiren') || Z.IsA('KFPawn_ZedHusk')) && !Z.bIsHeadless)
+            {
+                TickOps++;
+                Found = false;
+                for (i = 0; i < NewLen && !Found; i++)
+                {
+                    for (k = 0; k < M.Fireteams[i].Members.Length && !Found; k++)
+                    {
+                        B = M.Fireteams[i].Members[k];
+                        if (B != None && B.Pawn != None && B.Pawn.Health > 0)
+                        {
+                            TickOps++;
+                            if (VSize(Z.Location - B.Pawn.Location) <= M.ZedScanDist)
+                                Found = true;
+                        }
+                    }
+                }
+                if (Found)
+                    ScanCaster[ScanCaster.Length] = Z;
             }
         }
     }
@@ -585,7 +605,8 @@ final function ProcessSlots()
 		Z = Cur.Tracks[ZedSeq[i]].Z;
 		band = Cur.Tracks[ZedSeq[i]].Band;
 		q = QuotaFor(band, CurN);
-		remaining = CurBudget - totalAssigned;
+		assigned = CountAssigned(Z);
+		remaining = CurBudget - (totalAssigned - assigned);
 
 		// Determine wanted for this zed
 		if (i == 0 && Cur.LeadZed != None)
@@ -611,7 +632,6 @@ final function ProcessSlots()
 			}
 		}
 
-		assigned = CountAssigned(Z);
 
 		// Release extras in reverse slot order
 		if (assigned > wanted)
