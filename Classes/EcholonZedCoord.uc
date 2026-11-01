@@ -635,7 +635,7 @@ final function ProcessSlots()
 					if (!BotSlotted(B) && !IsRetaken(B, Z))
 					{
 						s = CandidateScore(B, Z, band);
-						if (s > bestS || (s == bestS && B.GetFullName() < bestBot.GetFullName()))
+						if (s > bestS || (s == bestS && string(B.Name) < string(bestBot.Name)))
 						{
 							bestS = s;
 							bestBot = B;
