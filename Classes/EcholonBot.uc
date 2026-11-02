@@ -199,7 +199,8 @@ state PickNextMove
                 }
             }
             if (ObjectiveGoal != None && bHasAmmo && VSizeSq(ObjectiveGoal.Location - Pawn.Location) > SYG_DISTANCE_SQ
-                && WorldInfo.TimeSeconds >= ObjectiveBailUntil)
+                && WorldInfo.TimeSeconds >= ObjectiveBailUntil
+                && !ObjectiveGoalHeld())
             {
                 HubPick("P5_SygEnforcement", 'DoObjective');
                 GotoState('DoObjective');

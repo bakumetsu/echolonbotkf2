@@ -2637,6 +2637,13 @@ final function bool NavGoalSkipped(Actor G)
     return G != None && G == NavSkipGoal && WorldInfo.TimeSeconds < NavSkipUntil;
 }
 
+// True when the hub must not send this bot to DoObjective now: the goal is set aside or blocked (?ObjPickGuard), which would bounce straight back to PickNextMove.
+final function bool ObjectiveGoalHeld()
+{
+    return mut != None && mut.bObjPickGuardNow && ObjectiveGoal != None
+        && (NavGoalSkipped(ObjectiveGoal) || mut.IsNodeBlocked(self, ObjectiveGoal));
+}
+
 final function NavSkipGoalFor(Actor G, float Secs, string Why)
 {
     if (G == None)
