@@ -406,7 +406,13 @@ var vector HeadlessAvoidDir;       // unit horizontal direction away from the he
 var bool bHeadlessStep;            // true while this function drives Pawn.Acceleration itself
 var float HeadlessLogTime;         // throttle for HEADLESS_AVOID logs (1 s)
 var float HeadlessAvoidDist;       // detect radius in uu
+var float LastZedSwitchTime;
+var float LastZedPickLog;
+var array<Pawn> ZedSeenList;
 var float HeadlessKeepDist;        // minimum safe distance in uu
+var float LastZedSkipLog;
+var bool bRepickNow;
+var bool bSelfDefNow;
 var bool bAllowHeadlessPick;
 var bool bHeadlessBurst;
 var float HeadlessBurstTime;
@@ -422,6 +428,9 @@ var transient float SprintLogTime;   // throttle for SPRINT_WAVE
 var transient float SprintOnTime;   // when the logged sprint started; 0 = no SPRINT_WAVE on line is open
 var bool bRetreatSurrounded; // every direction was blocked at the last check
 var float RetreatLogTime; // throttle for RETREAT_SHOT logs
+var bool bRetreatTargetBlocks; // RetreatPickTarget returned the zed that blocks the escape cone
+var bool bRetreatNoFace; // RetreatFireTick: shot target is far and not blocking, so do not face or pass it to MoveToX
+var float RetreatFaceLogTime; // throttle for RETREAT_FACE_MOVE logs
 var array<Pawn> RetreatFPs; // Fleshpounds seen within 25 m
 var array<bool> RetreatFPRaged; // their last known IsEnraged()
 var float RetreatMaxDist; // 750.0 (15 m)
@@ -817,6 +826,10 @@ function Restart(bool bVehicleTransition)
     SetTimer(0.2 + (FRand() * 0.1), true, 'CheckGrabbed');
     SetTimer(SPRINT_TICK_INTERVAL + (FRand() * 0.05), true, 'SprintTick');
     SetTimer(0.25 + (FRand() * 0.05), true, 'HeadlessAvoidTick');
+    if (mut != None && mut.bZedTargetingNow)
+    {
+        SetTimer(mut.ZedRepickSecs + (FRand() * 0.05), true, 'ZedRepickTick');
+    }
     if (mut != None && mut.bNavTrace)
     {
         TraceLastLoc = Pawn.Location;
@@ -1034,6 +1047,7 @@ final function bool PickNextEnemy()
         {
             if (!P.bIsHeadless)
                 bSawLive = true;
+            NoteZedSeen(P);
             bResult = SetEnemy(P, true) || bResult;
         }
     }
@@ -1058,6 +1072,8 @@ final function bool PickNextEnemy()
 function bool SetEnemy(Pawn Other, optional bool bNoNotify)
 {
     local KFPawn_Monster M;
+    local Pawn PrevEnemy;
+    local bool bOverride;
 
     if (Other == None || Other == Pawn || Other.SpawnTime == WorldInfo.TimeSeconds || !Other.IsAliveAndWell())
     {
@@ -1090,12 +1106,26 @@ function bool SetEnemy(Pawn Other, optional bool bNoNotify)
 
     EnemyEncounterTime = WorldInfo.TimeSeconds;
 
-    if (Enemy != None && GetEnemyThreat(Enemy) > GetEnemyThreat(Other))
+    bOverride = false;
+    bSelfDefNow = false;
+    if (Enemy != None && !ZedSelfDefense(Other) && GetEnemyThreat(Enemy) > GetEnemyThreat(Other))
     {
-        return false;
+        if (ZedHardOverride(Other))
+        {
+            bOverride = true;
+        }
+        else
+        {
+            return false;
+        }
     }
-
+    PrevEnemy = Enemy;
     Enemy = Other;
+    if (mut != None && mut.bZedTargetingNow && PrevEnemy != Other)
+    {
+        LastZedSwitchTime = WorldInfo.TimeSeconds;
+        ZedPickLog(PrevEnemy, bOverride);
+    }
 
     if (!bNoNotify)
     {
@@ -1132,7 +1162,267 @@ final function float GetSpecialZedFactor(Pawn Other)
     return 1.0;
 }
 
+// D-11: table-driven zed priority; falls back to legacy GetSpecialZedFactor when switch off or zed unlisted.
+final function float GetZedPriority(Pawn Other)
+{
+    local KFPawn_Monster M;
+    local float P;
+    M = KFPawn_Monster(Other);
+    if (M == None)
+        return 1.0;
+    if (mut == None || !mut.bZedTargetingNow)
+        return GetSpecialZedFactor(Other);
+    P = class'EcholonZedProfile'.static.GetPriority(Other);
+    if (P < 0.0)
+        P = GetSpecialZedFactor(Other);
+    return P + PerkZedPriorityBonus(Other);
+}
+
+// D-12 overrides per perk; the base returns today's value.
+function float PerkZedPriorityBonus(Pawn Z)
+{
+    return 0.0;
+}
+
+function PerkZedBand(Pawn Z, out float BandMin, out float BandMax)
+{
+}
+
+function bool PerkAllowBash(Pawn Z, bool bProfileAllows)
+{
+    return bProfileAllows;
+}
+
+function class<KFWeapon> PerkWeaponForZed(Pawn Z)
+{
+    return None;
+}
+
+function name PerkAimBone(Pawn Z, name ProfileBone)
+{
+    return ProfileBone;
+}
+
+final function bool ZedAllowsBash(Pawn Z)
+{
+    return PerkAllowBash(Z, class'EcholonZedProfile'.static.GetAllowBash(Z));
+}
+
+function bool IsCloseMeleeThreat(Pawn Z)
+{
+    local float Dot;
+    if (mut == None || !mut.bZedTargetingNow)
+        return false;
+    if (Z == None)
+        return false;
+    if (!Z.IsA('KFPawn_Monster'))
+        return false;
+    if (!Z.IsAliveAndWell())
+        return false;
+    if (KFPawn_Monster(Z).bIsHeadless)
+        return false;
+    if (Z.IsA('KFPawn_ZedHusk') || Z.IsA('KFPawn_ZedSiren') || Z.IsA('KFPawn_ZedBloat'))
+        return false;
+    if (VSize(Z.Location - Pawn.Location) > 250.0)
+        return false;
+    Dot = Z.Velocity dot (Pawn.Location - Z.Location);
+    if (Dot <= 0.0)
+        return false;
+    return true;
+}
+
+final function bool IsSelfDefThreat(Pawn Z)
+{
+    local KFPawn_Monster M;
+    if (mut == None || !mut.bZedTargetingNow)
+        return false;
+    M = KFPawn_Monster(Z);
+    if (M == None)
+        return false;
+    if (!M.IsAliveAndWell())
+        return false;
+    if (M.bIsHeadless)
+        return false;
+    if (M.IsA('KFPawn_ZedSiren') || M.IsA('KFPawn_ZedHusk') || M.IsA('KFPawn_ZedBloat'))
+        return false;
+    if (class'EcholonZedProfile'.static.GetBandMax(Z) > 0.0)
+        return false;
+    if (VSize(Z.Location - Pawn.Location) > mut.ZedSelfDefenseDist)
+        return false;
+    if ((Z.Controller != None && Z.Controller.Enemy == Pawn) || ((Z.Velocity dot (Pawn.Location - Z.Location)) > 0.0))
+        return true;
+    return false;
+}
+
+final function bool ZedSelfDefense(Pawn Z)
+{
+    if (Enemy == None)
+        return false;
+    if (Z == Enemy)
+        return false;
+    if (!IsSelfDefThreat(Z))
+        return false;
+    if (WorldInfo.TimeSeconds - LastZedSwitchTime < 1.0)
+        return false;
+    if (VSize(Enemy.Location - Pawn.Location) <= VSize(Z.Location - Pawn.Location))
+        return false;
+    bSelfDefNow = true;
+    return true;
+}
+
+function ZedRepickTick()
+{
+    local KFPawn_Monster Z;
+    local KFPawn_Monster M;
+
+    if (mut == None || !mut.bZedTargetingNow || Pawn == None || Pawn.Health <= 0)
+        return;
+    if (Enemy == None || !Enemy.IsAliveAndWell())
+        return;
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', Z, Pawn.Location, mut.ZedSelfDefenseDist)
+    {
+        if (Z != Enemy && IsSelfDefThreat(Z) && ZedSelfDefense(Z))
+        {
+            SetEnemy(Z, true);
+            return;
+        }
+    }
+    M = KFPawn_Monster(Enemy);
+    if (M != None && M.bIsHeadless)
+        return;
+    if (Enemy.IsA('KFPawn_ZedSiren') || Enemy.IsA('KFPawn_ZedHusk'))
+        return;
+    if (WorldInfo.TimeSeconds - LastZedSwitchTime < mut.ZedHardOverrideGap)
+        return;
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', Z, Pawn.Location, ENEMY_SCAN_RADIUS)
+    {
+        if (!Z.IsAliveAndWell() || Z.bIsHeadless || Z == Enemy || (!Z.IsA('KFPawn_ZedSiren') && !Z.IsA('KFPawn_ZedHusk')))
+            continue;
+        if (ZedSeenList.Find(Z) == INDEX_NONE)
+        {
+            if (FastTrace(Z.Location, Pawn.Location))
+            {
+                NoteZedSeen(Z);
+            }
+        }
+        if (GetEnemyThreat(Z) < GetEnemyThreat(Enemy))
+            continue;
+        if (IsCloseMeleeThreat(Enemy))
+        {
+            ZedSkipLog(Z, "close", GetEnemyThreatBase(Z), GetEnemyThreatBase(Enemy));
+            return;
+        }
+        if (FastTrace(Z.Location, Pawn.Location))
+        {
+            bRepickNow = true;
+            SetEnemy(Z, true);
+            bRepickNow = false;
+            return;
+        }
+    }
+}
+
+function ZedSkipLog(Pawn Other, string Why, float BaseOther, float BaseEnemy)
+{
+    local float Now;
+    Now = WorldInfo.TimeSeconds;
+    if (Now - LastZedSkipLog < 1.0)
+        return;
+    LastZedSkipLog = Now;
+    EchelonLog("ZED_OVERRIDE_SKIP zed=" $ string(Other.Class.Name) $ " dist=" $ string(int(VSize(Other.Location - Pawn.Location))) $ " why=" $ Why $ " incumbent=" $ string(Enemy.Class.Name) $ " base_new=" $ string(int(BaseOther)) $ " base_old=" $ string(int(BaseEnemy)));
+}
+
+function bool ZedHardOverride(Pawn Other)
+{
+    local float BaseOther;
+    local float BaseEnemy;
+    if (mut == None || !mut.bZedTargetingNow)
+        return false;
+    if (VSize(Other.Location - Pawn.Location) > mut.ZedHardOverrideDist)
+        return false;
+    if (!Other.IsA('KFPawn_ZedSiren') && !Other.IsA('KFPawn_ZedHusk') && !IsCloseMeleeThreat(Other))
+        return false;
+    BaseOther = GetEnemyThreatBase(Other);
+    BaseEnemy = GetEnemyThreatBase(Enemy);
+    if (WorldInfo.TimeSeconds - LastZedSwitchTime < mut.ZedHardOverrideGap)
+    {
+        ZedSkipLog(Other, "gap", BaseOther, BaseEnemy);
+        return false;
+    }
+    if (BaseOther < BaseEnemy)
+    {
+        ZedSkipLog(Other, "base", BaseOther, BaseEnemy);
+        return false;
+    }
+    return true;
+}
+
+function ZedPickLog(Pawn Prev, bool bOverride)
+{
+    local string Reason;
+    local string RunnerStr;
+    local int RunnerScore;
+    local int Score;
+    if (mut == None || !mut.bZedTargetingNow)
+        return;
+    if (bOverride && Enemy != None && (Enemy.IsA('KFPawn_ZedSiren') || Enemy.IsA('KFPawn_ZedHusk')))
+        Reason = "override";
+    else if (bOverride && IsCloseMeleeThreat(Enemy))
+        Reason = "close_threat";
+    else
+        Reason = "normal";
+    if (bRepickNow)
+        Reason = "repick";
+    if (bSelfDefNow)
+        Reason = "selfdef";
+    if (Reason == "normal" && !Enemy.IsA('KFPawn_ZedSiren') && !Enemy.IsA('KFPawn_ZedHusk') && WorldInfo.TimeSeconds - LastZedPickLog < 1.0)
+        return;
+    LastZedPickLog = WorldInfo.TimeSeconds;
+    if (Prev == None || !Prev.IsAliveAndWell())
+    {
+        RunnerStr = "none";
+        RunnerScore = 0;
+    }
+    else
+    {
+        RunnerStr = string(Prev.Class.Name);
+        RunnerScore = int(GetEnemyThreat(Prev));
+    }
+    Score = int(GetEnemyThreat(Enemy));
+    EchelonLog("ZED_PICK zed=" $ string(Enemy.Class.Name) $ " score=" $ string(Score) $ " dist=" $ string(int(VSize(Enemy.Location - Pawn.Location))) $ " runner=" $ RunnerStr $ " runner_score=" $ string(RunnerScore) $ " reason=" $ Reason);
+}
+
+function NoteZedSeen(Pawn P)
+{
+    local int Idx;
+    if (mut == None || !mut.bZedTargetingNow)
+        return;
+    if (P == None)
+        return;
+    if (!P.IsA('KFPawn_Monster'))
+        return;
+    if (class'EcholonZedProfile'.static.GetBandMax(P) <= 0.0 && !P.IsA('KFPawn_ZedSiren') && !P.IsA('KFPawn_ZedHusk'))
+        return;
+    Idx = ZedSeenList.Find(P);
+    if (Idx == INDEX_NONE)
+    {
+        if (ZedSeenList.Length > 40)
+            ZedSeenList.Remove(0, 1);
+        ZedSeenList.AddItem(P);
+        EchelonLog("ZED_SEEN zed=" $ string(P.Class.Name) $ " id=" $ string(P.Name) $ " dist=" $ string(int(VSize(P.Location - Pawn.Location))));
+    }
+}
+
 function float GetEnemyThreat(Pawn Other)
+{
+    local float V;
+    V = GetEnemyThreatBase(Other);
+    if (Other == Enemy)
+        V *= 1.25;
+    return V;
+}
+
+function float GetEnemyThreatBase(Pawn Other)
 {
     local float V;
 
@@ -1143,12 +1433,13 @@ function float GetEnemyThreat(Pawn Other)
     }
     // Special zeds first: the factor scales the base score before the distance penalty, so a Siren or
     // Fleshpound still wins over a closer Clot but a far one does not pull a bot across the room.
-    V *= GetSpecialZedFactor(Other);
-    V -= (VSize(Other.Location - Pawn.Location) / 2.0);
-    if (Other == Enemy)
-    {
-        V *= 1.25;
-    }
+    V *= GetZedPriority(Other);
+    if (IsCloseMeleeThreat(Other))
+        V *= 1.3;
+    if (mut != None && mut.bZedTargetingNow && (Other.IsA('KFPawn_ZedSiren') || Other.IsA('KFPawn_ZedHusk')))
+        V -= VSize(Other.Location - Pawn.Location) * mut.ZedSpecialDistWeight;
+    else
+        V -= (VSize(Other.Location - Pawn.Location) / 2.0);
     return V;
 }
 
@@ -7042,6 +7333,8 @@ final function bool IsNoBashZed(Pawn P)
     M = KFPawn_Monster(P);
     if (M == None)
         return false;
+    if (mut != None && mut.bZedTargetingNow)
+        return (M.bLargeZed || !ZedAllowsBash(P));
     if (M.bLargeZed || M.IsA('KFPawn_ZedHusk') || M.IsA('KFPawn_ZedSiren') || M.IsA('KFPawn_ZedBloat') || M.IsA('KFPawn_ZedScrake') || M.IsA('KFPawn_ZedFleshpound') || M.IsA('KFPawn_ZedFleshpoundMini') || M.IsA('KFPawn_ZedHans') || M.IsA('KFPawn_ZedPatriarch') || M.IsA('KFPawn_ZedMatriarch') || M.IsA('KFPawn_ZedFleshpoundKing') || M.IsA('KFPawn_ZedBloatKing'))
         return true;
     return false;
@@ -7584,6 +7877,7 @@ defaultproperties
     LookSweepAmp=20.0
     LookSweepPeriod=5.0
     LookAheadDist=150.0
+    // D-11 distances are config keys on EcholonMut (ZedHardOverrideDist and the other Zed* keys)
     HeadlessAvoidDist=150.0
     HeadlessKeepDist=100.0
     RetreatMaxDist=750.0

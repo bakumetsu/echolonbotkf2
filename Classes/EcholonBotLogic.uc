@@ -1618,8 +1618,10 @@ function Pawn RetreatPickTarget(vector EscapeDir)
 
     if (BlockTarget != None)
     {
+        bRetreatTargetBlocks = true;
         return BlockTarget;
     }
+    bRetreatTargetBlocks = false;
     return NearTarget;
 }
 
@@ -1744,11 +1746,23 @@ function RetreatFireTick()
     RetreatTarget = RetreatPickTarget(EscapeDir);
     if (RetreatTarget == None)
     {
+        bRetreatNoFace = false;
         Pawn.StopFiring();
         return;
     }
 
-    Focus = RetreatTarget;
+    bRetreatNoFace = (mut != None && mut.bRetreatFaceNow && !bRetreatTargetBlocks && VSize(RetreatTarget.Location - Pawn.Location) > RETREAT_ZED_RADIUS + 100.0);
+    if (bRetreatNoFace)
+    {
+        Focus = None;
+        if (WorldInfo.TimeSeconds - RetreatFaceLogTime >= 1.0)
+        {
+            EchelonLog("RETREAT_FACE_MOVE target=" $ string(RetreatTarget.Class.Name) $ " dist=" $ string(int(VSize(RetreatTarget.Location - Pawn.Location))));
+            RetreatFaceLogTime = WorldInfo.TimeSeconds;
+        }
+    }
+    else
+        Focus = RetreatTarget;
     if (FireWeaponAt(RetreatTarget))
     {
         if (WorldInfo.TimeSeconds - RetreatLogTime >= 1.0)
@@ -1798,7 +1812,10 @@ function PickRetreatMove()
         return;
     }
 
-    MoveToX(Pawn.Location + Dir * 400.0, RetreatTarget, false, 'RetreatMove');
+    if (bRetreatNoFace)
+        MoveToX(Pawn.Location + Dir * 400.0, None, false, 'RetreatMove');
+    else
+        MoveToX(Pawn.Location + Dir * 400.0, RetreatTarget, false, 'RetreatMove');
 }
 
 final function bool FindCollectable()

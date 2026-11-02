@@ -678,6 +678,14 @@ state FightEnemy
                 Pawn.StopFiring();
             }
             Enemy = none;
+            if (mut != None && mut.bZedTargetingNow)
+            {
+                Target = None;
+                if (PickNextEnemy())
+                {
+                    return;
+                }
+            }
             AbortMove();
             CheckWeaponReequip();
             FinishedMove();
