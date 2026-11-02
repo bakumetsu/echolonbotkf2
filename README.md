@@ -48,6 +48,14 @@ Add `?Survey=1` to the map URL and the match becomes a map survey: no zeds, a fe
 
 `?SurveyNav=1` (or the ini key `bSurveyNav`, default off; `?SurveyNav=0` forces it off) makes the bots use a finished survey: bad links stay out of their routes and the survey grid saves traces. The data comes from `KFEcholonMapData.ini` (class `EcholonMapData`, one section per map), which the local kit writes from survey logs. Windows and shortcuts a survey bot walked are no longer refused as too narrow or forced, and a failed route search first lets trouble-spot links back in. Without data for the map nothing changes. Details are in `docs/ARCHITECTURE.md` ("Survey-based nav").
 
+## Newer switches
+
+The traffic table is off by default. The ini key `TrafficMode` (0 off, 1 shadow) controls it: in shadow mode the table only logs where a bot would have had to wait, nobody is actually held. `?Traffic=0/1` overrides the setting for one match. `TrafficRoute` (0 off, 1 on; needs the table) makes long walks avoid busy blocks, and `?TrafficRoute=0/1` overrides it for one match. The blocks themselves are `Block=` lines in the map's section of `KFEcholonMapData.ini`, written by the kit tool `traffic_blocks.py`.
+
+`?HeadlessKeep=1/0` (ini `bHeadlessKeep`, off by default) makes bots keep farther from headless zeds and finish them from a safe distance. All distances are in uu: `HeadlessKeepAvoidDist` 300 (detect radius), `HeadlessKeepKeepDist` 200 (minimum safe distance), `HeadlessKeepFinishMin` 300 (a headless zed is only shot from beyond this). Defaults are written once and tracked by `HeadlessKeepConfigVer`.
+
+The remaining URL switches are all on by default and each is turned off for one match with `=0`: `?ShopFix=0` (a bot that set the trader aside no longer picks GoShopping again every frame), `?BashGuard=0` (`FireWeaponAt` skips the bash on zeds that must not be bashed), `?SlotYield=0` (a grunt's squad-slot move is skipped while a bot state owns movement), `?TetherHold=0` (a squad leader standing on its reached tether anchor holds there up to 15 s, then gets 10 s of no hold), `?CampZ=0` (the Camp slot is accepted within 50 uu in 2D and 90 uu in height). Also `bWaveSprint` (ini, on by default, written once by `WaveSprintConfigVer`): bots sprint to hold zones (leaders too), follow a sprinting leader, and sprint when retreating; never while firing or reloading. Logged as `SPRINT_WAVE on why=... state=` and `SPRINT_WAVE off dur=`. The Doshinegun is banned from the bot trader list (it spends dosh as ammo), logged as `SHOP_BAN`.
+
 ## Docs before every push
 
 Every push that changes `Classes/` also updates the docs (`docs/ARCHITECTURE.md` or this README). If a change needs no doc update, add a line `Docs: none (<reason>)` to the last commit message.
