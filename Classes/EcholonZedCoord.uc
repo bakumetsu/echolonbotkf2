@@ -323,38 +323,43 @@ final function UpdateTracks()
 final function BuildOrder()
 {
     local int i, j, n;
+    local int key;
+    local bool keyEnr, slotEnr;
 
     Order.Length = Cur.Tracks.Length;
     n = Order.Length;
     for (i = 0; i < n; i++)
         Order[i] = i;
 
-    // Insertion sort: enraged-latched first, then smaller D
     for (i = 1; i < n; i++)
     {
-        j = i;
-        while (j > 0)
+        key = Order[i];
+        j = i - 1;
+        while (j >= 0)
         {
-            if (Cur.Tracks[Order[j]].EnragedUntil > Now && Cur.Tracks[Order[j-1]].EnragedUntil <= Now)
-                break;
-            if (Cur.Tracks[Order[j]].EnragedUntil <= Now && Cur.Tracks[Order[j-1]].EnragedUntil > Now)
+            keyEnr = Cur.Tracks[key].EnragedUntil > Now;
+            slotEnr = Cur.Tracks[Order[j]].EnragedUntil > Now;
+            if (keyEnr && !slotEnr)
             {
-                if (Cur.Tracks[Order[j]].D < Cur.Tracks[Order[j-1]].D)
-                {
-                    Order[j] = Order[j-1];
-                    Order[j-1] = i;
-                    break;
-                }
+                Order[j+1] = Order[j];
+                j--;
             }
-            if (Cur.Tracks[Order[j]].D < Cur.Tracks[Order[j-1]].D)
-            {
-                Order[j] = Order[j-1];
-                Order[j-1] = i;
+            else if (!keyEnr && slotEnr)
                 break;
+            else if (Cur.Tracks[key].D < Cur.Tracks[Order[j]].D)
+            {
+                Order[j+1] = Order[j];
+                j--;
             }
-            j--;
-            if (j == 0) break;
+            else if (Cur.Tracks[key].D == Cur.Tracks[Order[j]].D && key < Order[j])
+            {
+                Order[j+1] = Order[j];
+                j--;
+            }
+            else
+                break;
         }
+        Order[j+1] = key;
     }
 }
 
@@ -366,94 +371,144 @@ final function UpdateLead()
 {
     local int LeadIdx, I, TargetIdx;
     local float LeadD;
-    local bool bNeedSwitch, bCandFound, bCandReady;
+    local int LeadBand;
+    local string oldZid, newZid, reason, logMsg;
+    local int oldBand, newBand, oldDist, newDist, slotsOld;
+    local Pawn oldLead;
+    local bool cEnr, lEnr;
+    local int candBand;
+    local float candD;
 
     LeadIdx = TrackIndex(Cur.LeadZed);
+
     if (Cur.LeadZed == None || Cur.LeadZed.bDeleteMe || !Cur.LeadZed.IsAliveAndWell() || LeadIdx == -1)
     {
+        oldLead = Cur.LeadZed;
+        if (oldLead != None)
+        {
+            oldZid = string(oldLead.Name);
+            oldBand = -1;
+            oldDist = -1;
+            slotsOld = CountAssigned(oldLead);
+            if (LeadIdx >= 0)
+            {
+                oldBand = Cur.Tracks[LeadIdx].Band;
+                oldDist = int(Cur.Tracks[LeadIdx].D);
+            }
+        }
+        else
+        {
+            oldZid = "None";
+            oldBand = -1;
+            oldDist = -1;
+            slotsOld = 0;
+        }
+
         Cur.CandLead = None;
         Cur.CandLeadSince = 0;
-        Cur.LeadZed = None;
+        Cur.LeadChangeTime = Now;
+
         if (Order.Length > 0)
         {
             TargetIdx = Order[0];
             Cur.LeadZed = Cur.Tracks[TargetIdx].Z;
-            Cur.LeadChangeTime = Now;
+            newZid = string(Cur.Tracks[TargetIdx].Z.Name);
+            newBand = Cur.Tracks[TargetIdx].Band;
+            newDist = int(Cur.Tracks[TargetIdx].D);
         }
+        else
+        {
+            Cur.LeadZed = None;
+            newZid = "None";
+            newBand = -1;
+            newDist = -1;
+        }
+
+        if (oldLead == None)
+            reason = "first";
+        else
+            reason = "dead";
+
+        logMsg = "ZED_LEAD team=" $ string(CurTeam) $ " old=" $ oldZid $ " new=" $ newZid
+            $ " reason=" $ reason $ " old_band=" $ string(oldBand) $ " new_band=" $ string(newBand)
+            $ " old_dist=" $ string(oldDist) $ " new_dist=" $ string(newDist)
+            $ " slots_old=" $ string(slotsOld);
+        if (oldLead != None || Cur.LeadZed != None)
+            Mut.EchelonLog(logMsg);
         return;
     }
 
     LeadD = Cur.Tracks[LeadIdx].D;
-    bNeedSwitch = false;
+    LeadBand = Cur.Tracks[LeadIdx].Band;
+
+    if (LeadBand >= BAND_MID && CountAssigned(Cur.LeadZed) > 0)
+    {
+        Cur.CandLead = None;
+        Cur.CandLeadSince = 0;
+        return;
+    }
+
     TargetIdx = -1;
-
-    // (a) another zed enraged-latched, lead not
-    if (Cur.Tracks[LeadIdx].EnragedUntil <= Now)
+    reason = "";
+    lEnr = Cur.Tracks[LeadIdx].EnragedUntil > Now;
+    for (I = 0; I < Order.Length; I++)
     {
-        for (I = 0; I < Order.Length; I++)
+        if (Order[I] == LeadIdx)
+            continue;
+        if (Cur.Tracks[Order[I]].Z == None || Cur.Tracks[Order[I]].Z.bDeleteMe || !Cur.Tracks[Order[I]].Z.IsAliveAndWell())
+            continue;
+        cEnr = Cur.Tracks[Order[I]].EnragedUntil > Now;
+        candBand = Cur.Tracks[Order[I]].Band;
+        candD = Cur.Tracks[Order[I]].D;
+        if ((cEnr && !lEnr) || (candBand > LeadBand) || (candBand == LeadBand && candD <= LeadD - 300.0))
         {
-            if (Order[I] == LeadIdx)
-                continue;
-            if (Cur.Tracks[Order[I]].EnragedUntil > Now)
-            {
-                bNeedSwitch = true;
-                TargetIdx = Order[I];
-                break;
-            }
+            TargetIdx = Order[I];
+            if (cEnr && !lEnr)
+                reason = "enraged";
+            else if (candBand > LeadBand)
+                reason = "nearer_band";
+            else
+                reason = "closer";
+            break;
         }
     }
 
-    // (b) CandLead 100+ uu closer for 1.5 s
-    if (!bNeedSwitch)
+    if (TargetIdx == -1)
     {
-        bCandFound = false;
-        bCandReady = false;
-        for (I = 0; I < Order.Length; I++)
-        {
-            if (Order[I] == LeadIdx)
-                continue;
-            if (Cur.Tracks[Order[I]].D < LeadD - 100.0)
-            {
-                bCandFound = true;
-                if (Cur.CandLead == Cur.Tracks[Order[I]].Z)
-                {
-                    if (Now - Cur.CandLeadSince >= 1.5)
-                    {
-                        bCandReady = true;
-                        TargetIdx = Order[I];
-                    }
-                }
-                else
-                {
-                    Cur.CandLead = Cur.Tracks[Order[I]].Z;
-                    Cur.CandLeadSince = Now;
-                }
-                break;
-            }
-        }
-        if (!bCandFound)
-        {
-            Cur.CandLead = None;
-            Cur.CandLeadSince = 0;
-        }
-    }
-    else
-    {
-        // (a) already wants switch; no cand bookkeeping needed
+        Cur.CandLead = None;
+        Cur.CandLeadSince = 0;
+        return;
     }
 
-    if (bCandReady)
+    if (Cur.CandLead != Cur.Tracks[TargetIdx].Z)
     {
-        bNeedSwitch = true;
+        Cur.CandLead = Cur.Tracks[TargetIdx].Z;
+        Cur.CandLeadSince = Now;
+        return;
     }
 
-    // Apply with 3 s cooldown (lead death handled above as immediate)
-    if (bNeedSwitch && TargetIdx >= 0 && Now - Cur.LeadChangeTime >= 3.0)
+    if (Now - Cur.CandLeadSince >= 4.0 && Now - Cur.LeadChangeTime >= 3.0)
     {
+        oldLead = Cur.LeadZed;
+        oldZid = string(oldLead.Name);
+        oldBand = LeadBand;
+        oldDist = int(LeadD);
+        slotsOld = CountAssigned(oldLead);
+
         Cur.LeadZed = Cur.Tracks[TargetIdx].Z;
         Cur.LeadChangeTime = Now;
         Cur.CandLead = None;
         Cur.CandLeadSince = 0;
+
+        newZid = string(Cur.Tracks[TargetIdx].Z.Name);
+        newBand = Cur.Tracks[TargetIdx].Band;
+        newDist = int(Cur.Tracks[TargetIdx].D);
+
+        logMsg = "ZED_LEAD team=" $ string(CurTeam) $ " old=" $ oldZid $ " new=" $ newZid
+            $ " reason=" $ reason $ " old_band=" $ string(oldBand) $ " new_band=" $ string(newBand)
+            $ " old_dist=" $ string(oldDist) $ " new_dist=" $ string(newDist)
+            $ " slots_old=" $ string(slotsOld);
+        Mut.EchelonLog(logMsg);
     }
 }
 
@@ -760,65 +815,80 @@ final function bool IsRetaken(EcholonBot B, Pawn Z)
 
 final function float CandidateScore(EcholonBot B, Pawn Z, int Band)
 {
-	local float s, d;
-	local int hpPct;
-	local float rng;
+    local float s, d;
+    local int hpPct;
+    local float rng;
 
-	s = 0;
-	hpPct = int(B.Pawn.Health * 100.0 / B.Pawn.HealthMax);
-	if (hpPct >= int(Mut.ZedHurtHealthPct))
-		s += 100;
-	d = VSize(B.Pawn.Location - Z.Location);
-	if (d > 250 || Band == BAND_MELEE)
-		s += 10;
-	if (B != Mut.Fireteams[CurTeam].Leader && (Band == BAND_FAR || Band == BAND_MID))
-		s += 10;
-	rng = B.GetWeaponEffectiveRangeUU(KFWeapon(B.Pawn.Weapon));
-	if (rng >= d)
-		s += 5;
-	return s;
+    if (B == None || B.Pawn == None || B.Pawn.Health <= 0)
+        return -1000.0;
+    s = 0;
+    hpPct = int(B.Pawn.Health * 100.0 / B.Pawn.HealthMax);
+    if (hpPct >= int(Mut.ZedHurtHealthPct))
+        s += 100;
+    d = VSize(B.Pawn.Location - Z.Location);
+    if (d > 250 || Band == BAND_MELEE)
+        s += 10;
+    if (B != Mut.Fireteams[CurTeam].Leader && (Band == BAND_FAR || Band == BAND_MID))
+        s += 10;
+    if (B.Pawn.Weapon != None)
+        rng = B.GetWeaponEffectiveRangeUU(KFWeapon(B.Pawn.Weapon));
+    else
+        rng = 0;
+    if (rng >= d)
+        s += 5;
+    return s;
 }
 
 final function LogRole(EcholonBot B, Pawn Z, string Role, string Why)
 {
-	local int lBand, lDist, lQuota, lRng;
-	local string zedName, zid, wepName;
+    local int lBand, lDist, lQuota, lRng;
+    local string zedName, zid, wepName, botTag;
 
-	if (Z != None && TrackIndex(Z) >= 0)
-	{
-		lBand = Cur.Tracks[TrackIndex(Z)].Band;
-		lDist = int(VSize(B.Pawn.Location - Z.Location));
-	}
-	else
-	{
-		lBand = 0;
-		lDist = 0;
-	}
-	lQuota = QuotaFor(lBand, CurN);
-	if (Z != None)
-	{
-		zedName = string(Z.Class.Name);
-		zid = string(Z.Name);
-	}
-	else
-	{
-		zedName = "None";
-		zid = "None";
-	}
-	if (B != None && B.Pawn != None && B.Pawn.Weapon != None)
-	{
-		wepName = string(B.Pawn.Weapon.Class.Name);
-		lRng = int(B.GetWeaponEffectiveRangeUU(KFWeapon(B.Pawn.Weapon)));
-	}
-	else
-	{
-		wepName = "None";
-		lRng = 0;
-	}
-	Mut.EchelonLog("ZED_ROLE team=" @ CurTeam @ " bot=" @ B.LogTag() @ " zed=" @ zedName
-		@ " zid=" @ zid @ " role=" @ Role @ " band=" @ lBand @ " dist=" @ lDist
-		@ " quota=" @ lQuota @ " budget=" @ CurBudget @ " n=" @ CurN @ " why=" @ Why
-		@ " wep=" @ wepName @ " rng=" @ lRng);
+    if (Z != None && TrackIndex(Z) >= 0)
+    {
+        lBand = Cur.Tracks[TrackIndex(Z)].Band;
+        if (B != None && B.Pawn != None)
+            lDist = int(VSize(B.Pawn.Location - Z.Location));
+        else
+            lDist = -1;
+    }
+    else
+    {
+        lBand = 0;
+        if (B != None && B.Pawn != None && Z != None)
+            lDist = int(VSize(B.Pawn.Location - Z.Location));
+        else
+            lDist = -1;
+    }
+    lQuota = QuotaFor(lBand, CurN);
+    if (Z != None)
+    {
+        zedName = string(Z.Class.Name);
+        zid = string(Z.Name);
+    }
+    else
+    {
+        zedName = "None";
+        zid = "None";
+    }
+    if (B != None && B.Pawn != None && B.Pawn.Weapon != None)
+    {
+        wepName = string(B.Pawn.Weapon.Class.Name);
+        lRng = int(B.GetWeaponEffectiveRangeUU(KFWeapon(B.Pawn.Weapon)));
+    }
+    else
+    {
+        wepName = "None";
+        lRng = 0;
+    }
+    if (B != None)
+        botTag = B.LogTag();
+    else
+        botTag = "None";
+    Mut.EchelonLog("ZED_ROLE team=" $ string(CurTeam) $ " bot=" $ botTag $ " zed=" $ zedName
+        $ " zid=" $ zid $ " role=" $ Role $ " band=" $ string(lBand) $ " dist=" $ string(lDist)
+        $ " quota=" $ string(lQuota) $ " budget=" $ string(CurBudget) $ " n=" $ string(CurN) $ " why=" $ Why
+        $ " wep=" $ wepName $ " rng=" $ string(lRng));
 }
 
 final function bool BotSlotted(EcholonBot B)
@@ -954,6 +1024,7 @@ final function ProcessFreeAndCaster()
     {
         if (Now - Cur.CasterChangeTime >= 3.0)
         {
+            BestBot = None;
             BestZed = None;
             BestDist = 999999.0;
             for (i = 0; i < ScanCaster.Length; i++)
@@ -998,7 +1069,7 @@ final function ProcessFreeAndCaster()
                     Cur.CasterBot = BestBot;
                     Cur.CasterZed = BestZed;
                     Cur.CasterChangeTime = Now;
-                    Mut.EchelonLog("ZED_ROLE team=" $ string(CurTeam) $ " bot=" $ BestBot.LogTag() $ " zed=" $ BestZed.Class.Name $ " zid=" $ BestZed.Name $ " role=caster band=-1 dist=" $ string(int(BestDist)) $ " quota=-1 budget=" $ string(CurBudget) $ " n=" $ string(CurN) $ " why=assign wep=" $ BestBot.Pawn.Weapon.Class.Name $ " rng=" $ string(int(BestBot.GetWeaponEffectiveRangeUU(KFWeapon(BestBot.Pawn.Weapon)))) $ " los=n/a");
+                    LogRole(BestBot, BestZed, "caster", "assign");
                 }
             }
             Cur.CasterChangeTime = Now;
