@@ -221,6 +221,7 @@ var transient EcholonZedCoord ZedCoord;
 var transient bool bZedTargetingNow;
 var transient bool bZedCoordShadowNow;
 var transient bool bRetreatFaceNow;
+var transient bool bObjPickGuardNow;
 var transient bool bFollowOwnsMoveNow;           // bFollowOwnsMove after the ?FollowOwn= option
 var config string _Separator1;
 var() config byte NumBots;
@@ -1430,6 +1431,10 @@ function InitMutator(string Options, out string ErrorMessage)
     if (class'GameInfo'.static.HasOption(Options, "RetreatFace"))
         bRetreatFaceNow = class'GameInfo'.static.GetIntOption(Options, "RetreatFace", 0) != 0;
     EchelonLog("RETREATFACE_CONFIG retreatface=" $ string(bRetreatFaceNow));
+    bObjPickGuardNow = false;
+    if (class'GameInfo'.static.HasOption(Options, "ObjPickGuard"))
+        bObjPickGuardNow = class'GameInfo'.static.GetIntOption(Options, "ObjPickGuard", 0) != 0;
+    EchelonLog("OBJPICKGUARD_CONFIG objpickguard=" $ string(bObjPickGuardNow));
     if (bZedTargetingNow || bZedCoordShadowNow)
         SetTimer(0.5, true, 'ZedRoleTick');
     TrafficModeNow = TrafficMode;

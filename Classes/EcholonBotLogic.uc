@@ -1151,7 +1151,8 @@ function bool FollowCheckExit()
     {
         IterDistSq = VSizeSq(ObjectiveGoal.Location - Pawn.Location);
         if (IterDistSq > SYG_DISTANCE_SQ
-            && WorldInfo.TimeSeconds >= ObjectiveBailUntil)
+            && WorldInfo.TimeSeconds >= ObjectiveBailUntil
+            && !ObjectiveGoalHeld())
         {
             FollowExitState = 'DoObjective';
             bFollowExitPending = true;
