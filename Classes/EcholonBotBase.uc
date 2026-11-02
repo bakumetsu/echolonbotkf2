@@ -428,6 +428,9 @@ var transient float SprintLogTime;   // throttle for SPRINT_WAVE
 var transient float SprintOnTime;   // when the logged sprint started; 0 = no SPRINT_WAVE on line is open
 var bool bRetreatSurrounded; // every direction was blocked at the last check
 var float RetreatLogTime; // throttle for RETREAT_SHOT logs
+var bool bRetreatTargetBlocks; // RetreatPickTarget returned the zed that blocks the escape cone
+var bool bRetreatNoFace; // RetreatFireTick: shot target is far and not blocking, so do not face or pass it to MoveToX
+var float RetreatFaceLogTime; // throttle for RETREAT_FACE_MOVE logs
 var array<Pawn> RetreatFPs; // Fleshpounds seen within 25 m
 var array<bool> RetreatFPRaged; // their last known IsEnraged()
 var float RetreatMaxDist; // 750.0 (15 m)
