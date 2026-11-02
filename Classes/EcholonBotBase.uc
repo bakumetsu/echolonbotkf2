@@ -2641,7 +2641,7 @@ final function bool NavGoalSkipped(Actor G)
 final function bool ObjectiveGoalHeld()
 {
     return mut != None && mut.bObjPickGuardNow && ObjectiveGoal != None
-        && (NavGoalSkipped(ObjectiveGoal) || mut.IsNodeBlocked(self, ObjectiveGoal));
+        && (NavGoalSkipped(ObjectiveGoal) || mut.IsNodeBlocked(EcholonBot(self), ObjectiveGoal));
 }
 
 final function NavSkipGoalFor(Actor G, float Secs, string Why)
